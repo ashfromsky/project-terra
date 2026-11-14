@@ -400,3 +400,30 @@ Extracted from the three responsive comparison frames in Figma (`14:2` Desktop, 
 3. **Semantic Landmarks & Keyboard Navigation**:
    - Use semantic `<header>`, `<nav>`, `<main>`, `<aside>`, and `<section>` landmarks.
    - All interactive controls (dataset selectors, map tool buttons, workspace tabs, timeline play/range controls, and route links) must be keyboard-focusable `<button>` or `<a>` elements with accessible `aria-label` or visible text.
+
+---
+
+## 14. Map Explorer (`/explore`) Visual Patterns
+
+### Workspace Architecture & Proportions
+- **Entry Point on Homepage**: Accessible pill CTA `.earth-observatory__explore-cta` (`Open Map Explorer`, `#159B91` primary teal fill, `32px` height, `rounded-16px`) positioned in the Earth Observatory header row next to the period pill, linking to `/explore`.
+- **Workspace Shell**: Full-viewport GIS layout (`calc(100vh - 64px)` beneath workspace navigation, switching to `position: fixed; inset: 0; z-index: 60` when fullscreen mode is toggled). The map canvas remains the primary visual focus.
+- **Top Control Toolbar (`48px` min-height)**:
+  - Left: Layers panel toggle + unified search (`Search` input parsing WGS 84 `lat, lon` coordinates, Natural Earth country names/ISO3 codes, biome bookmarks, and environmental layer/product identifiers).
+  - Center: Segmented projection selector (`Equal Earth`, `Globe`, `Mercator`), centralized basemap dropdown (`Scientific Light`, `Satellite Imagery`, `Terrain & Bathymetry`, `VIIRS Daily True Color`), and target date input (`tabular-nums`).
+  - Right: Interaction mode strip (`Inspect`, `Select`, `Polygon`, `Rectangle`), `Compare` mode toggle, `Reset Camera`, `Inspector` toggle, and `Fullscreen` toggle.
+- **Left Sidebar (`296px` desktop, overlay drawer `< 1200px`)**:
+  - Explicit `SYNTHETIC / DEMONSTRATION DATA` disclosure box with master toggle for synthetic Natural Earth demonstration fills.
+  - Reference cartography toggles (`Graticules`, `Borders`, `Labels`, `Biome AOIs`).
+  - Grouped catalog cards (`Vegetation`, `Temperature`, `Water`, `Derived Indicators`) with status pills (`Preview · Synthetic`, `Planned`, `Unavailable`, `Experimental`), per-layer visibility eye toggle, opacity slider, display stretch `[minValue, maxValue]` inputs + reset, and provenance metadata.
+- **Right Inspector (`320px` desktop, overlay drawer `< 1200px`)**:
+  - Persistent live WGS 84 (`EPSG:4326`) cursor coordinate readout and Web Mercator (`EPSG:3857`) visualization-only warning when Mercator is active.
+  - Three tabs: `Point` (native resolution + QA provenance + explicit unavailable observation notice), `Feature` (Natural Earth selection + quick assignment to Region A / Region B / Primary AOI), and `AOI` (role assignment, polygon/rectangle drawing guide, editable AOI names, spherical approximate area in `km²`, GeoJSON export in EPSG:4326).
+- **Bottom Timeline & Legend Dock**:
+  - Temporal playback (`Play/Pause`, `Previous/Next`, continuous timeline slider, `[start, end]` range inputs, simulated catalog coverage strip) alongside active layer color-ramp gradient bar, `NoData` swatch, and active basemap + dataset attribution line.
+- **Comparison Mode**:
+  - Split two-pane workspace preserving Region A (`#159B91` teal accent badge) vs Region B (`#3193CE` blue accent badge) semantic colors, camera synchronization toggle, per-pane layer/date/basemap selectors, dual legends, and explicit withholding of pixel difference calculations until validated backend observations connect.
+- **Responsive Behavior**:
+  - Desktop (`>= 1200px`): Docked sidebars (`296px` left, `320px` right) framing the map viewport.
+  - Tablet (`768px–1199px`): Sidebars convert to slide-over drawers over the map with backdrop dismissal; bottom dock stacks vertically.
+  - Mobile (`< 768px`): Compact icon-first toolbar, drawer sidebars up to `88vw`, comparison panes stack single-column (`grid-template-columns: 1fr`).

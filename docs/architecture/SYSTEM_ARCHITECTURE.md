@@ -678,11 +678,31 @@ This is a target organization, not an instruction to create every directory befo
 | Database | PostgreSQL + PostGIS | Large arrays/rasters stay in object storage. |
 | Data Lake | S3-compatible object storage | Provider remains deployment-specific. |
 | Raster serving | TiTiler for COG and supported Xarray/Zarr paths | Validate exact extensions, formats, auth, and workload before deployment. |
-| Base map | MapLibre GL JS | GIBS layers are visualization, not analytical source arrays. |
-| Analytical overlays | deck.gl | Use only where its GPU/large-data capabilities add value. |
+| Base map | `d3-geo` Equal Earth + MapLibre GL JS v5 (Globe & Mercator) | Equal Earth renders natively via `d3-geo`; GIBS layers remain browse/visualization only. |
+| Analytical overlays | `@deck.gl/maplibre` `MapLibreOverlay` | Attached in 2D Mercator mode only; MapLibre-native vector/GeoJSON sources used in Globe mode. |
 | Climate point data | NASA POWER API | No fixed latency guarantee; cache and bound requests. |
 | AI assistance | Backend-mediated LLM adapter | LLM cannot calculate or invent scientific metrics. |
 | Edge | Caddy | Rate limiting requires a verified module or application/edge solution. |
+
+### Map Explorer Frontend Architecture (`/explore`) — Implemented vs. Planned
+
+To avoid tight coupling between React components and geospatial rendering engines, `/explore` separates projection engines, registries, state management, and future data providers across FSD-lite layers:
+
+1. **Projection-Independent Rendering Abstraction (`entities/map`)**:
+   - `MapRenderer` defines a uniform lifecycle (`mount`, `update`, `setViewport`, `zoomIn`, `zoomOut`, `resetView`, `flyTo`, `destroy`) and capability flags (`supportsDeckGl`, `supports3dGlobe`, `supportsRasterTiles`, `supportsAntimeridianClipping`).
+   - `EqualEarthRenderer` (`d3-geo` `geoEqualEarth()`) is the default global projection using Natural Earth `1:110m` WGS 84 GeoJSON boundaries, coastlines, graticules, coordinate inversion (`invert`), antimeridian handling, and optional client-side canvas reprojection of NASA GIBS `EPSG:4326` `500m` static composites.
+   - `MapLibreRenderer` (`maplibre-gl` v5) drives `Globe` (3D spherical projection with atmospheric sky styling and native MapLibre GeoJSON overlays) and `Mercator` (`EPSG:3857` visualization-only navigation with validated `@deck.gl/maplibre` `MapLibreOverlay` overlays).
+   - `MapProjectionController` switches cleanly between `d3-geo` and `MapLibre` engines on projection change while preserving center/zoom camera state and cleaning up DOM listeners and WebGL contexts on unmount.
+2. **Centralized Basemap & Layer Registries (`shared/config/geospatial.ts`, `entities/layer`)**:
+   - `BASEMAP_PROVIDER_REGISTRY` isolates public provider URLs (`VITE_NASA_GIBS_BASE_URL`, default `https://gibs.earthdata.nasa.gov`), WMTS `GoogleMapsCompatible_Level8`/`Level9` (`epsg3857`) and `500m` (`epsg4326`) tile matrices, date formatting rules for temporal VIIRS reflectance (`VIIRS_SNPP_CorrectedReflectance_TrueColor`), attribution strings, and projection compatibility flags.
+   - `ENVIRONMENTAL_LAYER_CATALOG` catalogs 16 Vegetation (`MOD13Q1.061`), Temperature (`MOD11A2.061`), Water (`GPM IMERG V07`, `SMAP SPL3SMP_E`), and Derived resilience/trend layers with explicit `availabilityStatus` (`connected`, `preview`, `planned`, `unavailable`), units, native spatial resolutions, QA policies, legend stops, and prepared `MapTileSource` descriptors (`cog`, `tilejson`, `zarr`, `mvt`, `geojson`, `wmts`).
+3. **Frontend Data Provider Contract & State (`shared/types/geospatial.ts`, `shared/api`, `features/map-explorer`)**:
+   - `MapDataProvider` defines replaceable async operations (`getLayers`, `getLayerMetadata`, `getTemporalCoverage`, `inspectPoint`, `getAreaObservation`) consumed via TanStack Query hooks.
+   - `MockMapDataProvider` currently supplies catalog metadata, simulated catalog coverage counts, and explicit `unavailable` point/area observation responses; all synthetic visual overlays are isolated behind `syntheticPreviewEnabled` and labeled `SYNTHETIC / DEMONSTRATION DATA`.
+   - `useExploreStore` (Zustand) manages active projection, basemap, layer stretch/opacity, temporal playback state, WGS 84 (`EPSG:4326`) AOI drafting/export, and side-by-side comparison panes, synchronized with URL query parameters via `useExploreUrlSync`.
+4. **Implemented vs. Planned Capabilities Boundary**:
+   - **Implemented (Frontend Workspace)**: `/explore` full-screen GIS shell, Homepage entry button (`Open Map Explorer`), three projection engines (`Equal Earth`, `Globe`, `Mercator`), verified public NASA GIBS Blue Marble / Shaded Relief / VIIRS True Color basemaps, 16-layer metadata catalog & legends, Point Inspector metadata view, WGS 84 polygon/rectangle drawing + `EPSG:4326` GeoJSON export, temporal playback controls, and side-by-side camera/layer/period comparison.
+   - **Planned (Requires Backend API & Scientific Core)**: Authenticated NASA Earthdata/POWER/STAC discovery, TiTiler dynamic COG/Zarr raster tile streaming, real pixel/time-series point extraction at native cell footprints, PostGIS/Worker zonal statistics, server-side Mann–Kendall / Sen's Slope / TRI computations, and pixel-wise comparison swipe/difference maps.
 
 ### Explicit diagram clarifications
 
