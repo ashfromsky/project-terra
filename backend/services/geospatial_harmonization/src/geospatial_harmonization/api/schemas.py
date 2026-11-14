@@ -1,5 +1,6 @@
 """Pydantic request and response schemas for the Geospatial Harmonization REST API."""
 
+from dataclasses import asdict
 from datetime import datetime
 from typing import Literal
 from uuid import UUID, uuid4
@@ -24,6 +25,12 @@ from geospatial_harmonization.domain.models.harmonization import (
     QualityReport,
     ResamplingMethod,
     ResamplingPolicy,
+)
+from geospatial_harmonization.domain.models.storage import (
+    CleanupReport,
+    ReconciliationReport,
+    StorageUsageSummary,
+    StorageZone,
 )
 from geospatial_harmonization.domain.models.temporal import (
     TemporalAggregationKind,
@@ -275,3 +282,157 @@ class ProcessingResultOut(BaseModel):
 class CapabilitiesOut(BaseModel):
     handlers: dict[str, tuple[str, ...]]
     formats: tuple[str, ...]
+
+
+class ZoneUsageSummaryOut(BaseModel):
+    zone: StorageZone
+    object_count: int
+    stored_bytes: int
+    reserved_bytes: int
+    original_bytes: int
+    compression_saved_bytes: int
+    dedup_saved_bytes: int
+
+
+class StorageWarningOut(BaseModel):
+    code: str
+    severity: Literal["info", "warning", "critical"]
+    message: str
+    action: str
+    zone: StorageZone | None = None
+    current_bytes: int | None = None
+    threshold_bytes: int | None = None
+    metadata: dict[str, object] = Field(default_factory=dict)
+
+
+class StorageUsageOut(BaseModel):
+    budget_bytes: int
+    warning_threshold: float
+    hard_limit_threshold: float
+    hard_limit_bytes: int
+    total_stored_bytes: int
+    object_count: int
+    reserved_bytes: int
+    available_budget_bytes: int
+    utilization_ratio: float
+    zones: dict[StorageZone, ZoneUsageSummaryOut]
+    daily_growth_bytes: int
+    compression_savings_bytes: int
+    deduplication_savings_bytes: int
+    cleanup_deleted_objects: int
+    cleanup_reclaimed_bytes: int
+    failed_uploads_count: int
+    orphaned_objects_count: int
+    missing_referenced_objects_count: int
+    reconciliation_diff_bytes: int | None = None
+    warnings: tuple[StorageWarningOut, ...]
+    measured_at: datetime
+
+    @classmethod
+    def from_domain(cls, summary: StorageUsageSummary) -> "StorageUsageOut":
+        return cls.model_validate(asdict(summary))
+
+
+class QuotaPolicyOut(BaseModel):
+    budget_bytes: int
+    warning_threshold: float
+    hard_limit_threshold: float
+    max_object_bytes: int
+    max_job_output_bytes: int
+    estimation_enabled: bool
+    reservation_ttl_seconds: int
+
+
+class ZonePolicyOut(BaseModel):
+    retention_seconds: int | None = None
+    auto_cleanup_on_job_success: bool
+    immutable: bool
+    allow_deduplication: bool
+
+
+class CompressionPolicyOut(BaseModel):
+    enabled: bool
+    raster_codec: str
+    raster_cog_enabled: bool
+    raster_block_size: int
+    netcdf_complevel: int
+    zarr_codec: str
+    zarr_target_chunk_bytes: int
+    allow_lossy_compression: bool
+    min_recompress_savings_ratio: float
+
+
+class DeduplicationPolicyOut(BaseModel):
+    enabled: bool
+    verify_upload_integrity: bool
+
+
+class LifecyclePolicyOut(BaseModel):
+    orphan_grace_seconds: int
+    abandoned_temp_max_age_seconds: int
+    max_worker_concurrency: int
+    temp_max_bytes: int
+
+
+class StoragePolicyOut(BaseModel):
+    storage_backend: str
+    quota: QuotaPolicyOut
+    zones: dict[StorageZone, ZonePolicyOut]
+    compression: CompressionPolicyOut
+    deduplication: DeduplicationPolicyOut
+    lifecycle: LifecyclePolicyOut
+
+
+class StorageHealthOut(BaseModel):
+    status: Literal["ok", "warning", "critical"]
+    storage_backend: str
+    budget_bytes: int
+    available_budget_bytes: int
+    utilization_ratio: float
+    orphaned_objects_count: int
+    missing_referenced_objects_count: int
+    warnings: tuple[StorageWarningOut, ...]
+    checked_at: datetime
+
+
+class ReconciliationReportOut(BaseModel):
+    ledger_bytes: int
+    actual_store_bytes: int
+    bytes_difference: int
+    ledger_object_count: int
+    actual_store_object_count: int
+    untracked_keys: tuple[str, ...]
+    missing_keys: tuple[str, ...]
+    expired_reservations_reconciled: int
+    warnings: tuple[StorageWarningOut, ...]
+    checked_at: datetime
+
+    @classmethod
+    def from_domain(cls, report: ReconciliationReport) -> "ReconciliationReportOut":
+        return cls.model_validate(asdict(report))
+
+
+class CleanupRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    dry_run: bool = False
+    grace_seconds: int | None = Field(default=None, ge=0)
+    include_expired_derived: bool = False
+
+
+class CleanupReportOut(BaseModel):
+    dry_run: bool
+    expired_intermediate_deleted: tuple[str, ...]
+    failed_job_artifacts_deleted: tuple[str, ...]
+    orphans_marked: tuple[str, ...]
+    orphans_swept: tuple[str, ...]
+    missing_detected: tuple[str, ...]
+    abandoned_temp_files_removed: int
+    abandoned_multipart_aborted: int
+    reclaimed_bytes: int
+    skipped_protected: tuple[str, ...]
+    executed_at: datetime
+
+    @classmethod
+    def from_domain(cls, report: CleanupReport) -> "CleanupReportOut":
+        return cls.model_validate(asdict(report))
