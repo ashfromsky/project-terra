@@ -19,26 +19,32 @@ from terra import __version__
 from terra.api.health import router as health_router
 from terra.api.v1.router import api_router
 from terra.config import Settings, get_settings
+from terra.infrastructure.database import DatabaseManager
 
 logger = logging.getLogger("terra")
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-    """Log application startup and shutdown.
-
-    Extend with initialization and teardown work as the application grows;
-    keep such hooks out of module import time.
-    """
+    """Initialize and dispose application-wide runtime resources."""
     settings: Settings = app.state.settings
+    db = DatabaseManager(settings)
+    app.state.db = db
+
+    if settings.database_auto_create_tables and settings.environment != "production":
+        await db.create_schema()
+
     logger.info(
         "Starting %s (environment=%s, version=%s)",
         settings.app_name,
         settings.environment,
         __version__,
     )
-    yield
-    logger.info("Shutting down %s", settings.app_name)
+    try:
+        yield
+    finally:
+        await db.dispose()
+        logger.info("Shutting down %s", settings.app_name)
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:

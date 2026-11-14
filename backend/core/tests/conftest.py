@@ -1,5 +1,7 @@
 """Shared pytest fixtures."""
 
+from collections.abc import Iterator
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -10,11 +12,15 @@ from terra.main import create_app
 @pytest.fixture
 def settings() -> Settings:
     """Deterministic settings for tests, independent of any local `.env`."""
-    return Settings(environment="test", cors_origins=[])
+    return Settings(
+        environment="test",
+        database_url="sqlite+aiosqlite:///:memory:",
+        cors_origins=[],
+    )
 
 
 @pytest.fixture
-def client(settings: Settings) -> TestClient:
+def client(settings: Settings) -> Iterator[TestClient]:
     """Test client with the application lifespan running."""
     app = create_app(settings)
     with TestClient(app) as test_client:
@@ -22,8 +28,14 @@ def client(settings: Settings) -> TestClient:
 
 
 @pytest.fixture
-def cors_client() -> TestClient:
+def cors_client() -> Iterator[TestClient]:
     """Test client for an application configured with CORS origins enabled."""
-    app = create_app(Settings(environment="test", cors_origins=["http://localhost:5173"]))
+    app = create_app(
+        Settings(
+            environment="test",
+            database_url="sqlite+aiosqlite:///:memory:",
+            cors_origins=["http://localhost:5173"],
+        )
+    )
     with TestClient(app) as test_client:
         yield test_client
