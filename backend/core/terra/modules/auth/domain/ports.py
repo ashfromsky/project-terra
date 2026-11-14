@@ -2,7 +2,12 @@
 
 from typing import Protocol
 
-from terra.modules.auth.domain.entities import AccessTokenClaims, GitHubProfile, User
+from terra.modules.auth.domain.entities import (
+    AccessTokenClaims,
+    GitHubProfile,
+    OAuthStateClaims,
+    User,
+)
 
 
 class GitHubOAuthClient(Protocol):
@@ -20,12 +25,14 @@ class GitHubOAuthClient(Protocol):
 class TokenService(Protocol):
     """Port for issuing and verifying OAuth state and session tokens."""
 
-    def issue_oauth_state(self) -> str:
+    def issue_oauth_state(
+        self, *, redirect_to_frontend: bool = False, return_to: str | None = None
+    ) -> str:
         """Issue a short-lived signed OAuth CSRF state token."""
         ...
 
-    def verify_oauth_state(self, state: str) -> None:
-        """Validate an OAuth CSRF state token or raise AuthenticationError."""
+    def verify_oauth_state(self, state: str) -> OAuthStateClaims:
+        """Validate an OAuth CSRF state token and return its claims."""
         ...
 
     def issue_access_token(self, user: User) -> str:

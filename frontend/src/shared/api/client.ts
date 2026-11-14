@@ -1,50 +1,73 @@
-/**
- * Centralized API client.
- *
- * All backend communication goes through `request()` so error handling,
- * base-URL resolution, and typing stay in one place. `VITE_API_BASE_URL`
- * comes from the root `.env`.
- */
+import createClient from 'openapi-fetch'
+import type { paths } from './contracts'
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8000'
+const rawBaseUrl = import.meta.env.VITE_API_BASE_URL ?? ''
+export const API_BASE_URL = rawBaseUrl.replace(/\/+$/, '')
 
-/** Error raised for non-2xx API responses. */
+/** Error raised for network failures or non-2xx API responses. */
 export class ApiError extends Error {
   readonly status: number
+  readonly detail: string | null
 
-  constructor(status: number, message: string) {
+  constructor(status: number, message: string, detail: string | null = null) {
     super(message)
     this.name = 'ApiError'
     this.status = status
+    this.detail = detail
   }
 }
 
-/**
- * Perform a JSON request against the TERRA core API.
- * Paths are absolute (start with `/`) and resolve against `API_BASE_URL`.
- */
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  let response: Response
-  try {
-    response = await fetch(`${API_BASE_URL}${path}`, {
-      headers: { Accept: 'application/json', ...init?.headers },
-      ...init,
-    })
-  } catch (cause) {
-    throw new ApiError(0, `Network error calling ${path}: ${String(cause)}`)
+export function extractErrorDetail(errorPayload: unknown): string | null {
+  if (!errorPayload || typeof errorPayload !== 'object') {
+    return null
   }
-
-  if (!response.ok) {
-    throw new ApiError(response.status, `API request to ${path} failed with ${response.status}`)
+  const detail = (errorPayload as { detail?: unknown }).detail
+  if (typeof detail === 'string' && detail.trim().length > 0) {
+    return detail
   }
-  if (response.status === 204) {
-    return undefined as T
+  if (Array.isArray(detail) && detail.length > 0) {
+    const messages = detail
+      .map((item) =>
+        item && typeof item === 'object' && 'msg' in item && typeof item.msg === 'string'
+          ? item.msg
+          : null,
+      )
+      .filter((msg): msg is string => Boolean(msg))
+    return messages.length > 0 ? messages.join('; ') : null
   }
-  return (await response.json()) as T
+  return null
 }
 
-/** Shared API surface; endpoint modules build on `request`. */
-export const apiClient = {
+/** Shared OpenAPI-typed HTTP client bound to `paths` with cookie credentials. */
+export const apiFetchClient = createClient<paths>({
   baseUrl: API_BASE_URL,
-  request,
+  credentials: 'include',
+})
+
+export function buildApiUrl(path: string): string {
+  const normalizedPath = path.startsWith('/') ? path : `/${path}`
+  return `${API_BASE_URL}${normalizedPath}`
+}
+
+// openapi-fetch wraps response DTOs in `Readable<T>`, which collapses fixed-length tuples
+// from generated `schema.d.ts` components (e.g. `rgb: [number, number, number]`) into arrays (`number[]`).
+type WidenTuples<T> = T extends readonly (infer E)[]
+  ? WidenTuples<E>[]
+  : T extends object
+    ? { [K in keyof T]: WidenTuples<T[K]> }
+    : T
+
+export function unwrapApiResponse<T>(
+  result: { data?: NoInfer<WidenTuples<T>>; error?: unknown; response: Response },
+  fallbackContext: string,
+): T {
+  if (!result.response.ok || result.data === undefined) {
+    const detail = extractErrorDetail(result.error)
+    throw new ApiError(
+      result.response.status,
+      detail ?? `${fallbackContext} failed with status ${result.response.status}`,
+      detail,
+    )
+  }
+  return result.data as T
 }
