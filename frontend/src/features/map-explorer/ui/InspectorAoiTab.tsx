@@ -1,7 +1,12 @@
+import { useRef, useState } from 'react'
+import { buildGitHubLoginUrl, useCurrentUserQuery } from '../../../shared/api/auth'
+import { useRegionStatisticsQuery } from '../../../shared/api/regions'
+import { useSystemInfoQuery } from '../../../shared/api/system'
 import {
   exportAoiGeoJsonFile,
   formatCoordinatePair,
 } from '../../../shared/lib/geojson-utils'
+import type { AoiFeature, AoiRole } from '../../../shared/types/geospatial'
 import {
   Check,
   Download,
@@ -10,40 +15,207 @@ import {
   Trash2,
   X,
 } from '../../../shared/ui/explorer-icons'
-import { useAreaObservationQuery } from '../api/use-map-provider-queries'
+import { useAoiWorkspace } from '../model/use-aoi-workspace'
 import { useExploreStore } from '../model/use-explore-store'
 
-const ROLE_OPTIONS = ['regionA', 'regionB', 'primary'] as const
+const ROLE_OPTIONS: readonly AoiRole[] = ['regionA', 'regionB', 'primary']
 
-function roleLabel(role: (typeof ROLE_OPTIONS)[number]): string {
+function roleLabel(role: AoiRole): string {
   return role === 'regionA' ? 'Region A' : role === 'regionB' ? 'Region B' : 'Primary'
 }
 
+interface AoiCardProps {
+  aoi: AoiFeature
+  isSelected: boolean
+  disabled: boolean
+  onSelect: () => void
+  onRename: (name: string) => Promise<void>
+  onRoleChange: (role: AoiRole) => Promise<void>
+  onRemove: () => Promise<void>
+}
+
+function AoiCard({
+  aoi,
+  isSelected,
+  disabled,
+  onSelect,
+  onRename,
+  onRoleChange,
+  onRemove,
+}: AoiCardProps) {
+  const [draftState, setDraftState] = useState<{ sourceName: string; value: string } | null>(null)
+  const skipNextBlurRef = useRef(false)
+  const draftName =
+    draftState && draftState.sourceName === aoi.properties.name
+      ? draftState.value
+      : aoi.properties.name
+
+  const commitName = () => {
+    if (skipNextBlurRef.current) {
+      skipNextBlurRef.current = false
+      setDraftState(null)
+      return
+    }
+    const trimmed = draftName.trim()
+    setDraftState(null)
+    if (!trimmed || trimmed === aoi.properties.name) {
+      return
+    }
+    void onRename(trimmed)
+  }
+
+  return (
+    <div
+      className={`explorer-aoi-card is-${aoi.properties.role} ${isSelected ? 'is-selected' : ''}`}
+      onClick={onSelect}
+    >
+      <div className="explorer-aoi-card__head">
+        <input
+          type="text"
+          className="explorer-aoi-name-input"
+          value={draftName}
+          disabled={disabled}
+          onClick={(e) => e.stopPropagation()}
+          onChange={(e) =>
+            setDraftState({ sourceName: aoi.properties.name, value: e.target.value })
+          }
+          onBlur={commitName}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              e.currentTarget.blur()
+            } else if (e.key === 'Escape') {
+              skipNextBlurRef.current = true
+              setDraftState(null)
+              e.currentTarget.blur()
+            }
+          }}
+          aria-label="AOI name"
+        />
+        <button
+          type="button"
+          className="explorer-icon-mini"
+          disabled={disabled}
+          onClick={(e) => {
+            e.stopPropagation()
+            void onRemove()
+          }}
+          aria-label={`Delete ${aoi.properties.name}`}
+        >
+          <Trash2 size={13} />
+        </button>
+      </div>
+
+      <div className="explorer-aoi-card__roles">
+        {ROLE_OPTIONS.map((role) => (
+          <button
+            key={role}
+            type="button"
+            disabled={disabled}
+            className={`explorer-role-pill is-${role} ${aoi.properties.role === role ? 'is-active' : ''}`}
+            onClick={(e) => {
+              e.stopPropagation()
+              void onRoleChange(role)
+            }}
+          >
+            {roleLabel(role)}
+          </button>
+        ))}
+      </div>
+
+      <dl className="explorer-kv-list explorer-kv-list--dense">
+        <div>
+          <dt>Source CRS</dt>
+          <dd>{aoi.properties.sourceCrs}</dd>
+        </div>
+        <div>
+          <dt>Approx area</dt>
+          <dd>{aoi.properties.approxAreaKm2.toLocaleString()} km²</dd>
+        </div>
+        <div>
+          <dt>Centroid</dt>
+          <dd>{formatCoordinatePair(aoi.properties.centroid[0], aoi.properties.centroid[1])}</dd>
+        </div>
+      </dl>
+    </div>
+  )
+}
+
 export function InspectorAoiTab() {
-  const primaryLayerId = useExploreStore((s) => s.primaryLayerId)
-  const dateRangeStart = useExploreStore((s) => s.dateRangeStart)
-  const dateRangeEnd = useExploreStore((s) => s.dateRangeEnd)
   const interactionMode = useExploreStore((s) => s.interactionMode)
   const setInteractionMode = useExploreStore((s) => s.setInteractionMode)
-  const aois = useExploreStore((s) => s.aois)
-  const selectedAoiId = useExploreStore((s) => s.selectedAoiId)
-  const setSelectedAoiId = useExploreStore((s) => s.setSelectedAoiId)
   const activeAoiRole = useExploreStore((s) => s.activeAoiRole)
   const setActiveAoiRole = useExploreStore((s) => s.setActiveAoiRole)
   const draftVertices = useExploreStore((s) => s.draftVertices)
-  const completeDraftAoi = useExploreStore((s) => s.completeDraftAoi)
   const cancelDraftAoi = useExploreStore((s) => s.cancelDraftAoi)
-  const updateAoiRole = useExploreStore((s) => s.updateAoiRole)
-  const renameAoi = useExploreStore((s) => s.renameAoi)
-  const removeAoi = useExploreStore((s) => s.removeAoi)
-  const clearAois = useExploreStore((s) => s.clearAois)
 
-  const selectedAoi = aois.find((item) => item.properties.id === selectedAoiId) ?? aois[0] ?? null
-  const areaQuery = useAreaObservationQuery(primaryLayerId, selectedAoi, dateRangeStart, dateRangeEnd)
+  const currentUserQuery = useCurrentUserQuery()
+  const systemInfoQuery = useSystemInfoQuery()
+  const currentUser = currentUserQuery.data ?? null
+  const oauthConfigured = systemInfoQuery.data?.githubOauthConfigured ?? false
+
+  const {
+    aois,
+    selectedAoi,
+    setSelectedAoiId,
+    isAuthenticated,
+    isLoadingRegions,
+    regionsError,
+    refetchRegions,
+    syncPending,
+    syncError,
+    clearSyncError,
+    completeDraftAoi,
+    updateAoiRole,
+    renameAoi,
+    removeAoi,
+    clearAois,
+  } = useAoiWorkspace()
+
+  const statisticsQuery = useRegionStatisticsQuery(
+    selectedAoi?.properties.id ?? null,
+    isAuthenticated && Boolean(selectedAoi),
+  )
+
   const isDrawing = interactionMode === 'draw-polygon' || interactionMode === 'draw-rectangle'
 
   return (
     <div className="explorer-inspector-stack" role="tabpanel">
+      {isAuthenticated && currentUser ? (
+        <div className="explorer-status-banner is-synced">
+          <strong>Synced workspace (@{currentUser.githubLogin})</strong>
+          <p>
+            Regions persist to TERRA Core API in WGS 84 (EPSG:4326).
+            {syncPending ? ' Saving changes…' : ''}
+          </p>
+        </div>
+      ) : (
+        <div className="explorer-status-banner">
+          <strong>Local session drafts</strong>
+          <p>
+            {oauthConfigured
+              ? 'AOIs stay in this browser session until you sign in with GitHub.'
+              : 'AOIs remain in this browser session and can be exported as WGS 84 GeoJSON.'}
+          </p>
+          {oauthConfigured && (
+            <a href={buildGitHubLoginUrl('/explore')} className="explorer-auth-link">
+              Sign in with GitHub to save regions
+            </a>
+          )}
+        </div>
+      )}
+
+      {syncError && (
+        <div className="explorer-status-banner is-error" role="alert">
+          <div className="explorer-banner-head">
+            <strong>Region sync error</strong>
+            <button type="button" className="explorer-inline-reset" onClick={clearSyncError}>
+              Dismiss
+            </button>
+          </div>
+          <p>{syncError}</p>
+        </div>
+      )}
+
       <div className="explorer-inspector-card">
         <div className="explorer-control-row">
           <span className="explorer-control-label">New AOI role</span>
@@ -64,6 +236,7 @@ export function InspectorAoiTab() {
         <div className="explorer-draw-toolbar">
           <button
             type="button"
+            disabled={syncPending}
             className={`explorer-action-btn ${interactionMode === 'draw-polygon' ? 'is-active' : ''}`}
             onClick={() => setInteractionMode('draw-polygon')}
           >
@@ -72,6 +245,7 @@ export function InspectorAoiTab() {
           </button>
           <button
             type="button"
+            disabled={syncPending}
             className={`explorer-action-btn ${interactionMode === 'draw-rectangle' ? 'is-active' : ''}`}
             onClick={() => setInteractionMode('draw-rectangle')}
           >
@@ -94,11 +268,11 @@ export function InspectorAoiTab() {
                 <button
                   type="button"
                   className="explorer-action-btn explorer-action-btn--primary"
-                  disabled={draftVertices.length < 3}
-                  onClick={() => completeDraftAoi()}
+                  disabled={draftVertices.length < 3 || syncPending}
+                  onClick={() => void completeDraftAoi()}
                 >
                   <Check size={13} />
-                  <span>Complete</span>
+                  <span>{syncPending ? 'Saving…' : 'Complete'}</span>
                 </button>
               )}
               <button type="button" className="explorer-action-btn" onClick={cancelDraftAoi}>
@@ -110,7 +284,23 @@ export function InspectorAoiTab() {
         )}
       </div>
 
-      {aois.length === 0 ? (
+      {isLoadingRegions ? (
+        <div className="explorer-state-card" role="status">
+          Loading saved regions from TERRA Core API…
+        </div>
+      ) : regionsError ? (
+        <div className="explorer-state-card explorer-state-card--error" role="alert">
+          <p className="explorer-state-card__title">Could not load saved regions</p>
+          <p className="explorer-muted-copy">{regionsError.message}</p>
+          <button
+            type="button"
+            className="explorer-action-btn"
+            onClick={() => void refetchRegions()}
+          >
+            Retry
+          </button>
+        </div>
+      ) : aois.length === 0 ? (
         <div className="explorer-empty-card">
           <Pentagon size={18} aria-hidden="true" />
           <h3>No Areas of Interest defined</h3>
@@ -122,77 +312,71 @@ export function InspectorAoiTab() {
       ) : (
         <>
           <div className="explorer-aoi-list">
-            {aois.map((aoi) => {
-              const isSelected = aoi.properties.id === selectedAoi?.properties.id
-              return (
-                <div
-                  key={aoi.properties.id}
-                  className={`explorer-aoi-card is-${aoi.properties.role} ${isSelected ? 'is-selected' : ''}`}
-                  onClick={() => setSelectedAoiId(aoi.properties.id)}
-                >
-                  <div className="explorer-aoi-card__head">
-                    <input
-                      type="text"
-                      className="explorer-aoi-name-input"
-                      value={aoi.properties.name}
-                      onClick={(e) => e.stopPropagation()}
-                      onChange={(e) => renameAoi(aoi.properties.id, e.target.value)}
-                      aria-label="AOI name"
-                    />
-                    <button
-                      type="button"
-                      className="explorer-icon-mini"
-                      onClick={(e) => {
-                        e.stopPropagation()
-                        removeAoi(aoi.properties.id)
-                      }}
-                      aria-label={`Delete ${aoi.properties.name}`}
-                    >
-                      <Trash2 size={13} />
-                    </button>
-                  </div>
-
-                  <div className="explorer-aoi-card__roles">
-                    {ROLE_OPTIONS.map((role) => (
-                      <button
-                        key={role}
-                        type="button"
-                        className={`explorer-role-pill is-${role} ${aoi.properties.role === role ? 'is-active' : ''}`}
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          updateAoiRole(aoi.properties.id, role)
-                        }}
-                      >
-                        {roleLabel(role)}
-                      </button>
-                    ))}
-                  </div>
-
-                  <dl className="explorer-kv-list explorer-kv-list--dense">
-                    <div>
-                      <dt>Source CRS</dt>
-                      <dd>{aoi.properties.sourceCrs}</dd>
-                    </div>
-                    <div>
-                      <dt>Approx area</dt>
-                      <dd>{aoi.properties.approxAreaKm2.toLocaleString()} km²</dd>
-                    </div>
-                    <div>
-                      <dt>Centroid</dt>
-                      <dd>
-                        {formatCoordinatePair(aoi.properties.centroid[0], aoi.properties.centroid[1])}
-                      </dd>
-                    </div>
-                  </dl>
-                </div>
-              )
-            })}
+            {aois.map((aoi) => (
+              <AoiCard
+                key={aoi.properties.id}
+                aoi={aoi}
+                isSelected={aoi.properties.id === selectedAoi?.properties.id}
+                disabled={syncPending}
+                onSelect={() => setSelectedAoiId(aoi.properties.id)}
+                onRename={(name) => renameAoi(aoi.properties.id, name)}
+                onRoleChange={(role) => updateAoiRole(aoi.properties.id, role)}
+                onRemove={() => removeAoi(aoi.properties.id)}
+              />
+            ))}
           </div>
 
-          {selectedAoi && areaQuery.data && (
+          {selectedAoi && isAuthenticated && (
+            <div className="explorer-inspector-card">
+              <span className="explorer-overline">Region Geometry &amp; Statistics</span>
+              {statisticsQuery.isPending ? (
+                <p className="explorer-muted-copy">Loading region statistics…</p>
+              ) : statisticsQuery.isError ? (
+                <div className="explorer-status-banner is-error" role="alert">
+                  <strong>Statistics unavailable</strong>
+                  <p>{statisticsQuery.error.message}</p>
+                  <button
+                    type="button"
+                    className="explorer-inline-reset"
+                    onClick={() => void statisticsQuery.refetch()}
+                  >
+                    Retry
+                  </button>
+                </div>
+              ) : statisticsQuery.data ? (
+                <>
+                  <dl className="explorer-kv-list explorer-kv-list--dense">
+                    <div>
+                      <dt>Vertices / Polygons</dt>
+                      <dd>
+                        {statisticsQuery.data.vertexCount} / {statisticsQuery.data.polygonCount}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt>Area (EPSG:4326)</dt>
+                      <dd>{statisticsQuery.data.approxAreaKm2.toLocaleString()} km²</dd>
+                    </div>
+                    <div>
+                      <dt>Available metrics</dt>
+                      <dd>{statisticsQuery.data.availableMetrics.join(', ')}</dd>
+                    </div>
+                  </dl>
+                  <div className="explorer-status-banner is-unavailable">
+                    <strong>Zonal environmental metrics ({statisticsQuery.data.observationStatus})</strong>
+                    <p>{statisticsQuery.data.message}</p>
+                  </div>
+                </>
+              ) : null}
+            </div>
+          )}
+
+          {selectedAoi && !isAuthenticated && (
             <div className="explorer-status-banner is-unavailable">
               <strong>Zonal aggregation not connected</strong>
-              <p>{areaQuery.data.message}</p>
+              <p>
+                Regional zonal statistics for &ldquo;{selectedAoi.properties.name}&rdquo; require
+                backend dataset ingestion. Geometric properties above are computed in EPSG:4326.
+              </p>
             </div>
           )}
 
@@ -205,7 +389,12 @@ export function InspectorAoiTab() {
               <Download size={13} />
               <span>Export WGS 84 GeoJSON</span>
             </button>
-            <button type="button" className="explorer-action-btn" onClick={clearAois}>
+            <button
+              type="button"
+              disabled={syncPending}
+              className="explorer-action-btn"
+              onClick={() => void clearAois()}
+            >
               Clear All
             </button>
           </div>

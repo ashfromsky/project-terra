@@ -1,16 +1,17 @@
 import type { MapLayerDefinition } from '../../../shared/types/geospatial'
 import { formatCoordinatePair } from '../../../shared/lib/geojson-utils'
 import { Crosshair } from '../../../shared/ui/explorer-icons'
-import { usePointInspectionQuery } from '../api/use-map-provider-queries'
 import { useExploreStore } from '../model/use-explore-store'
 
-export function InspectorPointTab({ activeLayer }: { activeLayer: MapLayerDefinition }) {
-  const primaryLayerId = useExploreStore((s) => s.primaryLayerId)
+interface InspectorPointTabProps {
+  activeLayer: MapLayerDefinition | null
+  catalogLoading: boolean
+}
+
+export function InspectorPointTab({ activeLayer, catalogLoading }: InspectorPointTabProps) {
   const selectedDate = useExploreStore((s) => s.selectedDate)
   const inspectedPoint = useExploreStore((s) => s.inspectedPoint)
   const setInspectedPoint = useExploreStore((s) => s.setInspectedPoint)
-
-  const pointQuery = usePointInspectionQuery(primaryLayerId, inspectedPoint, selectedDate)
 
   return (
     <div className="explorer-inspector-stack" role="tabpanel">
@@ -20,7 +21,8 @@ export function InspectorPointTab({ activeLayer }: { activeLayer: MapLayerDefini
           <h3>No pixel or coordinate inspected</h3>
           <p>
             Select the <strong>Inspect</strong> tool and click anywhere on the map to inspect WGS 84
-            coordinates and source metadata for <strong>{activeLayer.shortName}</strong>.
+            coordinates and source metadata for{' '}
+            <strong>{activeLayer ? activeLayer.shortName : 'selected layer'}</strong>.
           </p>
         </div>
       ) : (
@@ -39,15 +41,19 @@ export function InspectorPointTab({ activeLayer }: { activeLayer: MapLayerDefini
             </button>
           </div>
 
-          {pointQuery.isLoading ? (
-            <p className="explorer-muted-copy">Querying provider metadata...</p>
-          ) : pointQuery.data ? (
-            <>
-              <div className="explorer-status-banner is-unavailable">
-                <strong>Observation data not connected</strong>
-                <p>{pointQuery.data.message}</p>
-              </div>
+          <div className="explorer-status-banner is-unavailable">
+            <strong>Observation data not connected</strong>
+            <p>
+              {activeLayer
+                ? `Actual ${activeLayer.productId}.${activeLayer.productVersion} pixel observations at native ${activeLayer.nativeSpatialResolution} resolution await backend COG / Zarr sampling.`
+                : catalogLoading
+                  ? 'Loading active layer metadata from TERRA Core API…'
+                  : 'Layer catalog is not connected. Point values are not interpolated in the browser.'}
+            </p>
+          </div>
 
+          {activeLayer && (
+            <>
               <dl className="explorer-kv-list">
                 <div>
                   <dt>Active layer</dt>
@@ -56,32 +62,32 @@ export function InspectorPointTab({ activeLayer }: { activeLayer: MapLayerDefini
                 <div>
                   <dt>Product &amp; Version</dt>
                   <dd>
-                    {pointQuery.data.productId} ({pointQuery.data.productVersion})
+                    {activeLayer.productId} ({activeLayer.productVersion})
                   </dd>
                 </div>
                 <div>
                   <dt>Native resolution</dt>
-                  <dd>{pointQuery.data.nativeSpatialResolution}</dd>
+                  <dd>{activeLayer.nativeSpatialResolution}</dd>
                 </div>
                 <div>
                   <dt>Requested date</dt>
-                  <dd>{pointQuery.data.requestedDate}</dd>
+                  <dd>{selectedDate}</dd>
                 </div>
                 <div>
                   <dt>Observation value</dt>
-                  <dd>{pointQuery.data.formattedValue}</dd>
+                  <dd>Not connected ({activeLayer.unit})</dd>
                 </div>
                 <div>
                   <dt>QA &amp; provenance</dt>
-                  <dd>{pointQuery.data.quality.qaFlagSummary}</dd>
+                  <dd>{activeLayer.qaPolicy}</dd>
                 </div>
               </dl>
               <p className="explorer-resolution-note">
-                Coordinate clicks query only the native cell footprint (
-                {pointQuery.data.nativeSpatialResolution}) and never interpolate finer resolution.
+                Coordinate clicks record exact WGS 84 (EPSG:4326) position and never interpolate finer
+                than native {activeLayer.nativeSpatialResolution} cell resolution.
               </p>
             </>
-          ) : null}
+          )}
         </div>
       )}
     </div>
