@@ -5,6 +5,8 @@ interface ImportMetaEnv {
   readonly VITE_API_BASE_URL?: string
   /** URL of a MapLibre style JSON (configured in the root .env). */
   readonly VITE_MAP_STYLE_URL?: string
+  /** Public base URL for NASA GIBS WMTS/WMS services. */
+  readonly VITE_NASA_GIBS_BASE_URL?: string
 }
 
 interface ImportMeta {
