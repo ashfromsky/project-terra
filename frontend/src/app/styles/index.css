@@ -1,0 +1,101 @@
+/* Global base styles and app-shell layout (see AGENTS.md: app layer owns
+   initialization and providers). */
+
+:root {
+  color-scheme: dark;
+  font-family:
+    system-ui,
+    -apple-system,
+    'Segoe UI',
+    Roboto,
+    'Helvetica Neue',
+    sans-serif;
+  line-height: 1.5;
+  font-weight: 400;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  color: #e8e8e8;
+  background-color: #10131a;
+}
+
+/* --- App shell ---------------------------------------------------------- */
+
+.app-shell {
+  position: relative;
+  display: flex;
+  height: 100%;
+  overflow: hidden;
+}
+
+/* MapLibre fills the shell and acts as the base layer of the app. */
+.app-map {
+  position: absolute;
+  inset: 0;
+}
+
+.app-panel {
+  position: absolute;
+  top: 1rem;
+  left: 1rem;
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  width: min(20rem, calc(100vw - 2rem));
+  max-height: calc(100% - 2rem);
+  padding: 1rem;
+  overflow: auto;
+  background: rgba(16, 19, 26, 0.92);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 0.75rem;
+}
+
+.app-panel h1 {
+  margin: 0;
+  font-size: 1.25rem;
+  letter-spacing: 0.08em;
+}
+
+.app-panel p {
+  margin: 0;
+  font-size: 0.85rem;
+}
+
+.app-chart {
+  width: 100%;
+  height: 12rem;
+}
+
+.app-panel-toggle {
+  position: absolute;
+  top: 1rem;
+  right: 3.5rem;
+  z-index: 10;
+  padding: 0.4rem 0.75rem;
+  font: inherit;
+  font-size: 0.85rem;
+  color: #e8e8e8;
+  background: rgba(16, 19, 26, 0.92);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 0.5rem;
+  cursor: pointer;
+}
+
+.app-panel-toggle:hover {
+  border-color: rgba(255, 255, 255, 0.3);
+}
