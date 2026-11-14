@@ -5,13 +5,16 @@ from terra.modules.layers.domain.entities import (
     LayerDefinition,
     MapLayerGroupId,
 )
+from terra.modules.layers.infrastructure.derived_layers import DERIVED_LAYERS
 from terra.modules.layers.infrastructure.observation_layers import OBSERVATION_LAYERS
+
+ALL_LAYERS: tuple[LayerDefinition, ...] = OBSERVATION_LAYERS + DERIVED_LAYERS
 
 
 class StaticLayerCatalogRepository:
     """In-memory repository serving the curated TERRA layer catalog."""
 
-    def __init__(self, layers: tuple[LayerDefinition, ...] = OBSERVATION_LAYERS) -> None:
+    def __init__(self, layers: tuple[LayerDefinition, ...] = ALL_LAYERS) -> None:
         self._layers = layers
         self._by_id = {layer.id: layer for layer in layers}
 
