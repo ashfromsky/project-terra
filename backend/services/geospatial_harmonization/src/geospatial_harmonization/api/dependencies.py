@@ -7,9 +7,17 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 
 from geospatial_harmonization.application.harmonize import HarmonizationService
 from geospatial_harmonization.config.settings import Settings
-from geospatial_harmonization.domain.ports import DatasetRepository, JobRepository, StoragePort
+from geospatial_harmonization.domain.ports import (
+    DatasetRepository,
+    JobRepository,
+    StorageLedgerRepository,
+    StoragePort,
+)
 from geospatial_harmonization.handlers.registry import HandlerRegistry
 from geospatial_harmonization.readers import ReaderRegistry
+from geospatial_harmonization.storage.lifecycle import StorageLifecycleManager
+from geospatial_harmonization.storage.monitoring import StorageMonitoringService
+from geospatial_harmonization.storage.quota import StorageQuotaManager
 
 
 def get_runtime_settings(request: Request) -> Settings:
@@ -52,6 +60,26 @@ def get_harmonization_service(request: Request) -> HarmonizationService:
     return cast("HarmonizationService", request.app.state.harmonization_service)
 
 
+def get_storage_ledger(request: Request) -> StorageLedgerRepository:
+    """Return StorageLedgerRepository bound to application sessions."""
+    return cast("StorageLedgerRepository", request.app.state.ledger)
+
+
+def get_storage_quota(request: Request) -> StorageQuotaManager:
+    """Return StorageQuotaManager enforcing budget reservations."""
+    return cast("StorageQuotaManager", request.app.state.quota)
+
+
+def get_storage_lifecycle(request: Request) -> StorageLifecycleManager:
+    """Return StorageLifecycleManager coordinating mark-and-sweep cleanup."""
+    return cast("StorageLifecycleManager", request.app.state.lifecycle)
+
+
+def get_storage_monitoring(request: Request) -> StorageMonitoringService:
+    """Return StorageMonitoringService providing usage and policy reports."""
+    return cast("StorageMonitoringService", request.app.state.monitoring)
+
+
 SettingsDep = Annotated[Settings, Depends(get_runtime_settings)]
 EngineDep = Annotated[AsyncEngine, Depends(get_db_engine)]
 StorageDep = Annotated[StoragePort, Depends(get_storage)]
@@ -60,3 +88,7 @@ ReadersDep = Annotated[ReaderRegistry, Depends(get_reader_registry)]
 DatasetRepoDep = Annotated[DatasetRepository, Depends(get_dataset_repo)]
 JobRepoDep = Annotated[JobRepository, Depends(get_job_repo)]
 HarmonizationServiceDep = Annotated[HarmonizationService, Depends(get_harmonization_service)]
+StorageLedgerDep = Annotated[StorageLedgerRepository, Depends(get_storage_ledger)]
+StorageQuotaDep = Annotated[StorageQuotaManager, Depends(get_storage_quota)]
+StorageLifecycleDep = Annotated[StorageLifecycleManager, Depends(get_storage_lifecycle)]
+StorageMonitoringDep = Annotated[StorageMonitoringService, Depends(get_storage_monitoring)]
