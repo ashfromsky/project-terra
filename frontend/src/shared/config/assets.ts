@@ -1,3 +1,9 @@
+import terraLogo from '../../../assets/terra-logo.png'
+
+export const brandAssets = {
+  terraLogo,
+} as const
+
 export const figmaAssets = {
   terraSymbol: '/assets/figma/669b9.svg',
   search: '/assets/figma/acb4b.svg',
