@@ -3,7 +3,7 @@
 from datetime import datetime, timedelta
 from uuid import UUID
 
-from sqlalchemy import and_, or_, select, update
+from sqlalchemy import Select, and_, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from geospatial_harmonization.domain.models.dataset import SpatialDataset
@@ -116,6 +116,27 @@ class SqlAlchemyDatasetRepository:
         return tuple(decode_dataset(row.payload_json) for row in rows)
 
 
+def build_claim_statement(
+    now_utc: datetime, *, skip_locked: bool = False
+) -> Select[GhsHarmonizationJobModel]:
+    """Build the oldest-eligible job claim SELECT, optionally with FOR UPDATE SKIP LOCKED."""
+    eligible = or_(
+        GhsHarmonizationJobModel.status == "pending",
+        and_(
+            GhsHarmonizationJobModel.status == "running",
+            GhsHarmonizationJobModel.lease_expires_at <= now_utc,
+            GhsHarmonizationJobModel.attempt < GhsHarmonizationJobModel.max_attempts,
+        ),
+    )
+    stmt = (
+        select(GhsHarmonizationJobModel)
+        .where(eligible)
+        .order_by(GhsHarmonizationJobModel.created_at.asc(), GhsHarmonizationJobModel.id.asc())
+        .limit(1)
+    )
+    return stmt.with_for_update(skip_locked=True) if skip_locked else stmt
+
+
 class SqlAlchemyJobRepository:
     """JobRepository adapter using PostgreSQL FOR UPDATE SKIP LOCKED lease claiming."""
 
@@ -159,27 +180,10 @@ class SqlAlchemyJobRepository:
         now_utc = ensure_utc(now)
         lease_until = now_utc + timedelta(seconds=lease_seconds)
 
-        eligible = or_(
-            GhsHarmonizationJobModel.status == "pending",
-            and_(
-                GhsHarmonizationJobModel.status == "running",
-                GhsHarmonizationJobModel.lease_expires_at <= now_utc,
-                GhsHarmonizationJobModel.attempt < GhsHarmonizationJobModel.max_attempts,
-            ),
-        )
         for _ in range(3):
             async with self._sessions() as session, session.begin():
-                stmt = (
-                    select(GhsHarmonizationJobModel)
-                    .where(eligible)
-                    .order_by(
-                        GhsHarmonizationJobModel.created_at.asc(),
-                        GhsHarmonizationJobModel.id.asc(),
-                    )
-                    .limit(1)
-                )
-                if session.bind is not None and session.bind.dialect.name == "postgresql":
-                    stmt = stmt.with_for_update(skip_locked=True)
+                use_pg_lock = session.bind is not None and session.bind.dialect.name == "postgresql"
+                stmt = build_claim_statement(now_utc, skip_locked=use_pg_lock)
                 cand = (await session.execute(stmt)).scalar_one_or_none()
                 if cand is None:
                     return None
