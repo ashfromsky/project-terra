@@ -1,12 +1,10 @@
 import { useCallback, useMemo, useRef } from 'react'
-import {
-  ENVIRONMENTAL_LAYER_CATALOG,
-  getLayerDefinition,
-} from '../../../entities/layer/model/layer-catalog'
 import type { MapRenderState } from '../../../entities/map/model/map-renderer'
+import { useLayerCatalogQuery } from '../../../shared/api/layers'
 import { BASEMAP_LIST } from '../../../shared/config/geospatial'
 import type { BasemapId, MapViewportState } from '../../../shared/types/geospatial'
 import { Info, Link2, Link2Off } from '../../../shared/ui/explorer-icons'
+import { useAoiWorkspace } from '../model/use-aoi-workspace'
 import { useExploreStore } from '../model/use-explore-store'
 import {
   ExplorerMapViewport,
@@ -31,8 +29,6 @@ export function ComparisonWorkspace() {
   const selectedCountry = useExploreStore((s) => s.selectedCountry)
   const hoveredCountry = useExploreStore((s) => s.hoveredCountry)
   const inspectedPoint = useExploreStore((s) => s.inspectedPoint)
-  const aois = useExploreStore((s) => s.aois)
-  const selectedAoiId = useExploreStore((s) => s.selectedAoiId)
   const draftVertices = useExploreStore((s) => s.draftVertices)
   const draftHoverPoint = useExploreStore((s) => s.draftHoverPoint)
   const viewport = useExploreStore((s) => s.viewport)
@@ -42,28 +38,36 @@ export function ComparisonWorkspace() {
   const setSelectedCountry = useExploreStore((s) => s.setSelectedCountry)
   const setInspectedPoint = useExploreStore((s) => s.setInspectedPoint)
   const addDraftVertex = useExploreStore((s) => s.addDraftVertex)
-  const completeDraftAoi = useExploreStore((s) => s.completeDraftAoi)
   const setDraftHoverPoint = useExploreStore((s) => s.setDraftHoverPoint)
+
+  const { aois, selectedAoi, completeDraftAoi } = useAoiWorkspace()
+  const selectedAoiId = selectedAoi?.properties.id ?? null
+
+  const catalogQuery = useLayerCatalogQuery()
+  const layers = catalogQuery.data ?? []
 
   const leftViewportRef = useRef<ExplorerMapViewportHandle | null>(null)
   const rightViewportRef = useRef<ExplorerMapViewportHandle | null>(null)
   const isSyncingRef = useRef(false)
 
-  const leftLayer = getLayerDefinition(comparisonLeft.layerId)
-  const rightLayer = getLayerDefinition(comparisonRight.layerId)
+  const leftLayer = layers.find((l) => l.id === comparisonLeft.layerId) ?? layers[0] ?? null
+  const rightLayer =
+    layers.find((l) => l.id === comparisonRight.layerId) ?? layers[1] ?? layers[0] ?? null
 
   const leftRenderState = useMemo<MapRenderState>(
     () => ({
       projection,
       basemap: comparisonLeft.basemap,
       selectedDate: comparisonLeft.date,
-      activeLayer: {
-        layer: leftLayer,
-        visible: true,
-        opacity: comparisonLeft.opacity,
-        minValue: leftLayer.valueRange.defaultMin,
-        maxValue: leftLayer.valueRange.defaultMax,
-      },
+      activeLayer: leftLayer
+        ? {
+            layer: leftLayer,
+            visible: true,
+            opacity: comparisonLeft.opacity,
+            minValue: leftLayer.valueRange.defaultMin,
+            maxValue: leftLayer.valueRange.defaultMax,
+          }
+        : null,
       syntheticPreviewEnabled,
       showGraticules,
       showBorders,
@@ -107,13 +111,15 @@ export function ComparisonWorkspace() {
       projection,
       basemap: comparisonRight.basemap,
       selectedDate: comparisonRight.date,
-      activeLayer: {
-        layer: rightLayer,
-        visible: true,
-        opacity: comparisonRight.opacity,
-        minValue: rightLayer.valueRange.defaultMin,
-        maxValue: rightLayer.valueRange.defaultMax,
-      },
+      activeLayer: rightLayer
+        ? {
+            layer: rightLayer,
+            visible: true,
+            opacity: comparisonRight.opacity,
+            minValue: rightLayer.valueRange.defaultMin,
+            maxValue: rightLayer.valueRange.defaultMax,
+          }
+        : null,
       syntheticPreviewEnabled,
       showGraticules,
       showBorders,
@@ -209,15 +215,22 @@ export function ComparisonWorkspace() {
             <span className="explorer-pane-badge is-region-a">Pane A</span>
             <select
               className="explorer-mini-select"
-              value={comparisonLeft.layerId}
+              value={leftLayer?.id ?? comparisonLeft.layerId}
+              disabled={layers.length === 0}
               onChange={(e) => setComparisonLeft({ layerId: e.target.value })}
               aria-label="Pane A environmental layer"
             >
-              {ENVIRONMENTAL_LAYER_CATALOG.map((layer) => (
-                <option key={layer.id} value={layer.id}>
-                  {layer.name}
+              {layers.length === 0 ? (
+                <option value={comparisonLeft.layerId}>
+                  {catalogQuery.isPending ? 'Loading layers…' : 'Layers unavailable'}
                 </option>
-              ))}
+              ) : (
+                layers.map((layer) => (
+                  <option key={layer.id} value={layer.id}>
+                    {layer.name}
+                  </option>
+                ))
+              )}
             </select>
             <input
               type="date"
@@ -257,7 +270,9 @@ export function ComparisonWorkspace() {
               onSelectCountry={(country) => setSelectedCountry(country)}
               onInspectPoint={(lon, lat) => setInspectedPoint({ lon, lat })}
               onAddDraftVertex={addDraftVertex}
-              onCompleteDraftShape={completeDraftAoi}
+              onCompleteDraftShape={(lon, lat) => {
+                void completeDraftAoi(lon, lat)
+              }}
               onUpdateDraftHover={setDraftHoverPoint}
               onViewportChange={(vp) => handlePaneViewportChange('left', vp)}
               ariaLabel="Comparison Left Map Pane"
@@ -265,16 +280,26 @@ export function ComparisonWorkspace() {
           </div>
 
           <div className="explorer-comparison__legend">
-            <span>
-              {leftLayer.shortName} ({leftLayer.unit})
-            </span>
-            <div
-              className="explorer-legend-gradient"
-              style={{ background: leftLayer.legend.gradientCss }}
-            />
-            <span>
-              {leftLayer.legend.minLabel} → {leftLayer.legend.maxLabel}
-            </span>
+            {leftLayer ? (
+              <>
+                <span>
+                  {leftLayer.shortName} ({leftLayer.unit})
+                </span>
+                <div
+                  className="explorer-legend-gradient"
+                  style={{ background: leftLayer.legend.gradientCss }}
+                />
+                <span>
+                  {leftLayer.legend.minLabel} → {leftLayer.legend.maxLabel}
+                </span>
+              </>
+            ) : (
+              <span>
+                {catalogQuery.isPending
+                  ? 'Loading Pane A layer legend…'
+                  : 'Layer catalog unavailable'}
+              </span>
+            )}
           </div>
         </section>
 
@@ -283,15 +308,22 @@ export function ComparisonWorkspace() {
             <span className="explorer-pane-badge is-region-b">Pane B</span>
             <select
               className="explorer-mini-select"
-              value={comparisonRight.layerId}
+              value={rightLayer?.id ?? comparisonRight.layerId}
+              disabled={layers.length === 0}
               onChange={(e) => setComparisonRight({ layerId: e.target.value })}
               aria-label="Pane B environmental layer"
             >
-              {ENVIRONMENTAL_LAYER_CATALOG.map((layer) => (
-                <option key={layer.id} value={layer.id}>
-                  {layer.name}
+              {layers.length === 0 ? (
+                <option value={comparisonRight.layerId}>
+                  {catalogQuery.isPending ? 'Loading layers…' : 'Layers unavailable'}
                 </option>
-              ))}
+              ) : (
+                layers.map((layer) => (
+                  <option key={layer.id} value={layer.id}>
+                    {layer.name}
+                  </option>
+                ))
+              )}
             </select>
             <input
               type="date"
@@ -331,7 +363,9 @@ export function ComparisonWorkspace() {
               onSelectCountry={(country) => setSelectedCountry(country)}
               onInspectPoint={(lon, lat) => setInspectedPoint({ lon, lat })}
               onAddDraftVertex={addDraftVertex}
-              onCompleteDraftShape={completeDraftAoi}
+              onCompleteDraftShape={(lon, lat) => {
+                void completeDraftAoi(lon, lat)
+              }}
               onUpdateDraftHover={setDraftHoverPoint}
               onViewportChange={(vp) => handlePaneViewportChange('right', vp)}
               ariaLabel="Comparison Right Map Pane"
@@ -339,16 +373,26 @@ export function ComparisonWorkspace() {
           </div>
 
           <div className="explorer-comparison__legend">
-            <span>
-              {rightLayer.shortName} ({rightLayer.unit})
-            </span>
-            <div
-              className="explorer-legend-gradient"
-              style={{ background: rightLayer.legend.gradientCss }}
-            />
-            <span>
-              {rightLayer.legend.minLabel} → {rightLayer.legend.maxLabel}
-            </span>
+            {rightLayer ? (
+              <>
+                <span>
+                  {rightLayer.shortName} ({rightLayer.unit})
+                </span>
+                <div
+                  className="explorer-legend-gradient"
+                  style={{ background: rightLayer.legend.gradientCss }}
+                />
+                <span>
+                  {rightLayer.legend.minLabel} → {rightLayer.legend.maxLabel}
+                </span>
+              </>
+            ) : (
+              <span>
+                {catalogQuery.isPending
+                  ? 'Loading Pane B layer legend…'
+                  : 'Layer catalog unavailable'}
+              </span>
+            )}
           </div>
         </section>
       </div>

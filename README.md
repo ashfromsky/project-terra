@@ -87,11 +87,19 @@ Planned components include:
 
 ### Development
 
+- pnpm
 - uv
 - Git
 - pytest
+- Vitest
 - Ruff
 - ESLint
+
+Run locally from the repository root via `Makefile`:
+
+- `make contracts` — export `openapi.json` from `backend/core` and regenerate `frontend/src/shared/api/generated/schema.d.ts`
+- `make dev` — start `backend/core` and the Vite dev server concurrently (auto-regenerates API contracts on startup)
+- `make test`, `make lint`, `make frontend-typecheck` — run backend and frontend tests, linters, and strict TypeScript type checks
 
 ## Architecture
 
@@ -125,8 +133,8 @@ TERRA is currently in its initial development stage.
 
 Planned development stages:
 
-- [ ] Repository and development environment initialization.
-- [ ] Frontend and backend foundation.
+- [x] Repository and development environment initialization.
+- [x] Frontend and backend foundation.
 - [ ] Environmental data ingestion.
 - [ ] Geospatial data processing.
 - [ ] Time-series analysis.

@@ -8,7 +8,7 @@ export default function OverviewPage() {
   const apiStatusText = healthQuery.isPending
     ? 'Core API probe: connecting…'
     : healthQuery.isError
-      ? 'Core API probe: offline (standalone frontend demonstration mode)'
+      ? 'Core API probe: offline (Core API unreachable)'
       : `Core API probe: online (${healthQuery.data.status})`
 
   return (

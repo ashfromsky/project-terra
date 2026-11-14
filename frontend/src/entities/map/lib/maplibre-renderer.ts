@@ -6,8 +6,8 @@ import maplibregl, {
   type MapMouseEvent,
 } from 'maplibre-gl'
 import { BASEMAP_PROVIDER_REGISTRY } from '../../../shared/config/geospatial'
-import { clampLatitude, normalizeLongitude } from '../../../shared/lib/geojson-utils'
-import type { AoiFeature, BasemapId, MapViewportState, ProjectionId } from '../../../shared/types/geospatial'
+import { clampLatitude, normalizeAoiGeometry, normalizeLongitude } from '../../../shared/lib/geojson-utils'
+import type { BasemapId, MapViewportState, ProjectionId } from '../../../shared/types/geospatial'
 import type { CountryFeatureProperties } from '../../../widgets/world-map/model/types'
 import {
   countryPropertiesToSummary,
@@ -280,7 +280,8 @@ export class MapLibreRenderer implements MapRenderer {
       const feature = map.queryRenderedFeatures(event.point, { layers: ['country-thematic-fill'] })[0]
       if (feature) {
         const summary = countryPropertiesToSummary(feature.properties as Partial<CountryFeatureProperties>)
-        if (summary) this.handlers.onSelectCountry?.(summary, feature.geometry as AoiFeature['geometry'])
+        const normalizedGeom = normalizeAoiGeometry(feature.geometry)
+        if (summary) this.handlers.onSelectCountry?.(summary, normalizedGeom ?? undefined)
       }
     }
     if (mode === 'inspect') this.handlers.onInspectPoint?.(lon, lat)

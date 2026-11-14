@@ -1,8 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef } from 'react'
-import { getLayerDefinition } from '../../entities/layer/model/layer-catalog'
 import type { MapRenderState } from '../../entities/map/model/map-renderer'
 import { useExploreUrlSync } from '../../features/map-explorer/lib/use-explore-url-sync'
-import { useExploreStore } from '../../features/map-explorer/model/use-explore-store'
+import { useAoiWorkspace } from '../../features/map-explorer/model/use-aoi-workspace'
+import {
+  resolveLayerControlState,
+  useExploreStore,
+} from '../../features/map-explorer/model/use-explore-store'
 import { ComparisonWorkspace } from '../../features/map-explorer/ui/ComparisonWorkspace'
 import {
   ExplorerMapViewport,
@@ -12,6 +15,7 @@ import { ExplorerTopToolbar } from '../../features/map-explorer/ui/ExplorerTopTo
 import { InspectorPanel } from '../../features/map-explorer/ui/InspectorPanel'
 import { LayerCatalogSidebar } from '../../features/map-explorer/ui/LayerCatalogSidebar'
 import { TemporalLegendBar } from '../../features/map-explorer/ui/TemporalLegendBar'
+import { useLayerCatalogQuery } from '../../shared/api/layers'
 import { PROJECTION_REGISTRY } from '../../shared/config/geospatial'
 import { formatCoordinatePair } from '../../shared/lib/geojson-utils'
 import {
@@ -46,8 +50,6 @@ export function MapExplorerWorkspace() {
   const hoveredCountry = useExploreStore((s) => s.hoveredCountry)
   const selectedCountry = useExploreStore((s) => s.selectedCountry)
   const inspectedPoint = useExploreStore((s) => s.inspectedPoint)
-  const aois = useExploreStore((s) => s.aois)
-  const selectedAoiId = useExploreStore((s) => s.selectedAoiId)
   const draftVertices = useExploreStore((s) => s.draftVertices)
   const draftHoverPoint = useExploreStore((s) => s.draftHoverPoint)
   const viewport = useExploreStore((s) => s.viewport)
@@ -62,7 +64,6 @@ export function MapExplorerWorkspace() {
   const setSelectedCountry = useExploreStore((s) => s.setSelectedCountry)
   const setInspectedPoint = useExploreStore((s) => s.setInspectedPoint)
   const addDraftVertex = useExploreStore((s) => s.addDraftVertex)
-  const completeDraftAoi = useExploreStore((s) => s.completeDraftAoi)
   const cancelDraftAoi = useExploreStore((s) => s.cancelDraftAoi)
   const setDraftHoverPoint = useExploreStore((s) => s.setDraftHoverPoint)
   const setViewport = useExploreStore((s) => s.setViewport)
@@ -71,21 +72,31 @@ export function MapExplorerWorkspace() {
   const rightInspectorOpen = useExploreStore((s) => s.rightInspectorOpen)
   const setRightInspectorOpen = useExploreStore((s) => s.setRightInspectorOpen)
 
-  const activeLayer = getLayerDefinition(primaryLayerId)
-  const activeLayerControl = layerStates[primaryLayerId]
+  const catalogQuery = useLayerCatalogQuery()
+  const layers = catalogQuery.data ?? []
+  const activeLayer = layers.find((layer) => layer.id === primaryLayerId) ?? layers[0] ?? null
+  const activeLayerControl = activeLayer
+    ? resolveLayerControlState(activeLayer, layerStates[activeLayer.id], primaryLayerId)
+    : null
+
+  const { aois, selectedAoi, completeDraftAoi } = useAoiWorkspace()
+  const selectedAoiId = selectedAoi?.properties.id ?? null
 
   const renderState = useMemo<MapRenderState>(
     () => ({
       projection,
       basemap,
       selectedDate,
-      activeLayer: {
-        layer: activeLayer,
-        visible: activeLayerControl?.visible ?? true,
-        opacity: activeLayerControl?.opacity ?? 0.85,
-        minValue: activeLayerControl?.minValue ?? activeLayer.valueRange.defaultMin,
-        maxValue: activeLayerControl?.maxValue ?? activeLayer.valueRange.defaultMax,
-      },
+      activeLayer:
+        activeLayer && activeLayerControl
+          ? {
+              layer: activeLayer,
+              visible: activeLayerControl.visible,
+              opacity: activeLayerControl.opacity,
+              minValue: activeLayerControl.minValue,
+              maxValue: activeLayerControl.maxValue,
+            }
+          : null,
       syntheticPreviewEnabled,
       showGraticules,
       showBorders,
@@ -103,10 +114,7 @@ export function MapExplorerWorkspace() {
     }),
     [
       activeLayer,
-      activeLayerControl?.maxValue,
-      activeLayerControl?.minValue,
-      activeLayerControl?.opacity,
-      activeLayerControl?.visible,
+      activeLayerControl,
       aois,
       basemap,
       draftHoverPoint,
@@ -196,7 +204,9 @@ export function MapExplorerWorkspace() {
                 onSelectCountry={(country) => setSelectedCountry(country)}
                 onInspectPoint={(lon, lat) => setInspectedPoint({ lon, lat })}
                 onAddDraftVertex={addDraftVertex}
-                onCompleteDraftShape={completeDraftAoi}
+                onCompleteDraftShape={(lon, lat) => {
+                  void completeDraftAoi(lon, lat)
+                }}
                 onUpdateDraftHover={setDraftHoverPoint}
                 onViewportChange={setViewport}
                 onRendererStatus={setRendererStatus}
@@ -244,7 +254,7 @@ export function MapExplorerWorkspace() {
                       type="button"
                       className="explorer-hud-btn is-primary"
                       disabled={draftVertices.length < 3}
-                      onClick={() => completeDraftAoi()}
+                      onClick={() => void completeDraftAoi()}
                     >
                       <Check size={12} />
                       Finish

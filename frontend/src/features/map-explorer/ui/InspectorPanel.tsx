@@ -1,7 +1,8 @@
-import { getLayerDefinition } from '../../../entities/layer/model/layer-catalog'
+import { useLayerCatalogQuery } from '../../../shared/api/layers'
 import { PROJECTION_REGISTRY } from '../../../shared/config/geospatial'
 import { formatCoordinatePair } from '../../../shared/lib/geojson-utils'
 import { Info, X } from '../../../shared/ui/explorer-icons'
+import { useAoiWorkspace } from '../model/use-aoi-workspace'
 import { useExploreStore } from '../model/use-explore-store'
 import { InspectorAoiTab } from './InspectorAoiTab'
 import { InspectorFeatureTab } from './InspectorFeatureTab'
@@ -15,13 +16,15 @@ export function InspectorPanel() {
   const projection = useExploreStore((s) => s.projection)
   const primaryLayerId = useExploreStore((s) => s.primaryLayerId)
   const hoverCoordinate = useExploreStore((s) => s.hoverCoordinate)
-  const aois = useExploreStore((s) => s.aois)
+
+  const catalogQuery = useLayerCatalogQuery()
+  const layers = catalogQuery.data ?? []
+  const activeLayer = layers.find((l) => l.id === primaryLayerId) ?? layers[0] ?? null
+  const { aois } = useAoiWorkspace()
 
   if (!rightInspectorOpen) {
     return null
   }
-
-  const activeLayer = getLayerDefinition(primaryLayerId)
 
   return (
     <aside
@@ -93,7 +96,12 @@ export function InspectorPanel() {
       </div>
 
       <div className="explorer-sidebar__scroll">
-        {tab === 'point' && <InspectorPointTab activeLayer={activeLayer} />}
+        {tab === 'point' && (
+          <InspectorPointTab
+            activeLayer={activeLayer}
+            catalogLoading={catalogQuery.isPending}
+          />
+        )}
         {tab === 'feature' && <InspectorFeatureTab />}
         {tab === 'aoi' && <InspectorAoiTab />}
       </div>

@@ -1,20 +1,21 @@
 import { loadNaturalEarthBundle } from '../../../entities/map/api/natural-earth-loader'
-import type { AoiFeature, AoiRole } from '../../../shared/types/geospatial'
+import { normalizeAoiGeometry } from '../../../shared/lib/geojson-utils'
+import type { AoiRole } from '../../../shared/types/geospatial'
 import { MapPin } from '../../../shared/ui/explorer-icons'
+import { useAoiWorkspace } from '../model/use-aoi-workspace'
 import { useExploreStore } from '../model/use-explore-store'
 
 export function InspectorFeatureTab() {
   const selectedCountry = useExploreStore((s) => s.selectedCountry)
-  const addCountryAsAoi = useExploreStore((s) => s.addCountryAsAoi)
-  const setTab = useExploreStore((s) => s.setInspectorTab)
+  const { assignCountryAsAoi, syncPending, syncError } = useAoiWorkspace()
 
   const handleAssignCountryAoi = async (role: AoiRole) => {
-    if (!selectedCountry) return
+    if (!selectedCountry || syncPending) return
     const bundle = await loadNaturalEarthBundle()
     const match = bundle.countries.features.find((f) => f.properties.isoA3 === selectedCountry.isoA3)
-    if (!match) return
-    addCountryAsAoi(selectedCountry, match.geometry as AoiFeature['geometry'], role)
-    setTab('aoi')
+    const normalized = match ? normalizeAoiGeometry(match.geometry) : null
+    if (!normalized) return
+    await assignCountryAsAoi(selectedCountry, normalized, role)
   }
 
   return (
@@ -58,27 +59,37 @@ export function InspectorFeatureTab() {
             </span>
           </div>
 
+          {syncError && (
+            <div className="explorer-status-banner is-error" role="alert">
+              <strong>Could not save region</strong>
+              <p>{syncError}</p>
+            </div>
+          )}
+
           <div className="explorer-action-stack">
             <button
               type="button"
+              disabled={syncPending}
               className="explorer-action-btn explorer-action-btn--region-a"
-              onClick={() => handleAssignCountryAoi('regionA')}
+              onClick={() => void handleAssignCountryAoi('regionA')}
             >
-              Assign as Region A
+              {syncPending ? 'Saving…' : 'Assign as Region A'}
             </button>
             <button
               type="button"
+              disabled={syncPending}
               className="explorer-action-btn explorer-action-btn--region-b"
-              onClick={() => handleAssignCountryAoi('regionB')}
+              onClick={() => void handleAssignCountryAoi('regionB')}
             >
-              Assign as Region B
+              {syncPending ? 'Saving…' : 'Assign as Region B'}
             </button>
             <button
               type="button"
+              disabled={syncPending}
               className="explorer-action-btn"
-              onClick={() => handleAssignCountryAoi('primary')}
+              onClick={() => void handleAssignCountryAoi('primary')}
             >
-              Add as Primary AOI
+              {syncPending ? 'Saving…' : 'Add as Primary AOI'}
             </button>
           </div>
         </div>

@@ -1,4 +1,3 @@
-import { ENVIRONMENTAL_LAYER_CATALOG } from '../../../entities/layer/model/layer-catalog'
 import type { ExplorerInteractionMode } from '../../../entities/map/model/map-renderer'
 import type { CountrySelectionSummary } from '../../../shared/store/ui-store'
 import type {
@@ -6,6 +5,7 @@ import type {
   AoiGeometry,
   AoiRole,
   BasemapId,
+  MapLayerDefinition,
   MapViewportState,
   ObservationGranularity,
   ProjectionId,
@@ -25,17 +25,18 @@ export interface ComparisonPaneConfig {
   opacity: number
 }
 
-export const DEFAULT_LAYER_STATES: Record<string, LayerControlState> = Object.fromEntries(
-  ENVIRONMENTAL_LAYER_CATALOG.map((layer) => [
-    layer.id,
-    {
-      visible: layer.id === 'ndvi-mod13q1',
-      opacity: 0.85,
-      minValue: layer.valueRange.defaultMin,
-      maxValue: layer.valueRange.defaultMax,
-    },
-  ]),
-)
+export function resolveLayerControlState(
+  layer: MapLayerDefinition,
+  override: Partial<LayerControlState> | undefined,
+  primaryLayerId: string,
+): LayerControlState {
+  return {
+    visible: override?.visible ?? layer.id === primaryLayerId,
+    opacity: override?.opacity ?? 0.85,
+    minValue: override?.minValue ?? layer.valueRange.defaultMin,
+    maxValue: override?.maxValue ?? layer.valueRange.defaultMax,
+  }
+}
 
 export const DEFAULT_VIEWPORT: MapViewportState = {
   center: [10, 18],
@@ -51,7 +52,7 @@ export interface ExploreState {
   setBasemap: (basemap: BasemapId) => void
   primaryLayerId: string
   setPrimaryLayerId: (layerId: string) => void
-  layerStates: Record<string, LayerControlState>
+  layerStates: Record<string, Partial<LayerControlState>>
   toggleLayerVisibility: (layerId: string) => void
   setLayerOpacity: (layerId: string, opacity: number) => void
   setLayerValueRange: (layerId: string, minValue: number, maxValue: number) => void
@@ -83,6 +84,10 @@ export interface ExploreState {
   setSelectedAoiId: (id: string | null) => void
   activeAoiRole: AoiRole
   setActiveAoiRole: (role: AoiRole) => void
+  aoiSyncError: string | null
+  setAoiSyncError: (error: string | null) => void
+  aoiSyncPending: boolean
+  setAoiSyncPending: (pending: boolean) => void
   draftVertices: [number, number][]
   draftHoverPoint: [number, number] | null
   addDraftVertex: (lon: number, lat: number) => void
@@ -99,7 +104,7 @@ export interface ExploreState {
   removeAoi: (aoiId: string) => void
   clearAois: () => void
   comparisonMode: boolean
-  setComparisonMode: (enabled: boolean) => void
+  setComparisonMode: (comparison: boolean) => void
   syncCameras: boolean
   setSyncCameras: (sync: boolean) => void
   comparisonLeft: ComparisonPaneConfig
@@ -132,10 +137,5 @@ export interface ExploreState {
     deckGlActive: boolean
     warning: string | null
   }
-  setRendererStatus: (status: {
-    ready: boolean
-    error: string | null
-    deckGlActive: boolean
-    warning: string | null
-  }) => void
+  setRendererStatus: (status: ExploreState['rendererStatus']) => void
 }

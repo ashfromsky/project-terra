@@ -1,5 +1,4 @@
 import { create } from 'zustand'
-import { getLayerDefinition } from '../../../entities/layer/model/layer-catalog'
 import {
   assignAoiRoleInList,
   buildCountryAoi,
@@ -7,15 +6,15 @@ import {
   mergeRoleExclusiveAoi,
 } from './explore-aoi-helpers'
 import {
-  DEFAULT_LAYER_STATES,
   DEFAULT_VIEWPORT,
+  resolveLayerControlState,
   type ComparisonPaneConfig,
   type ExploreState,
   type LayerControlState,
 } from './explore-store.types'
 
 export type { ComparisonPaneConfig, ExploreState, LayerControlState }
-export { DEFAULT_VIEWPORT }
+export { DEFAULT_VIEWPORT, resolveLayerControlState }
 
 function isWideWorkspaceViewport(): boolean {
   if (typeof window === 'undefined') return true
@@ -31,32 +30,21 @@ export const useExploreStore = create<ExploreState>()((set, get) => ({
 
   primaryLayerId: 'ndvi-mod13q1',
   setPrimaryLayerId: (layerId) =>
-    set((state) => {
-      const existing = state.layerStates[layerId]
-      const layer = getLayerDefinition(layerId)
-      return {
-        primaryLayerId: layerId,
-        layerStates: {
-          ...state.layerStates,
-          [layerId]: existing
-            ? { ...existing, visible: true }
-            : {
-                visible: true,
-                opacity: 0.85,
-                minValue: layer.valueRange.defaultMin,
-                maxValue: layer.valueRange.defaultMax,
-              },
-        },
-      }
-    }),
+    set((state) => ({
+      primaryLayerId: layerId,
+      layerStates: {
+        ...state.layerStates,
+        [layerId]: { ...state.layerStates[layerId], visible: true },
+      },
+    })),
 
-  layerStates: DEFAULT_LAYER_STATES,
+  layerStates: {},
 
   toggleLayerVisibility: (layerId) =>
     set((state) => {
       const current = state.layerStates[layerId]
-      if (!current) return state
-      const nextVisible = !current.visible
+      const currentVisible = current?.visible ?? layerId === state.primaryLayerId
+      const nextVisible = !currentVisible
       return {
         primaryLayerId: nextVisible ? layerId : state.primaryLayerId,
         layerStates: { ...state.layerStates, [layerId]: { ...current, visible: nextVisible } },
@@ -66,7 +54,6 @@ export const useExploreStore = create<ExploreState>()((set, get) => ({
   setLayerOpacity: (layerId, opacity) =>
     set((state) => {
       const current = state.layerStates[layerId]
-      if (!current) return state
       return {
         layerStates: {
           ...state.layerStates,
@@ -78,7 +65,6 @@ export const useExploreStore = create<ExploreState>()((set, get) => ({
   setLayerValueRange: (layerId, minValue, maxValue) =>
     set((state) => {
       const current = state.layerStates[layerId]
-      if (!current) return state
       return {
         layerStates: {
           ...state.layerStates,
@@ -93,17 +79,15 @@ export const useExploreStore = create<ExploreState>()((set, get) => ({
 
   resetLayerValueRange: (layerId) =>
     set((state) => {
-      const layer = getLayerDefinition(layerId)
       const current = state.layerStates[layerId]
       if (!current) return state
+      const nextOverride: Partial<LayerControlState> = { ...current }
+      delete nextOverride.minValue
+      delete nextOverride.maxValue
       return {
         layerStates: {
           ...state.layerStates,
-          [layerId]: {
-            ...current,
-            minValue: layer.valueRange.defaultMin,
-            maxValue: layer.valueRange.defaultMax,
-          },
+          [layerId]: nextOverride,
         },
       }
     }),
@@ -166,6 +150,10 @@ export const useExploreStore = create<ExploreState>()((set, get) => ({
   setSelectedAoiId: (selectedAoiId) => set({ selectedAoiId }),
   activeAoiRole: 'regionA',
   setActiveAoiRole: (activeAoiRole) => set({ activeAoiRole }),
+  aoiSyncError: null,
+  setAoiSyncError: (aoiSyncError) => set({ aoiSyncError }),
+  aoiSyncPending: false,
+  setAoiSyncPending: (aoiSyncPending) => set({ aoiSyncPending }),
   draftVertices: [],
   draftHoverPoint: null,
 

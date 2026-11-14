@@ -74,5 +74,9 @@ balance the mandated stack against current ecosystem compatibility.
 - The MapLibre v5 security advisory must be revisited before production use
   (see Decision 4).
 - TypeScript should be revisited when `typescript-eslint` supports TS 7.
-- Dependency lockfiles (`frontend/package-lock.json`,
-  `backend/core/uv.lock`) are committed and define reproducible installs.
+- Dependency lockfiles (`frontend/pnpm-lock.yaml` — superseding the initial
+  `frontend/package-lock.json` — and `backend/core/uv.lock`) are committed and
+  define reproducible installs.
+- Note (P0 API integration): `frontend/src/shared/api/generated/openapi.json` is exported directly from
+  `backend/core` and compiled into `frontend/src/shared/api/generated/schema.d.ts`
+  via `openapi-typescript` as the single source of truth for frontend API types.
