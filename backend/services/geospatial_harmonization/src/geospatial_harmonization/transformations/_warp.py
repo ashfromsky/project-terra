@@ -1,0 +1,206 @@
+"""Universal spatial reprojection, axis orientation, and COG GeoTIFF export."""
+
+import math
+from dataclasses import dataclass
+from pathlib import Path
+
+import numpy as np
+import rasterio
+from numpy.typing import NDArray
+from pyproj import Geod, Transformer
+from rasterio.transform import Affine
+from rasterio.warp import Resampling, reproject
+
+from geospatial_harmonization.domain.exceptions import IncompatibleDatasetError
+from geospatial_harmonization.domain.models.dataset import VariableSpec
+from geospatial_harmonization.domain.models.grid import GridSpec
+from geospatial_harmonization.domain.models.harmonization import ResamplingMethod
+
+_RESAMPLING_MAP: dict[ResamplingMethod, Resampling] = {
+    "nearest": Resampling.nearest,
+    "bilinear": Resampling.bilinear,
+    "cubic": Resampling.cubic,
+    "average": Resampling.average,
+    "sum": Resampling.sum,
+    "mode": Resampling.mode,
+}
+_X_DIMS = frozenset({"x", "xdim", "lon", "longitude"})
+_Y_DIMS = frozenset({"y", "ydim", "lat", "latitude"})
+_GEOD = Geod(ellps="WGS84")
+
+
+@dataclass(frozen=True, slots=True)
+class WarpedVariable:
+    """In-memory warped raster result paired with target nodata and pixel counts."""
+
+    data: NDArray[np.generic]
+    nodata: float | int | None
+    valid_pixels: int
+    total_pixels: int
+
+
+def to_rasterio_affine(grid: GridSpec) -> Affine:
+    t = grid.resolved().transform
+    assert t is not None
+    return Affine(t.a, t.b, t.c, t.d, t.e, t.f)
+
+
+def _pixel_ground_meters(grid: GridSpec) -> tuple[float, float]:
+    res = grid.resolved()
+    b = res.bounds
+    cx, cy = 0.5 * (b.min_x + b.max_x), 0.5 * (b.min_y + b.max_y)
+    to_geo = Transformer.from_crs(res.crs, "EPSG:4326", always_xy=True)
+    lon0, lat0 = to_geo.transform(cx, cy)
+    lonx, latx = to_geo.transform(cx + res.resolution_x, cy)
+    lony, laty = to_geo.transform(cx, cy + res.resolution_y)
+    lat0_c = max(-89.9, min(89.9, lat0))
+    _, _, dx = _GEOD.inv(lon0, lat0_c, lonx, max(-89.9, min(89.9, latx)))
+    _, _, dy = _GEOD.inv(lon0, lat0_c, lony, max(-89.9, min(89.9, laty)))
+    return abs(float(dx)), abs(float(dy))
+
+
+def check_upsampling_warning(src_grid: GridSpec, dst_grid: GridSpec) -> str | None:
+    """Emit resolution-fidelity warning if target spacing is finer than native grid."""
+    if src_grid.crs == dst_grid.crs:
+        finer = (
+            dst_grid.resolution_x < src_grid.resolution_x * 0.99
+            or dst_grid.resolution_y < src_grid.resolution_y * 0.99
+        )
+    else:
+        sx, sy = _pixel_ground_meters(src_grid)
+        dx, dy = _pixel_ground_meters(dst_grid)
+        finer = dx < sx * 0.99 or dy < sy * 0.99
+    if finer:
+        return "Target grid is finer than source grid (upsampling); no native detail is added."
+    return None
+
+
+def _find_coord(
+    dim_name: str, coordinates: dict[str, tuple[float | int | str, ...]]
+) -> tuple[float | int | str, ...] | None:
+    if dim_name in coordinates:
+        return coordinates[dim_name]
+    return next((v for k, v in coordinates.items() if k.rsplit("/", 1)[-1] == dim_name), None)
+
+
+def orient_to_north_up(
+    arr: NDArray[np.generic],
+    dims: tuple[str, ...],
+    coordinates: dict[str, tuple[float | int | str, ...]],
+) -> tuple[NDArray[np.generic], tuple[str, ...]]:
+    """Reorder axes to (..., y, x) and orient North-to-South, West-to-East."""
+    if arr.ndim < 2 or len(dims) != arr.ndim:
+        raise IncompatibleDatasetError("Grid variable must be at least 2D with matching dimensions")
+    lower = [d.lower() for d in dims]
+    y_idx = next((i for i, d in enumerate(lower) if d in _Y_DIMS), arr.ndim - 2)
+    x_idx = next((i for i, d in enumerate(lower) if d in _X_DIMS), arr.ndim - 1)
+    if y_idx == x_idx:
+        raise IncompatibleDatasetError(f"Ambiguous spatial dimensions: {dims}")
+
+    reordered = np.moveaxis(arr, (y_idx, x_idx), (-2, -1))
+    leading = tuple(d for i, d in enumerate(dims) if i not in (y_idx, x_idx))
+    y_coords = _find_coord(dims[y_idx], coordinates)
+    if y_coords and len(y_coords) >= 2 and float(y_coords[0]) < float(y_coords[-1]):
+        reordered = np.flip(reordered, axis=-2)
+    x_coords = _find_coord(dims[x_idx], coordinates)
+    if x_coords and len(x_coords) >= 2 and float(x_coords[0]) > float(x_coords[-1]):
+        reordered = np.flip(reordered, axis=-1)
+    return reordered, (*leading, "y", "x")
+
+
+def warp_variable(
+    raw_arr: NDArray[np.generic],
+    spec: VariableSpec,
+    src_grid: GridSpec,
+    dst_grid: GridSpec,
+    method: ResamplingMethod,
+    coordinates: dict[str, tuple[float | int | str, ...]],
+) -> tuple[WarpedVariable, tuple[str, ...]]:
+    """Scale continuous data safely, orient spatial axes, and warp onto target grid."""
+    src_res, dst_res = src_grid.resolved(), dst_grid.resolved()
+    oriented, out_dims = orient_to_north_up(raw_arr, spec.dimensions, coordinates)
+    if oriented.shape[-2:] != (src_res.height, src_res.width):
+        raise IncompatibleDatasetError(
+            f"Variable '{spec.name}' spatial shape {oriented.shape[-2:]} != "
+            f"source grid {(src_res.height, src_res.width)}"
+        )
+
+    discrete = spec.semantics in ("qa_flag", "categorical")
+    if discrete:
+        work: NDArray[np.generic] = oriented
+        src_nd: float | int | None = spec.nodata
+        dst_nd: float | int | None = spec.nodata if isinstance(spec.nodata, (int, float)) else None
+        fill_val: float | int = dst_nd if dst_nd is not None else 0
+    else:
+        scaled: NDArray[np.float64] = oriented.astype(np.float64, copy=True)
+        if spec.nodata is not None:
+            nd = float(spec.nodata)
+            scaled[np.isnan(scaled) if math.isnan(nd) else (scaled == nd)] = np.nan
+        if spec.scale_factor is not None:
+            scaled *= spec.scale_factor
+        if spec.add_offset is not None:
+            scaled += spec.add_offset
+        work = scaled
+        src_nd = dst_nd = fill_val = np.nan
+
+    assert dst_res.height is not None and dst_res.width is not None
+    lead_shape = work.shape[:-2]
+    out = np.full((*lead_shape, dst_res.height, dst_res.width), fill_val, dtype=work.dtype)
+    src_t, dst_t = to_rasterio_affine(src_res), to_rasterio_affine(dst_res)
+
+    for idx in np.ndindex(lead_shape) if lead_shape else ((),):
+        src_slice = np.ascontiguousarray(work[idx] if idx else work)
+        dst_slice = np.ascontiguousarray(out[idx] if idx else out)
+        reproject(
+            source=src_slice,
+            destination=dst_slice,
+            src_transform=src_t,
+            src_crs=src_res.crs,
+            dst_transform=dst_t,
+            dst_crs=dst_res.crs,
+            src_nodata=src_nd,
+            dst_nodata=dst_nd,
+            resampling=_RESAMPLING_MAP[method],
+        )
+        if idx:
+            out[idx] = dst_slice
+        else:
+            out = dst_slice
+
+    if discrete:
+        valid = int(out.size) if dst_nd is None else int(np.count_nonzero(out != dst_nd))
+        return WarpedVariable(out, dst_nd, valid, int(out.size)), out_dims
+    out = out.astype(np.float32)
+    valid = int(np.count_nonzero(np.isfinite(out)))
+    return WarpedVariable(out, np.nan, valid, int(out.size)), out_dims
+
+
+def write_variable_geotiff(
+    out_path: Path, warped: WarpedVariable, grid: GridSpec, var_name: str, tags: dict[str, str]
+) -> None:
+    """Persist warped 2D/3D array to a fresh tiled GeoTIFF preserving exact dtype."""
+    res = grid.resolved()
+    assert res.width is not None and res.height is not None
+    arr = warped.data
+    bands = arr.reshape((-1, res.height, res.width)) if arr.ndim > 2 else arr[np.newaxis, :, :]
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    nodata = warped.nodata if isinstance(warped.nodata, (int, float)) else None
+    with rasterio.open(
+        out_path,
+        "w",
+        driver="GTiff",
+        height=res.height,
+        width=res.width,
+        count=int(bands.shape[0]),
+        dtype=str(bands.dtype),
+        crs=res.crs,
+        transform=to_rasterio_affine(res),
+        nodata=nodata if nodata is not None else (np.nan if bands.dtype.kind == "f" else None),
+        tiled=True,
+    ) as dst:
+        for bidx in range(bands.shape[0]):
+            dst.write(bands[bidx], bidx + 1)
+            dst.set_band_description(
+                bidx + 1, var_name if bands.shape[0] == 1 else f"{var_name}_{bidx}"
+            )
+        dst.update_tags(**tags)
