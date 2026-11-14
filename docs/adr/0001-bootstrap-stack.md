@@ -57,10 +57,18 @@ balance the mandated stack against current ecosystem compatibility.
    scientific algorithms, no external API integrations, and no synthetic data
    ship with the bootstrap.
 
+8. **No environment files in version control.** Every `.env*` file — including
+   examples — is gitignored and stays out of history. Variable documentation
+   lives in code instead of a committed example file: `terra/config.py` lists
+   the backend variables with defaults, `frontend/src/vite-env.d.ts` types the
+   `VITE_*` variables.
+
 ## Consequences
 
 - Frontend and backend install, run, test, and build independently; both are
-  configured from a single documented `.env.example` at the repository root.
+  configured from environment variables (root `.env` for Vite,
+  `backend/core/.env` or the process environment for the backend), and no
+  environment file is ever committed.
 - The MapLibre v5 security advisory must be revisited before production use
   (see Decision 4).
 - TypeScript should be revisited when `typescript-eslint` supports TS 7.
