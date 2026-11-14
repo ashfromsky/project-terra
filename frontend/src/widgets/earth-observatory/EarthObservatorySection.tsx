@@ -1,7 +1,8 @@
 import { useState } from 'react'
-import { useNavigate } from 'react-router'
+import { Link, useNavigate } from 'react-router'
 import { figmaAssets } from '../../shared/config/assets'
 import { APP_ROUTES } from '../../shared/config/routes'
+import { ObservatoryFrameIcon } from '../../shared/ui/explorer-icons'
 import {
   useUiStore,
   type RegionOption,
@@ -331,6 +332,17 @@ export function EarthObservatorySection() {
             Jan 2001 — Dec 2025
           </p>
         </div>
+
+        <Link
+          to={APP_ROUTES.explore}
+          className="earth-observatory__explore-cta"
+          aria-label="Open full-screen Map Explorer at /explore"
+        >
+          <span className="earth-observatory__explore-cta-icon" aria-hidden="true">
+            <ObservatoryFrameIcon size={13} />
+          </span>
+          <span className="earth-observatory__explore-cta-label">Open Map Explorer</span>
+        </Link>
       </div>
     </section>
   )
