@@ -21,12 +21,18 @@ def test_alembic_upgrade_downgrade_cycle(tmp_path: Path) -> None:
             row[0]
             for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
         }
-    assert {
+    expected_tables = {
         "ghs_alembic_version",
         "ghs_datasets",
         "ghs_assets",
         "ghs_harmonization_jobs",
-    } <= tables
+        "ghs_storage_ledger_state",
+        "ghs_storage_objects",
+        "ghs_storage_asset_refs",
+        "ghs_storage_reservations",
+        "ghs_storage_audit_events",
+    }
+    assert expected_tables <= tables
 
     command.downgrade(cfg, "base")
     with sqlite3.connect(db_path) as conn:
@@ -34,7 +40,7 @@ def test_alembic_upgrade_downgrade_cycle(tmp_path: Path) -> None:
             row[0]
             for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
         }
-    assert not (remaining & {"ghs_datasets", "ghs_assets", "ghs_harmonization_jobs"})
+    assert not (remaining & (expected_tables - {"ghs_alembic_version"}))
     assert "ghs_alembic_version" in remaining
 
     command.upgrade(cfg, "head")

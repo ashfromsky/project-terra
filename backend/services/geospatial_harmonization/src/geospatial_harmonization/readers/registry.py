@@ -1,6 +1,7 @@
 """Format detection and ReaderRegistry dispatch without provider coupling."""
 
 from pathlib import Path
+from typing import Protocol, runtime_checkable
 from urllib.parse import urlparse
 
 from geospatial_harmonization.domain.exceptions import IncompatibleDatasetError
@@ -9,6 +10,7 @@ from geospatial_harmonization.domain.models.dataset import (
     DataFormat,
     DecodedDataset,
 )
+from geospatial_harmonization.domain.models.grid import SpatialBounds
 from geospatial_harmonization.domain.ports import AssetReader
 
 _HDF4_MAGIC = b"\x0e\x03\x13\x01"
@@ -41,6 +43,22 @@ class UnsupportedFormatError(IncompatibleDatasetError):
 
 class AssetDecodeError(IncompatibleDatasetError):
     """Raised when a readable asset is missing, empty, truncated, or corrupt."""
+
+
+@runtime_checkable
+class WindowedAssetReader(Protocol):
+    """Optional extension for AssetReaders capable of AOI-windowed decoding."""
+
+    def read_windowed(
+        self,
+        asset: AssetReference,
+        path: Path,
+        *,
+        aoi_bounds: SpatialBounds,
+        aoi_crs: str | None = None,
+        variables: tuple[str, ...] | None = None,
+        allow_disjoint_fallback: bool = True,
+    ) -> DecodedDataset: ...
 
 
 def _suffix_from(asset: AssetReference, path: Path | None) -> str:
@@ -150,4 +168,35 @@ class ReaderRegistry:
             with path.open("rb") as handle:
                 header = handle.read(256)
         reader = self.resolve(asset, path=path, header=header)
+        return reader.read(asset, path, variables=variables)
+
+    def read_windowed(
+        self,
+        asset: AssetReference,
+        path: Path,
+        *,
+        aoi_bounds: SpatialBounds,
+        aoi_crs: str | None = None,
+        variables: tuple[str, ...] | None = None,
+        allow_disjoint_fallback: bool = True,
+    ) -> DecodedDataset:
+        """Read only the AOI window when the resolved reader supports spatial subsetting."""
+        if not path.exists():
+            raise AssetDecodeError(f"Asset path does not exist: {path}")
+        header = b""
+        if path.is_file():
+            if path.stat().st_size == 0:
+                raise AssetDecodeError(f"Asset file is empty: {path}")
+            with path.open("rb") as handle:
+                header = handle.read(256)
+        reader = self.resolve(asset, path=path, header=header)
+        if isinstance(reader, WindowedAssetReader):
+            return reader.read_windowed(
+                asset,
+                path,
+                aoi_bounds=aoi_bounds,
+                aoi_crs=aoi_crs,
+                variables=variables,
+                allow_disjoint_fallback=allow_disjoint_fallback,
+            )
         return reader.read(asset, path, variables=variables)

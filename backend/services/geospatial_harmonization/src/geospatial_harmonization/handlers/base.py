@@ -3,7 +3,9 @@
 import hashlib
 import ipaddress
 import json
+import os
 import socket
+import uuid
 from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
@@ -13,7 +15,10 @@ import httpx
 from pydantic import BaseModel, ValidationError
 
 from geospatial_harmonization import __version__
-from geospatial_harmonization.domain.exceptions import IncompatibleDatasetError
+from geospatial_harmonization.domain.exceptions import (
+    IncompatibleDatasetError,
+    ObjectTooLargeError,
+)
 from geospatial_harmonization.domain.models.dataset import (
     AssetReference,
     DataFormat,
@@ -172,6 +177,126 @@ def write_raw_asset(
         size_bytes=len(data),
     )
     return dest, ref
+
+
+async def safe_fetch_to_file(
+    url: str,
+    dest_dir: Path,
+    filename: str | None = None,
+    *,
+    fallback_filename: str = "asset.bin",
+    data_format: DataFormat = "unknown",
+    allowed_hosts: Sequence[str] | None = None,
+    headers: Mapping[str, str] | None = None,
+    params: Mapping[str, str] | None = None,
+    timeout: float = 30.0,
+    max_retries: int = 2,
+    transport: httpx.AsyncBaseTransport | None = None,
+    require_https: bool = False,
+    max_bytes: int | None = None,
+    chunk_bytes: int = 1_048_576,
+) -> tuple[Path, AssetReference, str]:
+    """Stream remote payload directly to disk with SSRF checks, max-bytes guard, and SHA-256."""
+    current = validate_safe_url(url, allowed_hosts=allowed_hosts, require_https=require_https)
+    req_headers = dict(headers or {})
+    dest_dir.mkdir(parents=True, exist_ok=True)
+
+    async with httpx.AsyncClient(
+        timeout=timeout, follow_redirects=False, transport=transport
+    ) as client:
+        cur_params: Mapping[str, str] | None = params
+        for _ in range(6):
+            redirect_target: str | None = None
+            last_exc: Exception | None = None
+            for attempt in range(max_retries + 1):
+                tmp_path = dest_dir / f".ghs-tmp-{uuid.uuid4().hex[:12]}.part"
+                try:
+                    async with client.stream(
+                        "GET", current, headers=req_headers, params=cur_params
+                    ) as resp:
+                        if resp.status_code in _REDIRECT_CODES and "location" in resp.headers:
+                            redirect_target = urljoin(current, resp.headers["location"])
+                            break
+                        if resp.status_code >= 500 and attempt < max_retries:
+                            continue
+                        if resp.status_code >= 400:
+                            raise IncompatibleDatasetError(
+                                f"Upstream HTTP {resp.status_code} for {current}"
+                            )
+
+                        if max_bytes is not None and (cl_hdr := resp.headers.get("content-length")):
+                            try:
+                                content_len = int(cl_hdr)
+                            except ValueError:
+                                content_len = -1
+                            if content_len > max_bytes:
+                                raise ObjectTooLargeError(
+                                    f"Upstream content-length {content_len} exceeds limit "
+                                    f"of {max_bytes} bytes",
+                                    requested_bytes=content_len,
+                                    limit_bytes=max_bytes,
+                                    scope="object",
+                                )
+
+                        hasher = hashlib.sha256()
+                        total = 0
+                        with tmp_path.open("wb") as out_f:
+                            async for chunk in resp.aiter_bytes(chunk_size=chunk_bytes):
+                                total += len(chunk)
+                                if max_bytes is not None and total > max_bytes:
+                                    raise ObjectTooLargeError(
+                                        f"Download stream exceeded max limit of {max_bytes} bytes",
+                                        requested_bytes=total,
+                                        limit_bytes=max_bytes,
+                                        scope="object",
+                                    )
+                                hasher.update(chunk)
+                                out_f.write(chunk)
+
+                        media = (
+                            resp.headers.get("content-type", "application/octet-stream")
+                            .split(";")[0]
+                            .strip()
+                            or "application/octet-stream"
+                        )
+                        raw_name = (
+                            filename or Path(urlparse(current).path).name or fallback_filename
+                        )
+                        safe_name = Path(raw_name).name or fallback_filename
+                        dest = dest_dir / safe_name
+                        os.replace(tmp_path, dest)
+                        ref = AssetReference(
+                            asset_id=safe_name,
+                            uri=dest.resolve().as_uri(),
+                            data_format=data_format,
+                            media_type=media,
+                            checksum_sha256=hasher.hexdigest(),
+                            size_bytes=total,
+                        )
+                        return dest, ref, current
+                except httpx.HTTPError as exc:
+                    tmp_path.unlink(missing_ok=True)
+                    last_exc = exc
+                    if attempt == max_retries:
+                        raise IncompatibleDatasetError(
+                            f"HTTP transport error for {current}: {exc}"
+                        ) from exc
+                except BaseException:
+                    tmp_path.unlink(missing_ok=True)
+                    raise
+                else:
+                    tmp_path.unlink(missing_ok=True)
+
+            if redirect_target is not None:
+                validate_safe_url(
+                    redirect_target, allowed_hosts=allowed_hosts, require_https=require_https
+                )
+                if urlparse(redirect_target).netloc != urlparse(current).netloc:
+                    req_headers.pop("Authorization", None)
+                current, cur_params = redirect_target, None
+                continue
+            raise IncompatibleDatasetError(f"Request failed for {current}: {last_exc}")
+    raise IncompatibleDatasetError(f"Exceeded maximum redirect hops for {url}")
 
 
 def build_provenance(

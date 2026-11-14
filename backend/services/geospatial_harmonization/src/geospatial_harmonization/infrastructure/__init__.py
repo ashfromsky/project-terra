@@ -11,12 +11,18 @@ from geospatial_harmonization.infrastructure.storage import (
     infer_data_format,
     normalize_object_key,
 )
+from geospatial_harmonization.infrastructure.storage_ledger import (
+    SqlAlchemyStorageLedgerRepository,
+    build_ledger_lock_statement,
+)
 
 __all__ = [
     "LocalObjectStore",
     "S3ObjectStore",
     "SqlAlchemyDatasetRepository",
     "SqlAlchemyJobRepository",
+    "SqlAlchemyStorageLedgerRepository",
+    "build_ledger_lock_statement",
     "build_storage_port",
     "infer_data_format",
     "normalize_object_key",

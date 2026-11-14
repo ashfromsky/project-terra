@@ -4,6 +4,7 @@ import asyncio
 import logging
 import signal
 from contextlib import suppress
+from datetime import UTC, datetime
 
 from sqlalchemy.ext.asyncio import AsyncEngine
 
@@ -20,7 +21,13 @@ from geospatial_harmonization.infrastructure.repositories import (
     SqlAlchemyJobRepository,
 )
 from geospatial_harmonization.infrastructure.storage import build_storage_port
+from geospatial_harmonization.infrastructure.storage_ledger import SqlAlchemyStorageLedgerRepository
 from geospatial_harmonization.readers import build_default_reader_registry
+from geospatial_harmonization.storage.compression import DataCompressionManager
+from geospatial_harmonization.storage.dedup import ContentDeduplicationService
+from geospatial_harmonization.storage.lifecycle import StorageLifecycleManager
+from geospatial_harmonization.storage.quota import StorageQuotaManager
+from geospatial_harmonization.storage.zones import StorageZoneManager
 from geospatial_harmonization.worker.runner import WorkerRunner
 
 logger = logging.getLogger("geospatial_harmonization.worker")
@@ -29,7 +36,7 @@ logger = logging.getLogger("geospatial_harmonization.worker")
 async def build_worker_runtime(
     settings: Settings | None = None,
 ) -> tuple[AsyncEngine, WorkerRunner]:
-    """Wire database, storage, handlers, and WorkerRunner for process execution."""
+    """Wire database, storage, quota/lifecycle managers, handlers, and WorkerRunner."""
     cfg = settings or get_settings()
     engine = build_async_engine(cfg.database_url, echo=cfg.database_echo)
     if cfg.environment != "production" and cfg.database_url.startswith("sqlite"):
@@ -39,18 +46,46 @@ async def build_worker_runtime(
     readers = build_default_reader_registry()
     handlers = build_default_handler_registry(settings=cfg, reader_registry=readers)
     storage = build_storage_port(cfg)
+    ledger = SqlAlchemyStorageLedgerRepository(sessions)
+    await ledger.ensure_ledger_initialized(datetime.now(UTC))
+    zones = StorageZoneManager(cfg)
+    quota = StorageQuotaManager(ledger, storage, cfg)
+    dedup = ContentDeduplicationService(storage, ledger, zones, cfg)
+    lifecycle = StorageLifecycleManager(storage, ledger, zones, cfg)
+    compression = DataCompressionManager(cfg)
     service = HarmonizationService(
         handlers=handlers,
         storage=storage,
         datasets=SqlAlchemyDatasetRepository(sessions),
         readers=readers,
         max_grid_pixels=cfg.max_grid_pixels,
+        settings=cfg,
+        ledger=ledger,
+        zones=zones,
+        quota=quota,
+        dedup=dedup,
+        lifecycle=lifecycle,
+        compression=compression,
+    )
+    maint_interval = max(
+        30.0,
+        float(
+            min(
+                cfg.ghs_storage_reservation_ttl_seconds,
+                cfg.ghs_storage_intermediate_retention_seconds,
+            )
+        )
+        / 2.0,
     )
     runner = WorkerRunner(
         service=service,
         jobs=SqlAlchemyJobRepository(sessions),
         lease_seconds=cfg.worker_lease_seconds,
         poll_interval_seconds=cfg.worker_poll_interval_seconds,
+        max_concurrency=cfg.ghs_storage_max_worker_concurrency,
+        maintenance_interval_seconds=maint_interval,
+        quota=quota,
+        lifecycle=lifecycle,
     )
     return engine, runner
 

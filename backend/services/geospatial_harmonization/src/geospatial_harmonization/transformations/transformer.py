@@ -1,6 +1,5 @@
 """Provider-agnostic TargetGridTransformer implementing the GridTransformer port."""
 
-import hashlib
 import tempfile
 from collections.abc import Callable
 from dataclasses import replace
@@ -17,7 +16,10 @@ from geospatial_harmonization.domain.exceptions import IncompatibleDatasetError
 from geospatial_harmonization.domain.models import dataset as dm
 from geospatial_harmonization.domain.models import harmonization as hm
 from geospatial_harmonization.domain.models.grid import GridSpec
+from geospatial_harmonization.domain.models.storage import CompressionPolicy
 from geospatial_harmonization.readers import ReaderRegistry, build_default_reader_registry
+from geospatial_harmonization.storage.compression import policy_from_settings
+from geospatial_harmonization.storage.dedup import compute_file_sha256
 from geospatial_harmonization.transformations._warp import (
     WarpedVariable,
     check_upsampling_warning,
@@ -90,6 +92,9 @@ def _export_asset(
     method: hm.ResamplingMethod,
     grid: GridSpec,
     warped: WarpedVariable,
+    *,
+    compression: CompressionPolicy,
+    units: str | None = None,
 ) -> dm.AssetReference:
     out_path = run_dir / f"{var}.tif"
     tags = {
@@ -98,15 +103,15 @@ def _export_asset(
         "GHS_SOURCE_DATASET_ID": str(src_id),
         "GHS_TARGET_CRS": grid.crs,
     }
-    write_variable_geotiff(out_path, warped, grid, var, tags)
-    digest = hashlib.sha256(out_path.read_bytes()).hexdigest()
+    write_variable_geotiff(out_path, warped, grid, var, tags, compression=compression, units=units)
+    digest, size_bytes = compute_file_sha256(out_path)
     return dm.AssetReference(
         f"{out_id}_{var}",
         out_path.resolve().as_uri(),
         "geotiff",
         "image/tiff",
         digest,
-        out_path.stat().st_size,
+        size_bytes,
     )
 
 
@@ -118,13 +123,15 @@ class TargetGridTransformer:
         output_dir: Path | None = None,
         reader_registry: ReaderRegistry | None = None,
         asset_resolver: Callable[[dm.AssetReference], Path] | None = None,
+        compression_policy: CompressionPolicy | None = None,
     ) -> None:
         self._output_dir = output_dir
         self._readers = reader_registry or build_default_reader_registry()
         self._asset_resolver = asset_resolver or default_local_asset_resolver
+        self._compression = compression_policy or policy_from_settings()
 
     def _decode_variables(
-        self, dataset: dm.SpatialDataset, selected: tuple[str, ...]
+        self, dataset: dm.SpatialDataset, selected: tuple[str, ...], target_grid: GridSpec
     ) -> tuple[dict[str, tuple[dm.DecodedDataset, dm.VariableSpec | None]], list[str]]:
         if not dataset.assets:
             raise IncompatibleDatasetError("SpatialDataset has no assets to transform")
@@ -135,7 +142,14 @@ class TargetGridTransformer:
                 break
             if asset.data_format in ("json", "csv") and len(dataset.assets) > 1:
                 continue
-            decoded = self._readers.read(asset, self._asset_resolver(asset), variables=selected)
+            decoded = self._readers.read_windowed(
+                asset,
+                self._asset_resolver(asset),
+                aoi_bounds=target_grid.bounds,
+                aoi_crs=target_grid.crs,
+                variables=selected,
+                allow_disjoint_fallback=True,
+            )
             warnings.extend(w for w in decoded.warnings if w not in warnings)
             for name in selected:
                 if name not in resolved and name in decoded.arrays:
@@ -153,7 +167,7 @@ class TargetGridTransformer:
         ds = request.dataset
         target_grid = request.target_grid.resolved()
         selected = request.variables or tuple(ds.variables.keys())
-        decoded_map, warnings = self._decode_variables(ds, selected)
+        decoded_map, warnings = self._decode_variables(ds, selected, target_grid)
 
         out_id = uuid4()
         base_dir = self._output_dir or Path(tempfile.mkdtemp(prefix="ghs_transform_"))
@@ -181,12 +195,29 @@ class TargetGridTransformer:
             if arr.dtype.kind not in ("i", "u", "f"):
                 raise IncompatibleDatasetError(f"Variable '{name}' non-numeric dtype '{arr.dtype}'")
             warped, dims = warp_variable(
-                arr, eff, src_grid, target_grid, method, decoded.coordinates
+                arr,
+                eff,
+                src_grid,
+                target_grid,
+                method,
+                decoded.coordinates,
+                precision=self._compression.precision,
             )
             valid_sum += warped.valid_pixels
             pixel_sum += warped.total_pixels
+            unit_label = ds.units.get(name, eff.units)
             out_assets.append(
-                _export_asset(run_dir, out_id, ds.dataset_id, name, method, target_grid, warped)
+                _export_asset(
+                    run_dir,
+                    out_id,
+                    ds.dataset_id,
+                    name,
+                    method,
+                    target_grid,
+                    warped,
+                    compression=self._compression,
+                    units=unit_label,
+                )
             )
             nd = warped.nodata if isinstance(warped.nodata, (int, float)) else None
             out_vars[name] = replace(
