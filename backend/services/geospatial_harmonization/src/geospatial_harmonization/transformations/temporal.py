@@ -58,7 +58,15 @@ def _stack_to_float64(
         buf = arr.astype(np.float64, copy=True)
         if nodata is not None:
             nd = float(nodata)
-            buf[np.isnan(buf) if np.isnan(nd) else (buf == nd)] = np.nan
+            if np.isnan(nd):
+                buf[np.isnan(buf)] = np.nan
+            elif np.issubdtype(arr.dtype, np.floating):
+                with np.errstate(over="ignore"):
+                    nd_typed = arr.dtype.type(nd)
+                if not np.isfinite(nd) or np.isfinite(nd_typed):
+                    buf[arr == nd_typed] = np.nan
+            else:
+                buf[buf == nd] = np.nan
         stacked[idx] = buf
     return stacked
 
