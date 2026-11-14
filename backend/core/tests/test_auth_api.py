@@ -106,3 +106,49 @@ def test_callback_rejects_invalid_state_and_handles_exchange_error() -> None:
         stub.fail_exchange = True
         failed = client.get("/api/v1/auth/github/callback", params={"code": "c", "state": state})
         assert failed.status_code == 502
+
+
+def test_github_login_redirect_roundtrip_and_safe_return_to() -> None:
+    stub = StubGitHubClient(GitHubProfile(github_id=777, github_login="gh-user"))
+    app = create_app(
+        Settings(
+            environment="test",
+            database_url="sqlite+aiosqlite:///:memory:",
+            github_client_id="cid",
+            github_client_secret="csec",
+            frontend_auth_redirect_url="http://localhost:5173",
+        )
+    )
+    app.dependency_overrides[get_github_oauth_client] = lambda: stub
+
+    with TestClient(app) as client:
+        login_resp = client.get(
+            "/api/v1/auth/github/login",
+            params={"redirect": "true", "returnTo": "/explore?proj=globe"},
+            follow_redirects=False,
+        )
+        assert login_resp.status_code == 302
+        state = _extract_state(login_resp.headers["location"])
+
+        cb_resp = client.get(
+            "/api/v1/auth/github/callback",
+            params={"code": "gh-code", "state": state},
+            follow_redirects=False,
+        )
+        assert cb_resp.status_code == 302
+        assert cb_resp.headers["location"] == "http://localhost:5173/explore?proj=globe"
+        assert client.get("/api/v1/auth/me").status_code == 200
+
+        bad_return_login = client.get(
+            "/api/v1/auth/github/login",
+            params={"redirect": "true", "returnTo": "https://evil.example/steal"},
+            follow_redirects=False,
+        )
+        bad_state = _extract_state(bad_return_login.headers["location"])
+        denied_resp = client.get(
+            "/api/v1/auth/github/callback",
+            params={"error": "access_denied", "state": bad_state},
+            follow_redirects=False,
+        )
+        assert denied_resp.status_code == 302
+        assert denied_resp.headers["location"] == "http://localhost:5173?authError=access_denied"

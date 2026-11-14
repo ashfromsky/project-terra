@@ -11,6 +11,7 @@ Serve with Granian:
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from urllib.parse import urlsplit
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -47,6 +48,22 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         logger.info("Shutting down %s", settings.app_name)
 
 
+def _resolve_cors_policy(settings: Settings) -> tuple[list[str], bool]:
+    if settings.cors_origins:
+        return settings.cors_origins, settings.cors_allow_credentials
+    if settings.environment == "development" and settings.frontend_auth_redirect_url:
+        parsed = urlsplit(settings.frontend_auth_redirect_url)
+        if parsed.scheme and parsed.netloc:
+            origins = [f"{parsed.scheme}://{parsed.netloc}"]
+            port_suffix = f":{parsed.port}" if parsed.port else ""
+            if parsed.hostname == "localhost":
+                origins.append(f"{parsed.scheme}://127.0.0.1{port_suffix}")
+            elif parsed.hostname == "127.0.0.1":
+                origins.append(f"{parsed.scheme}://localhost{port_suffix}")
+            return origins, True
+    return [], False
+
+
 def create_app(settings: Settings | None = None) -> FastAPI:
     """Build the FastAPI application from the given (or cached) settings."""
     settings = settings or get_settings()
@@ -58,11 +75,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
     app.state.settings = settings
 
-    if settings.cors_origins:
+    cors_origins, allow_credentials = _resolve_cors_policy(settings)
+    if cors_origins:
         app.add_middleware(
             CORSMiddleware,
-            allow_origins=settings.cors_origins,
-            allow_credentials=settings.cors_allow_credentials,
+            allow_origins=cors_origins,
+            allow_credentials=allow_credentials,
             allow_methods=settings.cors_allow_methods,
             allow_headers=settings.cors_allow_headers,
         )
