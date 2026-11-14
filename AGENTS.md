@@ -166,6 +166,16 @@ Modules must have explicit boundaries. Avoid cyclic dependencies and direct acce
 
 Do not introduce microservices or distributed infrastructure without a demonstrated requirement.
 
+## Project Overview & Global Context (Mandatory)
+
+Before starting any non-trivial task, you MUST read:
+
+- `docs/PROJECT_OVERVIEW.md`
+
+This file captures the live repository-wide state: currently implemented modules and services, runtime boundaries, mock/synthetic placeholders, verification baseline, and known integration gaps.
+
+Whenever a task introduces **global or cross-cutting changes** — including new services or modules, stack or dependency changes, architectural boundary shifts, integration of previously mocked/placeholder workflows, API domain additions/removals, or CI/build tooling changes — you MUST update `docs/PROJECT_OVERVIEW.md` in the same increment (or an accompanying documentation increment) so it always reflects the actual state of the project. Never document planned work as implemented.
+
 ## Architecture Reference
 
 Before making any non-trivial architectural, cross-module, data-processing, or infrastructure changes, you MUST read:
@@ -470,11 +480,12 @@ Do not introduce Docker, Kubernetes, Envoy, Kafka, or additional services withou
 
 Before implementing a non-trivial task:
 
-1. Inspect existing files and architecture.
-2. Identify the responsible module and architectural layer.
-3. Check existing contracts and reusable functionality.
-4. Identify affected dependencies.
-5. Present the intended file changes when architecture is affected.
+1. Read `docs/PROJECT_OVERVIEW.md` to confirm current system state, active services, and integration gaps.
+2. Inspect existing files and architecture (`docs/architecture/SYSTEM_ARCHITECTURE.md` and relevant ADRs).
+3. Identify the responsible module and architectural layer.
+4. Check existing contracts and reusable functionality.
+5. Identify affected dependencies.
+6. Present the intended file changes when architecture is affected.
 
 During implementation:
 
@@ -496,6 +507,7 @@ After implementation:
 ## 10. Documentation
 
 - Keep documentation consistent with the implementation.
+- Update `docs/PROJECT_OVERVIEW.md` whenever global, cross-cutting, architectural, service, or integration-status changes occur.
 - Document public interfaces.
 - Document scientific formulas and assumptions.
 - Record significant architectural decisions in ADRs.
@@ -519,7 +531,7 @@ A task is complete only when:
 - Persistence uses repository contracts and implementations.
 - Relevant tests and checks pass.
 - No unrelated functionality is modified.
-- Documentation is updated where necessary.
+- Documentation (including `docs/PROJECT_OVERVIEW.md` for global changes) is updated where necessary.
 - All approved increments are committed separately and pushed to the working branch without merging into `main`.
 - Remaining limitations are explicitly reported.
 
