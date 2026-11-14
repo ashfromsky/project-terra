@@ -1,0 +1,13 @@
+<svg preserveAspectRatio="none" overflow="visible" style="display: block;" width="268" height="14" viewBox="0 0 268 14" fill="none" xmlns="http://www.w3.org/2000/svg">
+<g id="Chart legend">
+<g id="Vector">
+<path d="M0 7H17Z" fill="black"/>
+<path d="M0 7H17" stroke-width="2" stroke="#159B91"/>
+</g>
+<g id="Vector_2">
+<path d="M95 7H112Z" fill="black"/>
+<path d="M95 7H96.4167M112 7H110.583M99.25 7H102.083M104.917 7H107.75" stroke-width="1.5" stroke="#3193CE"/>
+</g>
+<path id="Vector_3" d="M197 2H185C183.895 2 183 2.89543 183 4V10C183 11.1046 183.895 12 185 12H197C198.105 12 199 11.1046 199 10V4C199 2.89543 198.105 2 197 2Z" fill="#3193CE" fill-opacity="0.13"/>
+</g>
+</svg>
