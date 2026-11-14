@@ -7,10 +7,13 @@ from geospatial_harmonization.readers.registry import (
     UnsupportedFormatError,
     detect_asset_format,
 )
+from geospatial_harmonization.readers.tabular import CSVReader, JSONReader
 
 __all__ = [
     "AssetDecodeError",
+    "CSVReader",
     "GeoTIFFReader",
+    "JSONReader",
     "ReaderRegistry",
     "UnsupportedFormatError",
     "detect_asset_format",
