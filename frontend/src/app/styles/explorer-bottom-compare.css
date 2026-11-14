@@ -1,0 +1,323 @@
+.explorer-bottom-dock {
+  display: grid;
+  grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr);
+  gap: 14px;
+  padding: 8px 14px;
+  background-color: var(--color-bg-surface);
+  border-top: 1px solid var(--color-border-subtle);
+  flex-shrink: 0;
+}
+
+.explorer-bottom-collapsed {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 5px 12px;
+  background-color: var(--color-bg-surface);
+  border-top: 1px solid var(--color-border-subtle);
+  flex-shrink: 0;
+}
+
+.explorer-bottom-collapsed__meta {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+}
+
+.explorer-temporal-pane,
+.explorer-legend-pane {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+}
+
+.explorer-temporal-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.explorer-temporal-controls {
+  display: inline-flex;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.explorer-timeline-slider {
+  flex: 1 1 auto;
+  min-width: 90px;
+  accent-color: var(--color-brand-teal);
+}
+
+.explorer-date-bounds {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.explorer-coverage-strip,
+.explorer-attribution-line {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 10.5px;
+  color: var(--color-text-subtle);
+}
+
+.explorer-legend-pane__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.explorer-legend-pane__title-wrap {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.explorer-legend-pane__title {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+.explorer-legend-pane__unit {
+  font-size: 10.5px;
+  color: var(--color-text-subtle);
+}
+
+.explorer-legend-bar-wrap {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.explorer-legend-gradient {
+  flex: 1 1 auto;
+  height: 9px;
+  border-radius: 999px;
+  border: 1px solid rgba(25, 47, 58, 0.12);
+}
+
+.explorer-legend-ticks {
+  display: inline-flex;
+  gap: 10px;
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+}
+
+.explorer-nodata-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10px;
+  color: var(--color-text-subtle);
+}
+
+.explorer-nodata-swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  border: 1px solid var(--color-border-control);
+}
+
+.explorer-comparison {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.explorer-comparison__bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 6px 12px;
+  background-color: var(--color-bg-canvas);
+  border-bottom: 1px solid var(--color-border-subtle);
+}
+
+.explorer-comparison__bar-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.explorer-comparison__bar-right {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 10.5px;
+  color: var(--color-text-subtle);
+}
+
+.explorer-region-chip {
+  padding: 3px 8px;
+  border-radius: 999px;
+  font-size: 10.5px;
+  font-weight: 600;
+}
+
+.explorer-region-chip.is-region-a,
+.explorer-pane-badge.is-region-a {
+  background-color: var(--color-teal-subtle);
+  color: var(--color-brand-teal);
+  border: 1px solid var(--color-border-teal);
+}
+
+.explorer-region-chip.is-region-b,
+.explorer-pane-badge.is-region-b {
+  background-color: var(--color-blue-subtle);
+  color: #1f6d9e;
+  border: 1px solid #b7d7ec;
+}
+
+.explorer-pane-badge {
+  padding: 2px 7px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.explorer-comparison__grid {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1px;
+  background-color: var(--color-border-subtle);
+}
+
+.explorer-comparison__pane {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background-color: var(--color-bg-observatory);
+}
+
+.explorer-comparison__pane-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 6px 10px;
+  background-color: var(--color-bg-surface);
+  border-bottom: 1px solid var(--color-border-subtle);
+}
+
+.explorer-comparison__viewport {
+  flex: 1 1 auto;
+  min-height: 0;
+  position: relative;
+}
+
+.explorer-comparison__legend {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 10px;
+  background-color: var(--color-bg-surface);
+  border-top: 1px solid var(--color-border-subtle);
+  font-size: 10.5px;
+  color: var(--color-text-secondary);
+}
+
+.explorer-mobile-backdrop {
+  display: none;
+}
+
+@media (max-width: 1359px) {
+  .explorer-btn-label-wide {
+    display: none;
+  }
+}
+
+@media (max-width: 1199px) {
+  .explorer-btn-label-desktop {
+    display: none;
+  }
+
+  .explorer-sidebar--left,
+  .explorer-sidebar--right {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    z-index: 35;
+    box-shadow: var(--shadow-glass-panel);
+  }
+
+  .explorer-sidebar--left {
+    left: 0;
+  }
+
+  .explorer-sidebar--right {
+    right: 0;
+  }
+
+  .explorer-mobile-backdrop {
+    display: block;
+    position: absolute;
+    inset: 0;
+    background-color: transparent;
+    z-index: 30;
+  }
+
+  .explorer-bottom-dock {
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+}
+
+@media (max-width: 767px) {
+  .explorer-mobile-backdrop {
+    background-color: rgba(25, 47, 58, 0.14);
+  }
+
+  .explorer-workspace {
+    height: auto;
+    min-height: calc(100vh - 60px);
+  }
+
+  .explorer-toolbar {
+    height: auto;
+    min-height: 48px;
+    padding: 8px 10px;
+    flex-wrap: wrap;
+  }
+
+  .explorer-sidebar--left,
+  .explorer-sidebar--right {
+    width: min(88vw, 330px);
+  }
+
+  .explorer-single-stage {
+    min-height: 54vh;
+  }
+
+  .explorer-comparison__grid {
+    grid-template-columns: 1fr;
+  }
+
+  .explorer-comparison__viewport {
+    min-height: 36vh;
+  }
+
+  .explorer-temporal-row {
+    flex-wrap: wrap;
+  }
+
+  .explorer-date-bounds {
+    width: 100%;
+    justify-content: space-between;
+  }
+}
