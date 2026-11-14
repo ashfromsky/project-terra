@@ -40,8 +40,18 @@ class WarpedVariable:
 
 
 def to_rasterio_affine(grid: GridSpec) -> Affine:
-    t = grid.resolved().transform
+    res = grid.resolved()
+    t = res.transform
     assert t is not None
+    if res.pixel_convention == "center":
+        return Affine(
+            t.a,
+            t.b,
+            t.c - 0.5 * t.a - 0.5 * t.b,
+            t.d,
+            t.e,
+            t.f - 0.5 * t.d - 0.5 * t.e,
+        )
     return Affine(t.a, t.b, t.c, t.d, t.e, t.f)
 
 
