@@ -30,7 +30,7 @@ When an implementation increment reaches approximately 300–350 changed source-
 4. Run relevant tests, linting, type checking, and build verification.
 5. Ensure the increment leaves the repository in a working state.
 6. Stage ONLY files belonging to the current increment.
-7. Create a Git commit using Conventional Commits.
+7. Create a Git commit using Conventional Commits on the current working branch.
 
 Do not exceed 400 changed source-code lines in a single commit.
 
@@ -62,15 +62,16 @@ Examples:
 
 Commit messages must be concise, descriptive, and written in English.
 
-### 4. No Automatic Push
+### 4. Prohibited Git Operations (No Push, Merge, or History Rewrite)
 
-- NEVER run `git push`.
-- NEVER push branches or commits to remote repositories.
-- NEVER force-push.
-- Create local commits only.
-- Do not amend or rewrite existing commits unless explicitly instructed.
+- NEVER run `git merge` (including fast-forward merges, `--no-ff`, or `--squash`).
+- NEVER run `git rebase` or `git cherry-pick`.
+- NEVER merge feature or working branches into `main` (or any other branch), even after receiving review approval or completing the entire task.
+- NEVER run `git push`, push branches or commits to remote repositories, or force-push.
+- NEVER amend, squash, or rewrite existing commits unless explicitly instructed.
+- Create local commits on the current working branch only.
 
-All commits must remain local until the project owner approves their review and explicitly authorizes further Git operations.
+Review approval from the project owner ONLY authorizes starting the next implementation increment on the same working branch—it NEVER authorizes merging branches or consolidating commits. All merges are performed exclusively by the project owner.
 
 ### 5. Mandatory Review Notification
 
@@ -93,7 +94,8 @@ After sending the review notification:
 
 - Do not start the next implementation increment.
 - Wait for explicit approval from the project owner.
-- Resume only after approval.
+- Resume only after approval, continuing strictly as a new incremental commit on the current working branch.
+- Do NOT merge branches, switch to `main`, or squash commits after approval or at the end of the task.
 - Apply requested corrections before proceeding.
 - Never interpret silence as approval.
 
@@ -108,7 +110,7 @@ If the current change cannot be safely split into a working increment within the
 
 If tests fail, do not commit the change as successfully completed. Report the failure and request review of the issue or corrective action.
 
-**Core principle: Every implementation increment must be small, functional, committed, locally preserved, and explicitly approved before the next increment begins.**
+**Core principle: Every implementation increment must be small, functional, committed as an individual local commit on the working branch, and explicitly approved before the next increment begins. Never merge commits or branches.**
 
 ## 1. Project Context
 
@@ -161,14 +163,11 @@ Do not introduce microservices or distributed infrastructure without a demonstra
 
 ## Architecture Reference
 
-Before making any non-trivial architectural, cross-module,
-data-processing, or infrastructure changes, you MUST read:
+Before making any non-trivial architectural, cross-module, data-processing, or infrastructure changes, you MUST read:
 
 - `docs/architecture/SYSTEM_ARCHITECTURE.md`
 
-This document defines the intended system architecture,
-component responsibilities, boundaries, integrations,
-and data flows.
+This document defines the intended system architecture, component responsibilities, boundaries, integrations, and data flows.
 
 `AGENTS.md` defines engineering rules.
 `SYSTEM_ARCHITECTURE.md` defines system design.
@@ -497,13 +496,13 @@ After implementation:
 - Record significant architectural decisions in ADRs.
 - Update documentation when changing existing behavior.
 
-## 11. Commits and branching
-- Use descriptive commit messages (conventional style).
-- Create feature branches for new development.
-- Merge changes into the main branch after review.
-- Use pull requests for code review and discussion.
-- Keep the main branch stable and deployable.
+## 11. Commits and Branching
 
+- Use descriptive commit messages (Conventional Commits style).
+- Create or use a feature branch for new development; never commit directly to `main`.
+- NEVER merge changes into `main` or any other branch (`git merge` is strictly forbidden for AI agents).
+- Leave all approved increments as separate, unmerged local commits on the working branch.
+- Keep the `main` branch completely untouched; branch integration and pull requests are handled solely by the project owner.
 
 ## 12. Definition of Done
 
@@ -516,15 +515,16 @@ A task is complete only when:
 - Relevant tests and checks pass.
 - No unrelated functionality is modified.
 - Documentation is updated where necessary.
+- All increments are committed separately on the working branch without merging into `main`.
 - Remaining limitations are explicitly reported.
 
 ## Final Commit Organization & History Integrity
 
-At the end of every multi-step implementation task, the agent MUST perform a final Git history audit.
+At the end of every multi-step implementation task, the agent MUST perform a final Git history audit on the current working branch without merging branches or rewriting history.
 
 ### 1. Logical Commit Organization
 
-If implementation changes remain uncommitted, organize them into small, logically independent commits.
+If implementation changes remain uncommitted, organize them into small, logically independent commits on the current working branch.
 
 Group changes by:
 - Architecture and project configuration.
@@ -550,8 +550,8 @@ Do not group unrelated functionality into the same commit.
 
 ### 3. Existing Commits
 
-- Preserve previously approved commits.
-- Never rewrite, amend, squash, or reorder existing commits without explicit authorization.
+- Preserve previously approved commits as individual commits.
+- Never merge, squash, rewrite, amend, or reorder existing commits without explicit authorization.
 - Do not duplicate functionality already committed.
 - Do not force-push or push any changes.
 
@@ -559,7 +559,7 @@ Do not group unrelated functionality into the same commit.
 
 Before declaring the task complete:
 
-1. Check `git status`.
+1. Check `git status` and confirm the repository remains on the working branch (not merged into `main`).
 2. Inspect all commits created during the task.
 3. Verify that each commit follows Conventional Commits.
 4. Verify that each commit respects the 400-line source-code change limit, excluding explicitly exempted generated files.
@@ -569,6 +569,7 @@ Before declaring the task complete:
 ### 5. Final Report
 
 Provide:
+- Current working branch name.
 - Ordered list of commits.
 - Commit hashes and messages.
 - Actual commit timestamps.
@@ -577,6 +578,6 @@ Provide:
 - Test and verification results.
 - Any remaining uncommitted changes.
 
-**Final principle: Git history must accurately represent the actual development process, with small, logical, chronological, and independently reviewable commits.**
+**Final principle: Git history must accurately represent the actual development process, with small, logical, chronological, unmerged, and independently reviewable commits.**
 
 **Final principle: Build TERRA as a scientifically trustworthy, modular, reproducible, and maintainable engineering system.**
