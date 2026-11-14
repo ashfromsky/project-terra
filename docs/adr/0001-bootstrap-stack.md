@@ -61,7 +61,9 @@ balance the mandated stack against current ecosystem compatibility.
    examples — is gitignored and stays out of history. Variable documentation
    lives in code instead of a committed example file: `terra/config.py` lists
    the backend variables with defaults, `frontend/src/vite-env.d.ts` types the
-   `VITE_*` variables.
+   `VITE_*` variables. For developer convenience an untracked `.env.example`
+   may exist locally on each machine (git refuses to stage it); when setting
+   up a fresh clone, recreate it by hand rather than committing it.
 
 ## Consequences
 
