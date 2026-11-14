@@ -62,6 +62,8 @@ class DatabaseManager:
 
     async def create_schema(self) -> None:
         """Create declared tables if they do not exist (non-production convenience)."""
+        import terra.infrastructure.database.models  # noqa: F401
+
         async with self._engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
 
