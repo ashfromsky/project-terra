@@ -1,6 +1,7 @@
 """Format-agnostic reader subsystem exports."""
 
 from geospatial_harmonization.readers.geotiff import GeoTIFFReader
+from geospatial_harmonization.readers.netcdf import NetCDFReader
 from geospatial_harmonization.readers.registry import (
     AssetDecodeError,
     ReaderRegistry,
@@ -14,6 +15,7 @@ __all__ = [
     "CSVReader",
     "GeoTIFFReader",
     "JSONReader",
+    "NetCDFReader",
     "ReaderRegistry",
     "UnsupportedFormatError",
     "detect_asset_format",

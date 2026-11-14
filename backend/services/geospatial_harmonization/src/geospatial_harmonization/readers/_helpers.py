@@ -1,8 +1,9 @@
 """Shared format-neutral helpers for building DecodedDataset contracts."""
 
 import math
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Mapping, Sequence
 
+import numpy as np
 from pyproj import CRS
 
 from geospatial_harmonization.domain.models.dataset import VariableSemantics
@@ -86,13 +87,13 @@ def infer_variable_semantics(
     name: str, attrs: Mapping[str, object], is_numeric: bool = True
 ) -> VariableSemantics:
     """Classify variable physical/QA semantics from metadata attributes and naming."""
-    lower = name.lower()
-    if lower in _COORD_NAMES:
+    leaf = name.rsplit("/", 1)[-1].lower()
+    if leaf in _COORD_NAMES:
         return "coordinate"
     if not is_numeric:
         return "categorical"
     if any(k in attrs for k in ("flag_values", "flag_masks", "flag_meanings")) or any(
-        token in lower for token in _QA_MARKERS
+        token in leaf for token in _QA_MARKERS
     ):
         return "qa_flag"
     if "sum" in str(attrs.get("cell_methods", "")).lower():
@@ -113,8 +114,90 @@ def select_variables(
     return tuple(v for v in avail if v in requested)
 
 
+def to_python_scalar(value: object) -> object:
+    """Convert numpy/bytes scalar metadata cleanly to native JSON-safe Python types."""
+    if isinstance(value, np.ndarray):
+        return [to_python_scalar(v) for v in value.tolist()]
+    if isinstance(value, np.generic):
+        return to_python_scalar(value.item())
+    if isinstance(value, (bytes, np.bytes_)):
+        return bytes(value).decode("utf-8", errors="replace")
+    return value
+
+
+def to_attr_dict(items: Iterable[tuple[str, object]]) -> dict[str, object]:
+    """Normalize an attribute stream into native Python types."""
+    return {str(k): to_python_scalar(v) for k, v in items}
+
+
 def as_float(value: object) -> float | None:
     """Convert numeric scalars cleanly to float without accepting booleans."""
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
+    native = to_python_scalar(value)
+    if isinstance(native, bool) or not isinstance(native, (int, float)):
         return None
-    return float(value)
+    f = float(native)
+    return f if math.isfinite(f) else None
+
+
+def extract_cf_var_meta(
+    name: str, attrs: Mapping[str, object], is_numeric: bool = True
+) -> tuple[VariableSemantics, float | None, float | None, float | int | None, list[str]]:
+    """Extract variable semantics, CF scaling, and nodata without scaling QA/categorical fields."""
+    semantics = infer_variable_semantics(name, attrs, is_numeric=is_numeric)
+    raw_nodata = attrs.get("_FillValue", attrs.get("missing_value"))
+    native_nd = to_python_scalar(raw_nodata)
+    nodata = (
+        native_nd
+        if isinstance(native_nd, (int, float)) and not isinstance(native_nd, bool)
+        else None
+    )
+    scale = as_float(attrs.get("scale_factor"))
+    offset = as_float(attrs.get("add_offset"))
+    scale = None if scale == 1.0 else scale
+    offset = None if offset == 0.0 else offset
+    warnings: list[str] = []
+    if semantics in ("qa_flag", "categorical") and (scale is not None or offset is not None):
+        warnings.append(f"Dropped scaling on '{name}' ({semantics})")
+        return semantics, None, None, nodata, warnings
+    return semantics, scale, offset, nodata, warnings
+
+
+def _uniform_step(coords: Sequence[float]) -> float | None:
+    if len(coords) < 2:
+        return None
+    diffs = [coords[i + 1] - coords[i] for i in range(len(coords) - 1)]
+    step = (coords[-1] - coords[0]) / (len(coords) - 1)
+    if math.isclose(step, 0.0, abs_tol=1e-12):
+        return None
+    if all(math.isclose(d, step, rel_tol=1e-3, abs_tol=1e-9) for d in diffs):
+        return abs(step)
+    return None
+
+
+def grid_from_axes(
+    crs_str: str | None, xs: Sequence[float] | None, ys: Sequence[float] | None
+) -> tuple[GridSpec | None, tuple[str, ...]]:
+    """Infer a center-registered GridSpec from uniform 1D coordinate vectors when CRS exists."""
+    if crs_str is None:
+        return None, ("No explicit CRS metadata found; spatial grid not invented.",)
+    if xs is None or ys is None:
+        return None, ("Missing 1D spatial coordinate vectors; grid skipped.",)
+    dx, dy = _uniform_step(xs), _uniform_step(ys)
+    if dx is None or dy is None:
+        return None, ("Non-uniform or insufficient 1D coordinates; regular grid skipped.",)
+    bounds = SpatialBounds(
+        min(xs) - 0.5 * dx, min(ys) - 0.5 * dy, max(xs) + 0.5 * dx, max(ys) + 0.5 * dy
+    )
+    return (
+        GridSpec(
+            crs=crs_str,
+            resolution_x=dx,
+            resolution_y=dy,
+            resolution_unit=resolution_unit_from_crs(crs_str),
+            bounds=bounds,
+            width=len(xs),
+            height=len(ys),
+            pixel_convention="center",
+        ),
+        (),
+    )
