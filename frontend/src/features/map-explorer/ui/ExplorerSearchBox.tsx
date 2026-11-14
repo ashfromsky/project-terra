@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import type { Feature, Geometry } from 'geojson'
-import { ENVIRONMENTAL_LAYER_CATALOG } from '../../../entities/layer/model/layer-catalog'
+import { useLayerCatalogQuery } from '../../../shared/api/layers'
 import { loadNaturalEarthBundle } from '../../../entities/map/api/natural-earth-loader'
 import { countryPropertiesToSummary } from '../../../entities/map/model/map-renderer'
 import { Search } from '../../../shared/ui/explorer-icons'
@@ -89,6 +89,8 @@ export function ExplorerSearchBox({
   const [searchFocused, setSearchFocused] = useState(false)
   const [countries, setCountries] = useState<CountryFeature[]>([])
   const searchBoxRef = useRef<HTMLDivElement | null>(null)
+  const catalogQuery = useLayerCatalogQuery()
+  const layers = useMemo(() => catalogQuery.data ?? [], [catalogQuery.data])
 
   useEffect(() => {
     let active = true
@@ -174,7 +176,7 @@ export function ExplorerSearchBox({
     }
 
     let layerMatches = 0
-    for (const layer of ENVIRONMENTAL_LAYER_CATALOG) {
+    for (const layer of layers) {
       if (layerMatches >= 4) break
       if (
         layer.name.toLowerCase().includes(q) ||
@@ -193,7 +195,7 @@ export function ExplorerSearchBox({
     }
 
     return results
-  }, [countries, query])
+  }, [countries, layers, query])
 
   const selectResult = (item: SearchResultItem) => {
     if (item.kind === 'coordinate' && item.center) {

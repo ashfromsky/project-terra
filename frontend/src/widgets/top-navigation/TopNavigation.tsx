@@ -1,17 +1,49 @@
-import { useState, useRef, useEffect } from 'react'
-import { Link, NavLink, useLocation } from 'react-router'
+import { useEffect, useRef, useState } from 'react'
+import { Link, NavLink, useLocation, useSearchParams } from 'react-router'
+import {
+  buildGitHubLoginUrl,
+  useCurrentUserQuery,
+  useLogoutMutation,
+} from '../../shared/api/auth'
+import { useSystemInfoQuery } from '../../shared/api/system'
 import { brandAssets, figmaAssets } from '../../shared/config/assets'
 import { APP_ROUTES, WORKSPACE_NAV_ITEMS } from '../../shared/config/routes'
 import { useUiStore } from '../../shared/store/ui-store'
 
+function formatAuthError(code: string): string {
+  if (code === 'access_denied') {
+    return 'GitHub sign-in was cancelled. You can continue exploring layers or retry sign-in.'
+  }
+  if (code === 'oauth_exchange_failed') {
+    return 'GitHub OAuth sign-in failed while exchanging authorization code. Please retry.'
+  }
+  return `Authentication error: ${code}`
+}
+
 export function TopNavigation() {
   const location = useLocation()
+  const [searchParams, setSearchParams] = useSearchParams()
   const mobileNavOpen = useUiStore((state) => state.mobileNavOpen)
   const setMobileNavOpen = useUiStore((state) => state.setMobileNavOpen)
   const [accountMenuPath, setAccountMenuPath] = useState<string | null>(null)
   const accountMenuRef = useRef<HTMLDivElement>(null)
   const isHomeRoute = location.pathname === APP_ROUTES.home
   const accountMenuOpen = accountMenuPath === location.pathname
+
+  const userQuery = useCurrentUserQuery()
+  const systemInfoQuery = useSystemInfoQuery()
+  const logoutMutation = useLogoutMutation()
+
+  const user = userQuery.data ?? null
+  const oauthConfigured = systemInfoQuery.data?.githubOauthConfigured ?? false
+  const apiOffline = systemInfoQuery.isError || (userQuery.isError && !user)
+  const authError = searchParams.get('authError')
+
+  const cleanParams = new URLSearchParams(searchParams)
+  cleanParams.delete('authError')
+  const cleanSearch = cleanParams.toString()
+  const returnToPath = `${location.pathname}${cleanSearch ? `?${cleanSearch}` : ''}`
+  const githubLoginUrl = buildGitHubLoginUrl(returnToPath)
 
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
@@ -36,6 +68,29 @@ export function TopNavigation() {
     document.addEventListener('mousedown', handleOutsideClick)
     return () => document.removeEventListener('mousedown', handleOutsideClick)
   }, [])
+
+  const dismissAuthError = () => {
+    const next = new URLSearchParams(searchParams)
+    next.delete('authError')
+    setSearchParams(next, { replace: true })
+  }
+
+  const handleSignOut = () => {
+    logoutMutation.mutate(undefined, {
+      onSuccess: () => {
+        setAccountMenuPath(null)
+        setMobileNavOpen(false)
+      },
+    })
+  }
+
+  const pillLabel = user
+    ? (user.displayName ?? `@${user.githubLogin}`)
+    : userQuery.isPending
+      ? 'Session…'
+      : oauthConfigured
+        ? 'Sign in'
+        : 'Researcher'
 
   return (
     <header className="workspace-nav" data-node-id="14:3">
@@ -111,15 +166,54 @@ export function TopNavigation() {
                 )
               }
             >
-              <span>Researcher</span>
+              {user?.avatarUrl && (
+                <img
+                  src={user.avatarUrl}
+                  alt=""
+                  className="workspace-nav__account-avatar"
+                />
+              )}
+              <span>{pillLabel}</span>
               <img src={figmaAssets.openAccount} alt="" className="workspace-nav__account-chevron" />
             </button>
+
             {accountMenuOpen && (
               <div className="workspace-nav__dropdown" role="menu" aria-label="Workspace menu">
                 <div className="workspace-nav__dropdown-header">
-                  <strong>Researcher</strong>
-                  <span>Open science prototype workspace</span>
+                  {user ? (
+                    <>
+                      <strong>{user.displayName ?? user.githubLogin}</strong>
+                      <span>@{user.githubLogin}{user.email ? ` · ${user.email}` : ''}</span>
+                    </>
+                  ) : apiOffline ? (
+                    <>
+                      <strong>Core API offline</strong>
+                      <span>Start TERRA Core API to sign in and sync saved regions</span>
+                    </>
+                  ) : oauthConfigured ? (
+                    <>
+                      <strong>Anonymous session</strong>
+                      <span>Sign in with GitHub to persist regions to your workspace</span>
+                    </>
+                  ) : (
+                    <>
+                      <strong>Researcher</strong>
+                      <span>GitHub OAuth not configured on backend API</span>
+                    </>
+                  )}
                 </div>
+
+                {!user && oauthConfigured && !apiOffline && (
+                  <a
+                    href={githubLoginUrl}
+                    className="workspace-nav__dropdown-cta"
+                    role="menuitem"
+                    onClick={() => setAccountMenuPath(null)}
+                  >
+                    Sign in with GitHub
+                  </a>
+                )}
+
                 <Link
                   to={APP_ROUTES.home}
                   className="workspace-nav__dropdown-item"
@@ -144,6 +238,27 @@ export function TopNavigation() {
                 >
                   Comparative Analysis
                 </Link>
+
+                {user && (
+                  <>
+                    <div className="workspace-nav__dropdown-sep" role="separator" />
+                    <button
+                      type="button"
+                      className="workspace-nav__dropdown-item workspace-nav__dropdown-btn"
+                      role="menuitem"
+                      disabled={logoutMutation.isPending}
+                      onClick={handleSignOut}
+                    >
+                      {logoutMutation.isPending ? 'Signing out…' : 'Sign out'}
+                    </button>
+                  </>
+                )}
+
+                {logoutMutation.isError && (
+                  <p className="workspace-nav__dropdown-error" role="alert">
+                    Failed to sign out. Please retry.
+                  </p>
+                )}
               </div>
             )}
           </div>
@@ -184,10 +299,50 @@ export function TopNavigation() {
               {item.label}
             </NavLink>
           ))}
+          <div className="mobile-nav-drawer__auth">
+            {user ? (
+              <div className="mobile-nav-drawer__user-row">
+                <span>Signed in as @{user.githubLogin}</span>
+                <button
+                  type="button"
+                  className="mobile-nav-drawer__auth-btn"
+                  disabled={logoutMutation.isPending}
+                  onClick={handleSignOut}
+                >
+                  {logoutMutation.isPending ? 'Signing out…' : 'Sign out'}
+                </button>
+              </div>
+            ) : oauthConfigured && !apiOffline ? (
+              <a
+                href={githubLoginUrl}
+                className="mobile-nav-drawer__auth-link"
+                onClick={() => setMobileNavOpen(false)}
+              >
+                Sign in with GitHub
+              </a>
+            ) : (
+              <span className="mobile-nav-drawer__auth-note">
+                {apiOffline ? 'Core API offline' : 'GitHub OAuth not configured'}
+              </span>
+            )}
+          </div>
         </nav>
       )}
 
       <div className="workspace-nav__divider" data-node-id="14:68" />
+
+      {authError && (
+        <div className="workspace-nav__auth-banner" role="alert">
+          <span>{formatAuthError(authError)}</span>
+          <button
+            type="button"
+            className="workspace-nav__auth-dismiss"
+            onClick={dismissAuthError}
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
     </header>
   )
 }

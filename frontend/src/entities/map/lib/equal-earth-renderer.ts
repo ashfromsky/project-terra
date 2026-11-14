@@ -1,7 +1,7 @@
 import { geoPath } from 'd3-geo'
 import { BASEMAP_PROVIDER_REGISTRY } from '../../../shared/config/geospatial'
-import { clampLatitude, normalizeLongitude } from '../../../shared/lib/geojson-utils'
-import type { AoiFeature, BasemapId, MapViewportState } from '../../../shared/types/geospatial'
+import { clampLatitude, normalizeAoiGeometry, normalizeLongitude } from '../../../shared/lib/geojson-utils'
+import type { BasemapId, MapViewportState } from '../../../shared/types/geospatial'
 import { loadNaturalEarthBundle, type NaturalEarthBundle } from '../api/natural-earth-loader'
 import {
   countryPropertiesToSummary,
@@ -306,7 +306,10 @@ export class EqualEarthRenderer implements MapRenderer {
     const feature = iso && this.bundle ? this.bundle.countries.features.find((f) => f.properties.isoA3 === iso) : undefined
     const summary = feature ? countryPropertiesToSummary(feature.properties) : null
     if (summary && feature) {
-      this.handlers.onSelectCountry?.(summary, feature.geometry as AoiFeature['geometry'])
+      this.handlers.onSelectCountry?.(
+        summary,
+        normalizeAoiGeometry(feature.geometry) ?? undefined,
+      )
     }
     if (mode === 'inspect') {
       this.handlers.onInspectPoint?.(geo[0], geo[1])

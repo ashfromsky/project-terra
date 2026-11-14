@@ -1,0 +1,2694 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "TERRA Core API",
+    "version": "0.1.0"
+  },
+  "paths": {
+    "/health": {
+      "get": {
+        "tags": [
+          "health"
+        ],
+        "summary": "Health",
+        "description": "Report basic service health.",
+        "operationId": "health_health_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/health/live": {
+      "get": {
+        "tags": [
+          "health"
+        ],
+        "summary": "Health Live",
+        "description": "Report process liveness without external dependency checks.",
+        "operationId": "health_live_health_live_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/health/ready": {
+      "get": {
+        "tags": [
+          "health"
+        ],
+        "summary": "Health Ready",
+        "description": "Verify runtime dependency readiness (database connectivity).",
+        "operationId": "health_ready_health_ready_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReadinessResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/health": {
+      "get": {
+        "tags": [
+          "health"
+        ],
+        "summary": "Health",
+        "description": "Report service liveness.",
+        "operationId": "health_api_v1_health_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/system/info": {
+      "get": {
+        "tags": [
+          "system"
+        ],
+        "summary": "System Info",
+        "description": "Return API version, runtime environment, and auth capability metadata.",
+        "operationId": "system_info_api_v1_system_info_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SystemInfoResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/auth/github/login": {
+      "get": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Github Login",
+        "description": "Initiate GitHub OAuth flow via JSON URL or HTTP redirect.",
+        "operationId": "github_login_api_v1_auth_github_login_get",
+        "parameters": [
+          {
+            "name": "redirect",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false,
+              "title": "Redirect"
+            }
+          },
+          {
+            "name": "returnTo",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Returnto"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GitHubLoginResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/auth/github/callback": {
+      "get": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Github Callback",
+        "description": "Handle GitHub OAuth callback, upsert user by GitHub ID, and issue session.",
+        "operationId": "github_callback_api_v1_auth_github_callback_get",
+        "parameters": [
+          {
+            "name": "state",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "title": "State"
+            }
+          },
+          {
+            "name": "code",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "minLength": 1
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Code"
+            }
+          },
+          {
+            "name": "error",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Error"
+            }
+          },
+          {
+            "name": "redirect",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false,
+              "title": "Redirect"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthCallbackResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/auth/logout": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Logout",
+        "description": "Clear the HttpOnly authentication session cookie.",
+        "operationId": "logout_api_v1_auth_logout_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LogoutResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/auth/me": {
+      "get": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Me",
+        "description": "Return the profile of the currently authenticated user.",
+        "operationId": "me_api_v1_auth_me_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/regions": {
+      "get": {
+        "tags": [
+          "regions"
+        ],
+        "summary": "List Regions",
+        "description": "List all geographic territories owned by the authenticated user.",
+        "operationId": "list_regions_api_v1_regions_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/RegionResponse"
+                  },
+                  "type": "array",
+                  "title": "Response List Regions Api V1 Regions Get"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "regions"
+        ],
+        "summary": "Create Region",
+        "description": "Create a new geographic territory for the authenticated user.",
+        "operationId": "create_region_api_v1_regions_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RegionCreateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RegionResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/regions/{region_id}": {
+      "get": {
+        "tags": [
+          "regions"
+        ],
+        "summary": "Get Region",
+        "description": "Retrieve a single geographic territory.",
+        "operationId": "get_region_api_v1_regions__region_id__get",
+        "parameters": [
+          {
+            "name": "region_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Region Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RegionResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "regions"
+        ],
+        "summary": "Update Region Metadata",
+        "description": "Update region metadata fields without modifying geometry.",
+        "operationId": "update_region_metadata_api_v1_regions__region_id__patch",
+        "parameters": [
+          {
+            "name": "region_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Region Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RegionUpdateMetadataRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RegionResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "regions"
+        ],
+        "summary": "Delete Region",
+        "description": "Delete a geographic territory owned by the authenticated user.",
+        "operationId": "delete_region_api_v1_regions__region_id__delete",
+        "parameters": [
+          {
+            "name": "region_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Region Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/regions/{region_id}/geometry": {
+      "get": {
+        "tags": [
+          "regions"
+        ],
+        "summary": "Get Region Geometry",
+        "description": "Return the region boundary as an EPSG:4326 GeoJSON Feature.",
+        "operationId": "get_region_geometry_api_v1_regions__region_id__geometry_get",
+        "parameters": [
+          {
+            "name": "region_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Region Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RegionGeometryResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "regions"
+        ],
+        "summary": "Update Region Geometry",
+        "description": "Replace region geometry and recompute WGS 84 spatial metrics.",
+        "operationId": "update_region_geometry_api_v1_regions__region_id__geometry_put",
+        "parameters": [
+          {
+            "name": "region_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Region Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RegionUpdateGeometryRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RegionResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/regions/{region_id}/statistics": {
+      "get": {
+        "tags": [
+          "regions"
+        ],
+        "summary": "Get Region Statistics",
+        "description": "Return computed geometric metrics and environmental statistics availability.",
+        "operationId": "get_region_statistics_api_v1_regions__region_id__statistics_get",
+        "parameters": [
+          {
+            "name": "region_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Region Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RegionStatisticsResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/layers": {
+      "get": {
+        "tags": [
+          "layers"
+        ],
+        "summary": "List Layers",
+        "description": "List available environmental map layers with optional group and status filters.",
+        "operationId": "list_layers_api_v1_layers_get",
+        "parameters": [
+          {
+            "name": "groupId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "vegetation",
+                    "temperature",
+                    "water",
+                    "derived"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Groupid"
+            }
+          },
+          {
+            "name": "availabilityStatus",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "connected",
+                    "preview",
+                    "planned",
+                    "unavailable"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Availabilitystatus"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/LayerDefinitionResponse"
+                  },
+                  "title": "Response List Layers Api V1 Layers Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/layers/{layer_id}": {
+      "get": {
+        "tags": [
+          "layers"
+        ],
+        "summary": "Get Layer",
+        "description": "Return the complete catalog definition for a layer.",
+        "operationId": "get_layer_api_v1_layers__layer_id__get",
+        "parameters": [
+          {
+            "name": "layer_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Layer Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LayerDefinitionResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/layers/{layer_id}/metadata": {
+      "get": {
+        "tags": [
+          "layers"
+        ],
+        "summary": "Get Layer Metadata",
+        "description": "Return spatial/temporal resolution, units, QA policy, and source provenance.",
+        "operationId": "get_layer_metadata_api_v1_layers__layer_id__metadata_get",
+        "parameters": [
+          {
+            "name": "layer_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Layer Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LayerMetadataResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/layers/{layer_id}/legend": {
+      "get": {
+        "tags": [
+          "layers"
+        ],
+        "summary": "Get Layer Legend",
+        "description": "Return color stops, labels, CSS gradient, and value range for a layer legend.",
+        "operationId": "get_layer_legend_api_v1_layers__layer_id__legend_get",
+        "parameters": [
+          {
+            "name": "layer_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Layer Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LayerLegendResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/layers/{layer_id}/coverage": {
+      "get": {
+        "tags": [
+          "layers"
+        ],
+        "summary": "Get Layer Coverage",
+        "description": "Return temporal archive bounds and nominal data availability for a layer.",
+        "operationId": "get_layer_coverage_api_v1_layers__layer_id__coverage_get",
+        "parameters": [
+          {
+            "name": "layer_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Layer Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TemporalCoverageResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "AoiPropertiesResponse": {
+        "properties": {
+          "sourceCrs": {
+            "type": "string",
+            "const": "EPSG:4326",
+            "title": "Sourcecrs"
+          },
+          "approxAreaKm2": {
+            "type": "number",
+            "title": "Approxareakm2"
+          },
+          "bbox": {
+            "prefixItems": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              }
+            ],
+            "type": "array",
+            "maxItems": 4,
+            "minItems": 4,
+            "title": "Bbox"
+          },
+          "centroid": {
+            "prefixItems": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              }
+            ],
+            "type": "array",
+            "maxItems": 2,
+            "minItems": 2,
+            "title": "Centroid"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "primary",
+              "regionA",
+              "regionB"
+            ],
+            "title": "Role"
+          },
+          "shapeType": {
+            "type": "string",
+            "enum": [
+              "feature",
+              "polygon",
+              "rectangle"
+            ],
+            "title": "Shapetype"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Createdat"
+          },
+          "isoA3": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Isoa3"
+          }
+        },
+        "type": "object",
+        "required": [
+          "sourceCrs",
+          "approxAreaKm2",
+          "bbox",
+          "centroid",
+          "id",
+          "name",
+          "role",
+          "shapeType",
+          "createdAt"
+        ],
+        "title": "AoiPropertiesResponse",
+        "description": "GeoJSON Feature properties matching frontend AoiFeature contract."
+      },
+      "AuthCallbackResponse": {
+        "properties": {
+          "accessToken": {
+            "type": "string",
+            "title": "Accesstoken"
+          },
+          "tokenType": {
+            "type": "string",
+            "const": "bearer",
+            "title": "Tokentype",
+            "default": "bearer"
+          },
+          "user": {
+            "$ref": "#/components/schemas/UserResponse"
+          }
+        },
+        "type": "object",
+        "required": [
+          "accessToken",
+          "user"
+        ],
+        "title": "AuthCallbackResponse",
+        "description": "Session payload returned after successful GitHub OAuth callback."
+      },
+      "AvailableTimeRangeResponse": {
+        "properties": {
+          "start": {
+            "type": "string",
+            "title": "Start"
+          },
+          "end": {
+            "type": "string",
+            "title": "End"
+          },
+          "cadence": {
+            "type": "string",
+            "enum": [
+              "30-minute",
+              "daily",
+              "8-day",
+              "16-day",
+              "monthly",
+              "multi-year"
+            ],
+            "title": "Cadence"
+          }
+        },
+        "type": "object",
+        "required": [
+          "start",
+          "end",
+          "cadence"
+        ],
+        "title": "AvailableTimeRangeResponse",
+        "description": "Nominal temporal window and cadence."
+      },
+      "ColorRampStopResponse": {
+        "properties": {
+          "value": {
+            "type": "number",
+            "title": "Value"
+          },
+          "color": {
+            "type": "string",
+            "title": "Color"
+          },
+          "rgb": {
+            "prefixItems": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "integer"
+              },
+              {
+                "type": "integer"
+              }
+            ],
+            "type": "array",
+            "maxItems": 3,
+            "minItems": 3,
+            "title": "Rgb"
+          },
+          "label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Label"
+          }
+        },
+        "type": "object",
+        "required": [
+          "value",
+          "color",
+          "rgb"
+        ],
+        "title": "ColorRampStopResponse",
+        "description": "Single stop in a layer color ramp."
+      },
+      "DependencyHealth": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "ok",
+              "unavailable"
+            ],
+            "title": "Status"
+          }
+        },
+        "type": "object",
+        "required": [
+          "status"
+        ],
+        "title": "DependencyHealth",
+        "description": "Status of a single runtime dependency."
+      },
+      "GeoJsonMultiPolygonInputSchema": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "MultiPolygon",
+            "title": "Type"
+          },
+          "coordinates": {
+            "items": {
+              "items": {
+                "items": {
+                  "anyOf": [
+                    {
+                      "prefixItems": [
+                        {
+                          "type": "number"
+                        },
+                        {
+                          "type": "number"
+                        }
+                      ],
+                      "type": "array",
+                      "maxItems": 2,
+                      "minItems": 2
+                    },
+                    {
+                      "prefixItems": [
+                        {
+                          "type": "number"
+                        },
+                        {
+                          "type": "number"
+                        },
+                        {
+                          "type": "number"
+                        }
+                      ],
+                      "type": "array",
+                      "maxItems": 3,
+                      "minItems": 3
+                    }
+                  ]
+                },
+                "type": "array"
+              },
+              "type": "array"
+            },
+            "type": "array",
+            "title": "Coordinates"
+          }
+        },
+        "type": "object",
+        "required": [
+          "type",
+          "coordinates"
+        ],
+        "title": "GeoJsonMultiPolygonInputSchema",
+        "description": "Accepted EPSG:4326 GeoJSON MultiPolygon input geometry."
+      },
+      "GeoJsonMultiPolygonSchema": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "MultiPolygon",
+            "title": "Type"
+          },
+          "coordinates": {
+            "items": {
+              "items": {
+                "items": {
+                  "prefixItems": [
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "number"
+                    }
+                  ],
+                  "type": "array",
+                  "maxItems": 2,
+                  "minItems": 2
+                },
+                "type": "array"
+              },
+              "type": "array"
+            },
+            "type": "array",
+            "title": "Coordinates"
+          }
+        },
+        "type": "object",
+        "required": [
+          "type",
+          "coordinates"
+        ],
+        "title": "GeoJsonMultiPolygonSchema",
+        "description": "Normalized 2D EPSG:4326 GeoJSON MultiPolygon geometry."
+      },
+      "GeoJsonPolygonInputSchema": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "Polygon",
+            "title": "Type"
+          },
+          "coordinates": {
+            "items": {
+              "items": {
+                "anyOf": [
+                  {
+                    "prefixItems": [
+                      {
+                        "type": "number"
+                      },
+                      {
+                        "type": "number"
+                      }
+                    ],
+                    "type": "array",
+                    "maxItems": 2,
+                    "minItems": 2
+                  },
+                  {
+                    "prefixItems": [
+                      {
+                        "type": "number"
+                      },
+                      {
+                        "type": "number"
+                      },
+                      {
+                        "type": "number"
+                      }
+                    ],
+                    "type": "array",
+                    "maxItems": 3,
+                    "minItems": 3
+                  }
+                ]
+              },
+              "type": "array"
+            },
+            "type": "array",
+            "title": "Coordinates"
+          }
+        },
+        "type": "object",
+        "required": [
+          "type",
+          "coordinates"
+        ],
+        "title": "GeoJsonPolygonInputSchema",
+        "description": "Accepted EPSG:4326 GeoJSON Polygon input geometry."
+      },
+      "GeoJsonPolygonSchema": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "Polygon",
+            "title": "Type"
+          },
+          "coordinates": {
+            "items": {
+              "items": {
+                "prefixItems": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "number"
+                  }
+                ],
+                "type": "array",
+                "maxItems": 2,
+                "minItems": 2
+              },
+              "type": "array"
+            },
+            "type": "array",
+            "title": "Coordinates"
+          }
+        },
+        "type": "object",
+        "required": [
+          "type",
+          "coordinates"
+        ],
+        "title": "GeoJsonPolygonSchema",
+        "description": "Normalized 2D EPSG:4326 GeoJSON Polygon geometry."
+      },
+      "GitHubLoginResponse": {
+        "properties": {
+          "authorizeUrl": {
+            "type": "string",
+            "title": "Authorizeurl"
+          },
+          "provider": {
+            "type": "string",
+            "const": "github",
+            "title": "Provider",
+            "default": "github"
+          }
+        },
+        "type": "object",
+        "required": [
+          "authorizeUrl"
+        ],
+        "title": "GitHubLoginResponse",
+        "description": "GitHub authorization URL response for SPA-initiated OAuth."
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "type": "array",
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "title": "HTTPValidationError"
+      },
+      "HealthResponse": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "service": {
+            "type": "string",
+            "title": "Service"
+          },
+          "version": {
+            "type": "string",
+            "title": "Version"
+          }
+        },
+        "type": "object",
+        "required": [
+          "status",
+          "service",
+          "version"
+        ],
+        "title": "HealthResponse",
+        "description": "Health probe payload."
+      },
+      "LayerDefinitionResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "shortName": {
+            "type": "string",
+            "title": "Shortname"
+          },
+          "groupId": {
+            "type": "string",
+            "enum": [
+              "vegetation",
+              "temperature",
+              "water",
+              "derived"
+            ],
+            "title": "Groupid"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description"
+          },
+          "dataSource": {
+            "type": "string",
+            "title": "Datasource"
+          },
+          "productId": {
+            "type": "string",
+            "title": "Productid"
+          },
+          "productVersion": {
+            "type": "string",
+            "title": "Productversion"
+          },
+          "variable": {
+            "type": "string",
+            "title": "Variable"
+          },
+          "unit": {
+            "type": "string",
+            "title": "Unit"
+          },
+          "nativeSpatialResolution": {
+            "type": "string",
+            "title": "Nativespatialresolution"
+          },
+          "temporalResolution": {
+            "type": "string",
+            "title": "Temporalresolution"
+          },
+          "availableTimeRange": {
+            "$ref": "#/components/schemas/AvailableTimeRangeResponse"
+          },
+          "attribution": {
+            "type": "string",
+            "title": "Attribution"
+          },
+          "availabilityStatus": {
+            "type": "string",
+            "enum": [
+              "connected",
+              "preview",
+              "planned",
+              "unavailable"
+            ],
+            "title": "Availabilitystatus"
+          },
+          "renderingType": {
+            "type": "string",
+            "enum": [
+              "raster",
+              "choropleth",
+              "vector",
+              "point"
+            ],
+            "title": "Renderingtype"
+          },
+          "supportedTileFormats": {
+            "items": {
+              "type": "string",
+              "enum": [
+                "geojson",
+                "mvt",
+                "tilejson",
+                "cog",
+                "zarr",
+                "wmts"
+              ]
+            },
+            "type": "array",
+            "title": "Supportedtileformats"
+          },
+          "qaPolicy": {
+            "type": "string",
+            "title": "Qapolicy"
+          },
+          "limitations": {
+            "type": "string",
+            "title": "Limitations"
+          },
+          "isExperimental": {
+            "type": "boolean",
+            "title": "Isexperimental"
+          },
+          "isSyntheticPreview": {
+            "type": "boolean",
+            "title": "Issyntheticpreview"
+          },
+          "previewPropertyKey": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "demoLstTrend",
+                  "demoNdvi",
+                  "demoEvi",
+                  "demoPrecipAnomaly"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Previewpropertykey"
+          },
+          "colorRamp": {
+            "items": {
+              "$ref": "#/components/schemas/ColorRampStopResponse"
+            },
+            "type": "array",
+            "title": "Colorramp"
+          },
+          "valueRange": {
+            "$ref": "#/components/schemas/ValueRangeResponse"
+          },
+          "legend": {
+            "$ref": "#/components/schemas/LegendConfigurationResponse"
+          },
+          "tileSource": {
+            "$ref": "#/components/schemas/MapTileSourceResponse"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "shortName",
+          "groupId",
+          "description",
+          "dataSource",
+          "productId",
+          "productVersion",
+          "variable",
+          "unit",
+          "nativeSpatialResolution",
+          "temporalResolution",
+          "availableTimeRange",
+          "attribution",
+          "availabilityStatus",
+          "renderingType",
+          "supportedTileFormats",
+          "qaPolicy",
+          "limitations",
+          "isExperimental",
+          "isSyntheticPreview",
+          "colorRamp",
+          "valueRange",
+          "legend",
+          "tileSource"
+        ],
+        "title": "LayerDefinitionResponse",
+        "description": "Complete layer catalog entry aligned with frontend MapLayerDefinition."
+      },
+      "LayerLegendResponse": {
+        "properties": {
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "unit": {
+            "type": "string",
+            "title": "Unit"
+          },
+          "minLabel": {
+            "type": "string",
+            "title": "Minlabel"
+          },
+          "midLabel": {
+            "type": "string",
+            "title": "Midlabel"
+          },
+          "maxLabel": {
+            "type": "string",
+            "title": "Maxlabel"
+          },
+          "gradientCss": {
+            "type": "string",
+            "title": "Gradientcss"
+          },
+          "nodataColor": {
+            "type": "string",
+            "title": "Nodatacolor"
+          },
+          "nodataLabel": {
+            "type": "string",
+            "title": "Nodatalabel"
+          },
+          "stops": {
+            "items": {
+              "$ref": "#/components/schemas/ColorRampStopResponse"
+            },
+            "type": "array",
+            "title": "Stops"
+          },
+          "layerId": {
+            "type": "string",
+            "title": "Layerid"
+          },
+          "valueRange": {
+            "$ref": "#/components/schemas/ValueRangeResponse"
+          }
+        },
+        "type": "object",
+        "required": [
+          "title",
+          "unit",
+          "minLabel",
+          "midLabel",
+          "maxLabel",
+          "gradientCss",
+          "nodataColor",
+          "nodataLabel",
+          "stops",
+          "layerId",
+          "valueRange"
+        ],
+        "title": "LayerLegendResponse",
+        "description": "Layer legend payload paired with layer identifier and display value range."
+      },
+      "LayerMetadataResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "shortName": {
+            "type": "string",
+            "title": "Shortname"
+          },
+          "groupId": {
+            "type": "string",
+            "enum": [
+              "vegetation",
+              "temperature",
+              "water",
+              "derived"
+            ],
+            "title": "Groupid"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description"
+          },
+          "dataSource": {
+            "type": "string",
+            "title": "Datasource"
+          },
+          "productId": {
+            "type": "string",
+            "title": "Productid"
+          },
+          "productVersion": {
+            "type": "string",
+            "title": "Productversion"
+          },
+          "variable": {
+            "type": "string",
+            "title": "Variable"
+          },
+          "unit": {
+            "type": "string",
+            "title": "Unit"
+          },
+          "nativeSpatialResolution": {
+            "type": "string",
+            "title": "Nativespatialresolution"
+          },
+          "temporalResolution": {
+            "type": "string",
+            "title": "Temporalresolution"
+          },
+          "availableTimeRange": {
+            "$ref": "#/components/schemas/AvailableTimeRangeResponse"
+          },
+          "attribution": {
+            "type": "string",
+            "title": "Attribution"
+          },
+          "availabilityStatus": {
+            "type": "string",
+            "enum": [
+              "connected",
+              "preview",
+              "planned",
+              "unavailable"
+            ],
+            "title": "Availabilitystatus"
+          },
+          "renderingType": {
+            "type": "string",
+            "enum": [
+              "raster",
+              "choropleth",
+              "vector",
+              "point"
+            ],
+            "title": "Renderingtype"
+          },
+          "supportedTileFormats": {
+            "items": {
+              "type": "string",
+              "enum": [
+                "geojson",
+                "mvt",
+                "tilejson",
+                "cog",
+                "zarr",
+                "wmts"
+              ]
+            },
+            "type": "array",
+            "title": "Supportedtileformats"
+          },
+          "qaPolicy": {
+            "type": "string",
+            "title": "Qapolicy"
+          },
+          "limitations": {
+            "type": "string",
+            "title": "Limitations"
+          },
+          "isExperimental": {
+            "type": "boolean",
+            "title": "Isexperimental"
+          },
+          "isSyntheticPreview": {
+            "type": "boolean",
+            "title": "Issyntheticpreview"
+          },
+          "previewPropertyKey": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "demoLstTrend",
+                  "demoNdvi",
+                  "demoEvi",
+                  "demoPrecipAnomaly"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Previewpropertykey"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "shortName",
+          "groupId",
+          "description",
+          "dataSource",
+          "productId",
+          "productVersion",
+          "variable",
+          "unit",
+          "nativeSpatialResolution",
+          "temporalResolution",
+          "availableTimeRange",
+          "attribution",
+          "availabilityStatus",
+          "renderingType",
+          "supportedTileFormats",
+          "qaPolicy",
+          "limitations",
+          "isExperimental",
+          "isSyntheticPreview"
+        ],
+        "title": "LayerMetadataResponse",
+        "description": "Layer scientific provenance, units, QA policy, and limitations."
+      },
+      "LegendConfigurationResponse": {
+        "properties": {
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "unit": {
+            "type": "string",
+            "title": "Unit"
+          },
+          "minLabel": {
+            "type": "string",
+            "title": "Minlabel"
+          },
+          "midLabel": {
+            "type": "string",
+            "title": "Midlabel"
+          },
+          "maxLabel": {
+            "type": "string",
+            "title": "Maxlabel"
+          },
+          "gradientCss": {
+            "type": "string",
+            "title": "Gradientcss"
+          },
+          "nodataColor": {
+            "type": "string",
+            "title": "Nodatacolor"
+          },
+          "nodataLabel": {
+            "type": "string",
+            "title": "Nodatalabel"
+          },
+          "stops": {
+            "items": {
+              "$ref": "#/components/schemas/ColorRampStopResponse"
+            },
+            "type": "array",
+            "title": "Stops"
+          }
+        },
+        "type": "object",
+        "required": [
+          "title",
+          "unit",
+          "minLabel",
+          "midLabel",
+          "maxLabel",
+          "gradientCss",
+          "nodataColor",
+          "nodataLabel",
+          "stops"
+        ],
+        "title": "LegendConfigurationResponse",
+        "description": "Legend display properties and ramp stops."
+      },
+      "LogoutResponse": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "const": "logged_out",
+            "title": "Status",
+            "default": "logged_out"
+          }
+        },
+        "type": "object",
+        "title": "LogoutResponse",
+        "description": "Confirmation payload after clearing the session cookie."
+      },
+      "MapTileSourceResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "geojson",
+              "mvt",
+              "tilejson",
+              "cog",
+              "zarr",
+              "wmts"
+            ],
+            "title": "Format"
+          },
+          "urlTemplate": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Urltemplate"
+          },
+          "crs": {
+            "type": "string",
+            "enum": [
+              "EPSG:4326",
+              "EPSG:3857"
+            ],
+            "title": "Crs"
+          },
+          "requiresBackendAuthorization": {
+            "type": "boolean",
+            "title": "Requiresbackendauthorization"
+          },
+          "isConnected": {
+            "type": "boolean",
+            "title": "Isconnected"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "format",
+          "urlTemplate",
+          "crs",
+          "requiresBackendAuthorization",
+          "isConnected"
+        ],
+        "title": "MapTileSourceResponse",
+        "description": "Tile or raster source descriptor."
+      },
+      "ReadinessResponse": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "ready",
+              "not_ready"
+            ],
+            "title": "Status"
+          },
+          "service": {
+            "type": "string",
+            "title": "Service"
+          },
+          "version": {
+            "type": "string",
+            "title": "Version"
+          },
+          "checks": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/DependencyHealth"
+            },
+            "type": "object",
+            "title": "Checks"
+          }
+        },
+        "type": "object",
+        "required": [
+          "status",
+          "service",
+          "version",
+          "checks"
+        ],
+        "title": "ReadinessResponse",
+        "description": "Readiness probe payload reporting dependency availability."
+      },
+      "RegionCreateRequest": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Name"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 2000
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "primary",
+              "regionA",
+              "regionB"
+            ],
+            "title": "Role",
+            "default": "primary"
+          },
+          "shapeType": {
+            "type": "string",
+            "enum": [
+              "feature",
+              "polygon",
+              "rectangle"
+            ],
+            "title": "Shapetype",
+            "default": "polygon"
+          },
+          "isoA3": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 3,
+                "minLength": 3
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Isoa3"
+          },
+          "geometry": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/GeoJsonPolygonInputSchema"
+              },
+              {
+                "$ref": "#/components/schemas/GeoJsonMultiPolygonInputSchema"
+              }
+            ],
+            "title": "Geometry",
+            "discriminator": {
+              "propertyName": "type",
+              "mapping": {
+                "MultiPolygon": "#/components/schemas/GeoJsonMultiPolygonInputSchema",
+                "Polygon": "#/components/schemas/GeoJsonPolygonInputSchema"
+              }
+            }
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "geometry"
+        ],
+        "title": "RegionCreateRequest",
+        "description": "Request payload for creating a geographic Area of Interest."
+      },
+      "RegionGeometryResponse": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "Feature",
+            "title": "Type",
+            "default": "Feature"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "properties": {
+            "$ref": "#/components/schemas/AoiPropertiesResponse"
+          },
+          "geometry": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/GeoJsonPolygonSchema"
+              },
+              {
+                "$ref": "#/components/schemas/GeoJsonMultiPolygonSchema"
+              }
+            ],
+            "title": "Geometry",
+            "discriminator": {
+              "propertyName": "type",
+              "mapping": {
+                "MultiPolygon": "#/components/schemas/GeoJsonMultiPolygonSchema",
+                "Polygon": "#/components/schemas/GeoJsonPolygonSchema"
+              }
+            }
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "properties",
+          "geometry"
+        ],
+        "title": "RegionGeometryResponse",
+        "description": "GeoJSON Feature representation matching frontend AoiFeature."
+      },
+      "RegionResponse": {
+        "properties": {
+          "sourceCrs": {
+            "type": "string",
+            "const": "EPSG:4326",
+            "title": "Sourcecrs"
+          },
+          "approxAreaKm2": {
+            "type": "number",
+            "title": "Approxareakm2"
+          },
+          "bbox": {
+            "prefixItems": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              }
+            ],
+            "type": "array",
+            "maxItems": 4,
+            "minItems": 4,
+            "title": "Bbox"
+          },
+          "centroid": {
+            "prefixItems": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              }
+            ],
+            "type": "array",
+            "maxItems": 2,
+            "minItems": 2,
+            "title": "Centroid"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "primary",
+              "regionA",
+              "regionB"
+            ],
+            "title": "Role"
+          },
+          "shapeType": {
+            "type": "string",
+            "enum": [
+              "feature",
+              "polygon",
+              "rectangle"
+            ],
+            "title": "Shapetype"
+          },
+          "isoA3": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Isoa3"
+          },
+          "vertexCount": {
+            "type": "integer",
+            "title": "Vertexcount"
+          },
+          "polygonCount": {
+            "type": "integer",
+            "title": "Polygoncount"
+          },
+          "geometry": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/GeoJsonPolygonSchema"
+              },
+              {
+                "$ref": "#/components/schemas/GeoJsonMultiPolygonSchema"
+              }
+            ],
+            "title": "Geometry",
+            "discriminator": {
+              "propertyName": "type",
+              "mapping": {
+                "MultiPolygon": "#/components/schemas/GeoJsonMultiPolygonSchema",
+                "Polygon": "#/components/schemas/GeoJsonPolygonSchema"
+              }
+            }
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Createdat"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updatedat"
+          }
+        },
+        "type": "object",
+        "required": [
+          "sourceCrs",
+          "approxAreaKm2",
+          "bbox",
+          "centroid",
+          "id",
+          "name",
+          "description",
+          "role",
+          "shapeType",
+          "isoA3",
+          "vertexCount",
+          "polygonCount",
+          "geometry",
+          "createdAt",
+          "updatedAt"
+        ],
+        "title": "RegionResponse",
+        "description": "Full region representation with derived WGS 84 metrics and GeoJSON."
+      },
+      "RegionStatisticsResponse": {
+        "properties": {
+          "sourceCrs": {
+            "type": "string",
+            "const": "EPSG:4326",
+            "title": "Sourcecrs"
+          },
+          "approxAreaKm2": {
+            "type": "number",
+            "title": "Approxareakm2"
+          },
+          "bbox": {
+            "prefixItems": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              }
+            ],
+            "type": "array",
+            "maxItems": 4,
+            "minItems": 4,
+            "title": "Bbox"
+          },
+          "centroid": {
+            "prefixItems": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              }
+            ],
+            "type": "array",
+            "maxItems": 2,
+            "minItems": 2,
+            "title": "Centroid"
+          },
+          "regionId": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Regionid"
+          },
+          "regionName": {
+            "type": "string",
+            "title": "Regionname"
+          },
+          "vertexCount": {
+            "type": "integer",
+            "title": "Vertexcount"
+          },
+          "polygonCount": {
+            "type": "integer",
+            "title": "Polygoncount"
+          },
+          "observationStatus": {
+            "type": "string",
+            "enum": [
+              "connected",
+              "preview",
+              "planned",
+              "unavailable"
+            ],
+            "title": "Observationstatus"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message"
+          },
+          "availableMetrics": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Availablemetrics"
+          }
+        },
+        "type": "object",
+        "required": [
+          "sourceCrs",
+          "approxAreaKm2",
+          "bbox",
+          "centroid",
+          "regionId",
+          "regionName",
+          "vertexCount",
+          "polygonCount",
+          "observationStatus",
+          "message",
+          "availableMetrics"
+        ],
+        "title": "RegionStatisticsResponse",
+        "description": "Available geometric and environmental statistics for a region."
+      },
+      "RegionUpdateGeometryRequest": {
+        "properties": {
+          "geometry": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/GeoJsonPolygonInputSchema"
+              },
+              {
+                "$ref": "#/components/schemas/GeoJsonMultiPolygonInputSchema"
+              }
+            ],
+            "title": "Geometry",
+            "discriminator": {
+              "propertyName": "type",
+              "mapping": {
+                "MultiPolygon": "#/components/schemas/GeoJsonMultiPolygonInputSchema",
+                "Polygon": "#/components/schemas/GeoJsonPolygonInputSchema"
+              }
+            }
+          },
+          "shapeType": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "feature",
+                  "polygon",
+                  "rectangle"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Shapetype"
+          }
+        },
+        "type": "object",
+        "required": [
+          "geometry"
+        ],
+        "title": "RegionUpdateGeometryRequest",
+        "description": "Replacement GeoJSON geometry payload for an existing region."
+      },
+      "RegionUpdateMetadataRequest": {
+        "properties": {
+          "name": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 200,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 2000
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "role": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "primary",
+                  "regionA",
+                  "regionB"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Role"
+          },
+          "shapeType": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "feature",
+                  "polygon",
+                  "rectangle"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Shapetype"
+          },
+          "isoA3": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 3,
+                "minLength": 3
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Isoa3"
+          }
+        },
+        "type": "object",
+        "title": "RegionUpdateMetadataRequest",
+        "description": "Partial metadata update payload for an existing region."
+      },
+      "SystemInfoResponse": {
+        "properties": {
+          "service": {
+            "type": "string",
+            "title": "Service"
+          },
+          "version": {
+            "type": "string",
+            "title": "Version"
+          },
+          "environment": {
+            "type": "string",
+            "title": "Environment"
+          },
+          "apiV1Prefix": {
+            "type": "string",
+            "title": "Apiv1Prefix"
+          },
+          "authProvider": {
+            "type": "string",
+            "title": "Authprovider"
+          },
+          "defaultCrs": {
+            "type": "string",
+            "title": "Defaultcrs"
+          },
+          "githubOauthConfigured": {
+            "type": "boolean",
+            "title": "Githuboauthconfigured"
+          }
+        },
+        "type": "object",
+        "required": [
+          "service",
+          "version",
+          "environment",
+          "apiV1Prefix",
+          "authProvider",
+          "defaultCrs",
+          "githubOauthConfigured"
+        ],
+        "title": "SystemInfoResponse",
+        "description": "Version, environment, and capability metadata for the API."
+      },
+      "TemporalCoverageResponse": {
+        "properties": {
+          "layerId": {
+            "type": "string",
+            "title": "Layerid"
+          },
+          "startDate": {
+            "type": "string",
+            "title": "Startdate"
+          },
+          "endDate": {
+            "type": "string",
+            "title": "Enddate"
+          },
+          "cadence": {
+            "type": "string",
+            "enum": [
+              "30-minute",
+              "daily",
+              "8-day",
+              "16-day",
+              "monthly",
+              "multi-year"
+            ],
+            "title": "Cadence"
+          },
+          "totalExpectedSteps": {
+            "type": "integer",
+            "title": "Totalexpectedsteps"
+          },
+          "availableSteps": {
+            "type": "integer",
+            "title": "Availablesteps"
+          },
+          "coveragePercent": {
+            "type": "number",
+            "title": "Coveragepercent"
+          },
+          "notes": {
+            "type": "string",
+            "title": "Notes"
+          },
+          "isSimulatedCoverage": {
+            "type": "boolean",
+            "title": "Issimulatedcoverage"
+          }
+        },
+        "type": "object",
+        "required": [
+          "layerId",
+          "startDate",
+          "endDate",
+          "cadence",
+          "totalExpectedSteps",
+          "availableSteps",
+          "coveragePercent",
+          "notes",
+          "isSimulatedCoverage"
+        ],
+        "title": "TemporalCoverageResponse",
+        "description": "Temporal archive coverage summary for a layer."
+      },
+      "UserResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "githubId": {
+            "type": "integer",
+            "title": "Githubid"
+          },
+          "githubLogin": {
+            "type": "string",
+            "title": "Githublogin"
+          },
+          "displayName": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Displayname"
+          },
+          "avatarUrl": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Avatarurl"
+          },
+          "email": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Email"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Createdat"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updatedat"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "githubId",
+          "githubLogin",
+          "createdAt",
+          "updatedAt"
+        ],
+        "title": "UserResponse",
+        "description": "Public profile representation of an authenticated TERRA user."
+      },
+      "ValidationError": {
+        "properties": {
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "type": "array",
+            "title": "Location"
+          },
+          "msg": {
+            "type": "string",
+            "title": "Message"
+          },
+          "type": {
+            "type": "string",
+            "title": "Error Type"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "ctx": {
+            "type": "object",
+            "title": "Context"
+          }
+        },
+        "type": "object",
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError"
+      },
+      "ValueRangeResponse": {
+        "properties": {
+          "min": {
+            "type": "number",
+            "title": "Min"
+          },
+          "max": {
+            "type": "number",
+            "title": "Max"
+          },
+          "defaultMin": {
+            "type": "number",
+            "title": "Defaultmin"
+          },
+          "defaultMax": {
+            "type": "number",
+            "title": "Defaultmax"
+          },
+          "step": {
+            "type": "number",
+            "title": "Step"
+          }
+        },
+        "type": "object",
+        "required": [
+          "min",
+          "max",
+          "defaultMin",
+          "defaultMax",
+          "step"
+        ],
+        "title": "ValueRangeResponse",
+        "description": "Valid range and default stretch bounds."
+      }
+    }
+  }
+}

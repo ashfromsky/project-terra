@@ -7,10 +7,20 @@ from uuid import UUID
 import jwt
 
 from terra.config import Settings
-from terra.modules.auth.domain.entities import AccessTokenClaims, User
+from terra.modules.auth.domain.entities import AccessTokenClaims, OAuthStateClaims, User
 from terra.modules.auth.domain.exceptions import AuthenticationError
 
 _OAUTH_STATE_TTL = timedelta(minutes=10)
+
+
+def sanitize_return_to(value: object) -> str | None:
+    """Allow only relative single-slash SPA paths to prevent open redirects."""
+    if not isinstance(value, str):
+        return None
+    cleaned = value.strip()
+    if not cleaned.startswith("/") or cleaned.startswith("//") or "\\" in cleaned:
+        return None
+    return cleaned
 
 
 class JwtTokenService:
@@ -21,22 +31,32 @@ class JwtTokenService:
         self._algorithm = settings.jwt_algorithm
         self._access_ttl = timedelta(minutes=settings.jwt_access_token_expire_minutes)
 
-    def issue_oauth_state(self) -> str:
+    def issue_oauth_state(
+        self, *, redirect_to_frontend: bool = False, return_to: str | None = None
+    ) -> str:
         """Create a short-lived signed state token for CSRF protection."""
         now = datetime.now(UTC)
-        payload = {
+        payload: dict[str, object] = {
             "type": "oauth_state",
             "jti": token_urlsafe(16),
+            "redirect_to_frontend": redirect_to_frontend,
             "iat": now,
             "exp": now + _OAUTH_STATE_TTL,
         }
+        safe_return = sanitize_return_to(return_to)
+        if safe_return is not None:
+            payload["return_to"] = safe_return
         return jwt.encode(payload, self._secret, algorithm=self._algorithm)
 
-    def verify_oauth_state(self, state: str) -> None:
+    def verify_oauth_state(self, state: str) -> OAuthStateClaims:
         """Verify OAuth state signature, expiry, and token type."""
         payload = self._decode(state, expected_type="oauth_state")
         if not payload.get("jti"):
             raise AuthenticationError("Invalid OAuth state")
+        return OAuthStateClaims(
+            redirect_to_frontend=bool(payload.get("redirect_to_frontend", False)),
+            return_to=sanitize_return_to(payload.get("return_to")),
+        )
 
     def issue_access_token(self, user: User) -> str:
         """Create a signed JWT access token bound to internal and GitHub IDs."""

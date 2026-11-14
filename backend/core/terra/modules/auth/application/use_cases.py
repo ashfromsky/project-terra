@@ -14,6 +14,8 @@ class AuthenticatedSession:
 
     user: User
     access_token: str
+    redirect_to_frontend: bool = False
+    return_to: str | None = None
 
 
 class StartGitHubLoginUseCase:
@@ -23,9 +25,14 @@ class StartGitHubLoginUseCase:
         self._github = github_client
         self._tokens = token_service
 
-    def execute(self) -> tuple[str, str]:
+    def execute(
+        self, *, redirect_to_frontend: bool = False, return_to: str | None = None
+    ) -> tuple[str, str]:
         """Return `(authorize_url, state)`."""
-        state = self._tokens.issue_oauth_state()
+        state = self._tokens.issue_oauth_state(
+            redirect_to_frontend=redirect_to_frontend,
+            return_to=return_to,
+        )
         return self._github.build_authorize_url(state), state
 
 
@@ -46,11 +53,16 @@ class AuthenticateGitHubCallbackUseCase:
         """Complete OAuth callback and return the persisted user and session token."""
         if not code.strip():
             raise AuthenticationError("Missing GitHub authorization code")
-        self._tokens.verify_oauth_state(state)
+        state_claims = self._tokens.verify_oauth_state(state)
         profile = await self._github.exchange_code_for_profile(code)
         user = await self._users.upsert_by_github_id(profile)
         token = self._tokens.issue_access_token(user)
-        return AuthenticatedSession(user=user, access_token=token)
+        return AuthenticatedSession(
+            user=user,
+            access_token=token,
+            redirect_to_frontend=state_claims.redirect_to_frontend,
+            return_to=state_claims.return_to,
+        )
 
 
 class GetCurrentUserUseCase:

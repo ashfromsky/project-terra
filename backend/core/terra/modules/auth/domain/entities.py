@@ -36,3 +36,11 @@ class AccessTokenClaims:
 
     user_id: UUID
     github_id: int
+
+
+@dataclass(frozen=True, slots=True)
+class OAuthStateClaims:
+    """Validated claims extracted from a signed OAuth CSRF state token."""
+
+    redirect_to_frontend: bool = False
+    return_to: str | None = None

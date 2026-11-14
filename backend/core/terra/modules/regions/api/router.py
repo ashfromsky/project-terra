@@ -59,7 +59,7 @@ async def create_region(
             role=body.role,
             shape_type=body.shape_type,
             iso_a3=body.iso_a3,
-            geometry=body.geometry,
+            geometry=body.geometry.model_dump(),
         )
     except RegionDomainError as exc:
         _raise_http(exc)
@@ -137,7 +137,10 @@ async def update_region_geometry(
     """Replace region geometry and recompute WGS 84 spatial metrics."""
     try:
         region = await service.update_geometry(
-            region_id, current_user.id, geometry=body.geometry, shape_type=body.shape_type
+            region_id,
+            current_user.id,
+            geometry=body.geometry.model_dump(),
+            shape_type=body.shape_type,
         )
     except RegionDomainError as exc:
         _raise_http(exc)

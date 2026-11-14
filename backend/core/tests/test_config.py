@@ -70,3 +70,14 @@ def test_production_environment_accepts_strong_jwt_secret() -> None:
         jwt_secret_key="a" * 32,
     )
     assert settings.environment == "production"
+
+
+def test_development_defaults_to_file_sqlite_when_unset() -> None:
+    dev_settings = Settings(environment="development")
+    assert dev_settings.database_url == "sqlite+aiosqlite:///./terra.dev.db"
+
+    explicit_settings = Settings(
+        environment="development",
+        database_url="sqlite+aiosqlite:///:memory:",
+    )
+    assert explicit_settings.database_url == "sqlite+aiosqlite:///:memory:"

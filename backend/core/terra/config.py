@@ -22,7 +22,7 @@ class Settings(BaseSettings):
     """Application settings loaded from environment variables."""
 
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=("../../.env", ".env"),
         env_file_encoding="utf-8",
         extra="ignore",
     )
@@ -71,7 +71,9 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def _validate_production_secrets(self) -> "Settings":
-        """Reject insecure default signing secrets when running in production."""
+        """Apply safe dev storage default and reject insecure production secrets."""
+        if self.environment == "development" and "database_url" not in self.model_fields_set:
+            self.database_url = "sqlite+aiosqlite:///./terra.dev.db"
         if self.environment == "production":
             secret = self.jwt_secret_key.get_secret_value()
             if not secret or secret == _DEFAULT_DEV_JWT_SECRET or len(secret) < 32:

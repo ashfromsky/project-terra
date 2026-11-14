@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react'
 import { useSearchParams } from 'react-router'
-import { LAYER_BY_ID } from '../../../entities/layer/model/layer-catalog'
+import { useLayerCatalogQuery } from '../../../shared/api/layers'
 import { BASEMAP_PROVIDER_REGISTRY, PROJECTION_REGISTRY } from '../../../shared/config/geospatial'
 import type { BasemapId, ProjectionId } from '../../../shared/types/geospatial'
 import { useExploreStore } from '../model/use-explore-store'
@@ -8,6 +8,8 @@ import { useExploreStore } from '../model/use-explore-store'
 export function useExploreUrlSync() {
   const [searchParams, setSearchParams] = useSearchParams()
   const initializedRef = useRef(false)
+  const layerValidatedRef = useRef(false)
+  const catalogQuery = useLayerCatalogQuery()
 
   const projection = useExploreStore((s) => s.projection)
   const basemap = useExploreStore((s) => s.basemap)
@@ -36,7 +38,7 @@ export function useExploreUrlSync() {
     }
 
     const urlLayer = searchParams.get('layer')
-    if (urlLayer && urlLayer in LAYER_BY_ID) {
+    if (urlLayer) {
       setPrimaryLayerId(urlLayer)
     }
 
@@ -57,6 +59,15 @@ export function useExploreUrlSync() {
     setProjection,
     setSelectedDate,
   ])
+
+  useEffect(() => {
+    if (layerValidatedRef.current || !catalogQuery.data || catalogQuery.data.length === 0) return
+    layerValidatedRef.current = true
+    const hasCurrent = catalogQuery.data.some((layer) => layer.id === primaryLayerId)
+    if (!hasCurrent) {
+      setPrimaryLayerId(catalogQuery.data[0].id)
+    }
+  }, [catalogQuery.data, primaryLayerId, setPrimaryLayerId])
 
   useEffect(() => {
     if (!initializedRef.current) return

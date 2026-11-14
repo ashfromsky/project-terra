@@ -70,3 +70,25 @@ def test_system_info_reports_github_oauth_configured() -> None:
 
     assert response.status_code == 200
     assert response.json()["githubOauthConfigured"] is True
+
+
+def test_development_cors_allows_frontend_origin_when_unset() -> None:
+    app = create_app(
+        Settings(
+            environment="development",
+            database_url="sqlite+aiosqlite:///:memory:",
+            frontend_auth_redirect_url="http://localhost:5173",
+            cors_origins=[],
+        )
+    )
+    with TestClient(app) as test_client:
+        preflight = test_client.options(
+            "/api/v1/auth/me",
+            headers={
+                "Origin": "http://localhost:5173",
+                "Access-Control-Request-Method": "GET",
+            },
+        )
+        assert preflight.status_code == 200
+        assert preflight.headers["access-control-allow-origin"] == "http://localhost:5173"
+        assert preflight.headers["access-control-allow-credentials"] == "true"

@@ -23,6 +23,9 @@ __pycache__/
 .mypy_cache/
 build/
 *.tsbuildinfo
+*.db
+*.db-*
+*.sqlite3
 
 # --- Editor / OS ---
 .idea/

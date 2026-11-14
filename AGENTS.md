@@ -1,597 +1,284 @@
-# AGENTS.md
+# PROJECT TERRA — Agent Engineering Contract
 
-# PROJECT TERRA — Engineering Guidelines
+These instructions apply to every AI coding agent working in this repository. They are mandatory unless the project owner explicitly overrides them for the current task. Prefer the actual implementation and accepted ADRs over assumptions based on the target architecture.
 
-These guidelines apply to the entire repository and all AI coding agents working on PROJECT TERRA.
+## 1. Mission and Non-Negotiable Principles
 
-All instructions are mandatory unless explicitly overridden by the project owner.
+PROJECT TERRA (Ecosystem Response & Resilience Intelligence) investigates ecosystem response, environmental stress, and resilience using Earth-observation and hydrometeorological data.
 
-## Mandatory Incremental Development & Review Workflow
+- Scientific correctness, reproducibility, and data provenance come before presentation or convenience.
+- Preserve explicit module, runtime, and dependency boundaries.
+- Keep changes small, reviewable, testable, and limited to the requested scope.
+- Never fabricate requirements, data, formulas, coefficients, capabilities, or verification results.
+- Never silently change architecture, security behavior, persisted data, public contracts, or user-visible behavior.
 
-This workflow is mandatory for ALL AI coding agents and applies to both frontend and backend development.
+## 2. Instruction Precedence and Stop-and-Ask
 
-### 1. Incremental Change Scope & Branch Threshold
+Apply instructions in this order:
 
-- Work in logically independent, coherent implementation increments.
-- There is **no line-count limit** per increment or commit; never artificially split a file or a cohesive feature just to satisfy a line count.
-- If a task spans multiple independent concerns or large subsystems, divide it into independently reviewable and functional increments.
-- Creating a `feat/` branch is **optional** for tasks whose total functional changes are **1500 changed source-code lines or fewer**. Work directly on the current branch (including `main` when already on `main`).
-- When the functional changes of a task **exceed 1500 changed source-code lines**, you MUST create and work on a `feat/` branch (`feat/<descriptive-name>`) rather than committing or pushing directly to `main`.
-- When counting changed source-code lines (for reporting and for the 1500-line `feat/` branch threshold), count added and deleted lines together, not net line differences, and exclude generated files, dependency lockfiles, binary assets, and automatically generated code (report those separately).
+1. Platform and system safety requirements.
+2. Explicit project-owner instructions for the current task.
+3. This repository-level `AGENTS.md`.
+4. Nested `AGENTS.md` files (they may refine, but not silently weaken, higher-priority rules).
+5. Referenced project documentation and applicable Skills.
+6. General engineering defaults.
 
-### 2. Mandatory Review, Commit & Push Procedure
+When requirements are ambiguous, incomplete, contradictory, or materially underspecified, stop before making a consequential choice. Explain the ambiguity, its impact, and the alternatives; ask the owner for clarification. Never invent missing requirements.
 
-Upon completing a logical implementation increment:
+Routine, low-risk implementation choices may be made without asking when they do not alter architecture, public contracts, scientific assumptions, security boundaries, persisted data, or user-visible behavior.
 
-1. Stop implementing new functionality.
-2. Review the complete unstaged and staged diff.
-3. Remove unrelated changes and temporary files.
-4. Run relevant tests, linting, type checking, and build verification.
-5. Ensure the increment leaves the repository in a working state.
-6. Leave the increment changes **uncommitted** in the working tree and request project owner review.
+## 3. Required Context and Documentation
 
-Only AFTER explicit project owner approval:
+Before every non-trivial task, read:
 
-7. Stage ONLY files belonging to the approved increment.
-8. Create a Git commit using Conventional Commits on the active working branch (including `main` when changes are 1500 source-code lines or fewer and no `feat/` branch is used).
-9. Push the active working branch (`git push origin <working-branch>`).
-10. Proceed to the next implementation increment.
+- `docs/PROJECT_OVERVIEW.md` — source of truth for current implementation state, placeholders, integration gaps, and verification baseline.
+- `docs/architecture/SYSTEM_ARCHITECTURE.md` — target design, when changing architecture, multiple modules, data processing, or infrastructure.
+- Relevant ADRs under `docs/adr/` and documentation for the affected component.
+- `frontend/DESIGN.md` before substantial frontend visual/interaction work.
+- `backend/services/geospatial_harmonization/README.md` before changing GHS.
 
-### 3. Conventional Commits
+Keep current reality distinct from the target design: `SYSTEM_ARCHITECTURE.md` does not prove a component is implemented. Update `docs/PROJECT_OVERVIEW.md` in the same increment when implementation status, runtime topology, public API contracts, dependencies, integrations, synthetic/mock status, or verification tooling materially changes. Update architecture documents and/or add an ADR for significant boundary or design changes. Never document planned work as implemented.
 
-All commits MUST follow Conventional Commits:
+## 4. Current-State Guardrails
+
+Read `docs/PROJECT_OVERVIEW.md` and inspect code rather than relying on this summary. The following distinctions are important in the current repository:
+
+- `backend/core/` is the main FastAPI application. Its implemented business modules currently include `auth`, `layers`, and `regions`, alongside health and system routes. Do not assume planned analyses, assessments, comparisons, reports, or AI modules exist.
+- `backend/services/geospatial_harmonization/` (GHS) is an implemented, independently runnable service accepted under ADR-0002. It has its own API, layered application/domain/infrastructure, readers, handlers, transformations, migrations, storage adapters, and service-local `WorkerRunner`. It is currently isolated from Core and the frontend unless the current overview/code proves otherwise.
+- `backend/scientific/` and `backend/worker/` are placeholders, not an implemented shared Scientific Core or shared Worker runtime. Do not confuse the GHS worker with `backend/worker/`.
+- The frontend is connected to Core for the implemented auth, layer-catalog, and region/AOI flows using generated OpenAPI contracts. Other analytical pages and scientific workflows still include synthetic/demo or unavailable states; preserve clear disclosure.
+- Core currently uses SQLAlchemy async and a SQLite development fallback. Do not claim that Core currently uses PostGIS-backed spatial queries. GHS has its own SQLite/PostgreSQL persistence context.
+- The layer catalog contains derived/resilience concepts whose algorithms are not thereby implemented. Catalog presence or `availableSteps: 0` is not evidence that quantitative analysis is available.
+- NASA GIBS is a contextual visualization source only; never derive measurements, time series, or pixel statistics from rendered tiles or screenshot colors.
+- Local Makefile verification exists. Do not assume CI workflows, Caddy, TiTiler, DuckDB analytics, PostGIS workflows, or shared Worker/Scientific Core are operational unless they are present and configured.
+
+## 5. Skills Discovery
+
+Before non-trivial work, identify relevant technologies and disciplines, discover Skills available in the agent environment/repository, and read the applicable instructions. Prefer existing Skills and project workflows over improvised ones. Never invent Skill names or assume an unavailable Skill exists.
+
+When available in the current environment:
+
+- Frontend: use `/antislop` and `/unslop` as applicable.
+- Backend: use `/antislop-code` as applicable.
+- Also look for relevant TDD/testing, code-review, architecture, security, database, and scientific-validation Skills.
+
+If a named Skill is unavailable, report that limitation and continue using project guidelines. A Skill cannot override owner instructions, this contract, or platform safety requirements.
+
+## 6. Planning, Baseline, and Protection of Existing Work
+
+Before editing a non-trivial task:
+
+1. Read the required documentation and Skills.
+2. Inspect the active branch and `git status`.
+3. Identify pre-existing staged, unstaged, and untracked changes.
+4. Inspect affected code, tests, callers, API contracts, and relevant configuration.
+5. Identify the owning module, runtime, and architectural layer.
+6. Check for reusable code before adding abstractions or dependencies.
+7. Identify existing verification commands and known baseline failures.
+8. Define expected behavior, acceptance criteria, affected files, risks, and reviewable increments.
+
+For changes to architecture, public contracts, persistence, security, or scientific methodology, explain the proposed design and affected boundaries before implementation. Do not ask for redundant approval when the requested scope and design are already explicit.
+
+**Protect user work:** preserve every change that existed before the task. Never revert, overwrite, stage, commit, delete, or reformat pre-existing user changes unless the owner explicitly includes them in scope. Never use destructive cleanup such as `git reset --hard` or `git clean`. Remove only temporary artifacts created by the current task. If ownership of a change is unclear, stop and ask.
+
+Run relevant baseline checks before editing when practical. Record pre-existing failures and distinguish them from regressions after implementation. Never attribute a failure to the current task without evidence.
+
+## 7. Incremental Development and Mandatory Review Gate
+
+This workflow applies to frontend, backend, documentation, infrastructure, and data changes.
+
+### Increment size
+
+- Work in logically independent, coherent, reviewable increments.
+- Target approximately **300–400 changed source-code lines per increment** (additions plus deletions). This is a reviewability target, not an absolute limit.
+- Never split cohesive functionality or files artificially to meet the target. Explain materially larger increments that cannot reasonably be decomposed.
+- Report generated files, lockfiles, binary assets, and other excluded changes separately.
+
+### Required sequence for every increment
+
+1. Implement only the current increment.
+2. Stop adding functionality when it is ready for review.
+3. Inspect the complete staged and unstaged diff, including new/untracked files.
+4. Confirm pre-existing owner changes remain untouched and unstaged.
+5. Remove only temporary artifacts and unrelated changes created by this task.
+6. Run relevant tests, linting, type checks, contract generation, and build checks.
+7. Review the diff for correctness, security, maintainability, and unintended scope.
+8. Leave the increment **uncommitted** and request owner review.
+9. Stop implementation and wait for explicit approval or requested corrections.
+10. Only after approval, stage only approved files, create coherent Conventional Commits, and push the active working branch.
+11. Start the next increment only after the approved increment is committed and pushed and the owner has authorized continuation.
+
+Never interpret silence, an acknowledgement, or an ambiguous response as approval to commit, push, or continue. Approval must clearly authorize the pending action.
+
+If checks fail, do not describe the increment as passing or commit it as successfully completed. Report the failure and request direction or correct it within the same review cycle. If the owner explicitly requests a failing checkpoint, disclose all failures prominently.
+
+### Review notification
+
+For each uncommitted increment, report:
+
+- Implemented changes and rationale.
+- Active branch.
+- Modified, deleted, renamed, and untracked files.
+- Added and deleted source-code lines separately (never only the net count).
+- Generated, lockfile, binary, and asset changes separately.
+- Verification commands and actual results.
+- Pre-existing failures, new failures, skipped checks, and unfinished work.
+- Architectural, API, database, security, or scientific decisions and documentation updates.
+
+Explicitly ask the owner to review and approve before commit, push, and continuation.
+
+## 8. Git, Branching, and Commit Safety
+
+### Branch selection
+
+- Respect the owner's active branch; do not switch branches for convenience.
+- If a task is expected to exceed **1500 changed source-code lines in total** (additions plus deletions; exclude generated files, lockfiles, binary assets, and automatically generated code), create and use `feat/<descriptive-name>` before implementation begins.
+- If the task is expected to remain at or below 1500 changed source-code lines, work on the current branch (including `main`) is permitted, subject to the approval gate.
+- Report excluded generated/lock/binary changes separately.
+- If a task unexpectedly approaches the threshold, stop before crossing it and move remaining work to a `feat/` branch without losing or rewriting existing work. Never rewrite commits already approved and pushed.
+
+### Commits
+
+Only after explicit owner approval:
+
+- Stage only files belonging to the approved increment.
+- Commit on the active working branch.
+- Push only that active branch to `origin`.
+- Keep increments independently reviewable.
+
+Use Conventional Commits:
 
 `<type>(<scope>): <description>`
 
-Allowed types include:
+Use concise English descriptions. Common types: `feat`, `fix`, `refactor`, `test`, `docs`, `style`, `perf`, `chore`, and `build`.
 
-- `feat` — new functionality.
-- `fix` — bug fixes.
-- `refactor` — structural improvements without behavior changes.
-- `test` — tests.
-- `docs` — documentation.
-- `style` — formatting and styling without logic changes.
-- `perf` — performance improvements.
-- `chore` — maintenance and configuration.
-- `build` — build system changes.
+### Prohibited operations
 
-Examples:
+AI agents MUST NOT:
 
-- `feat(map): implement Equal Earth renderer`
-- `feat(frontend): add map explorer routing`
-- `fix(api): handle invalid region geometry`
-- `test(scientific-core): add NDVI validation tests`
-- `docs(architecture): document spatial harmonization`
+- Run `git merge` (including fast-forward, no-ff, or squash merges), `git rebase`, or `git cherry-pick`.
+- Merge any branch or pull request into `main` or another branch. The project owner exclusively handles integration.
+- Force-push, amend, squash, reorder, or rewrite existing commits/history.
+- Commit or push unapproved changes.
+- Indiscriminately stage the full working tree (for example, `git add .`) when pre-existing or unrelated changes may exist.
+- Use `git pull` without first checking its behavior; fetch and inspect remote changes without implicitly merging or rebasing.
 
-Commit messages must be concise, descriptive, and written in English.
+A feature branch remains separate until the owner integrates it. Do not switch to `main` to integrate a feature branch.
 
-### 4. Prohibited Git Operations (No Merge, Rewrite, or Unapproved Push)
+Do not create commits merely to organize changes that are still awaiting review. After approval, make each commit a coherent unit; preserve previously approved commits and real timestamps. At task end, inspect `git status`, the active branch, commits created during the task, commit messages, and push status. Intentional uncommitted changes awaiting review are not accidental leftovers and must not be cleaned up.
 
-- NEVER run `git merge` (including fast-forward merges, `--no-ff`, or `--squash`).
-- NEVER run `git rebase` or `git cherry-pick`.
-- NEVER merge feature or working branches into `main` (or any other branch), even after receiving review approval or completing the entire task.
-- NEVER push unapproved changes or force-push.
-- NEVER commit or push directly to `main` without explicit owner approval, or when the task's functional changes exceed 1500 changed source-code lines (which require a `feat/` branch).
-- NEVER amend, squash, or rewrite existing commits unless explicitly instructed.
-- Commit and push ONLY to the active working branch after explicit project owner approval of the uncommitted increment.
+## 9. Architecture and Backend Boundaries
 
-Follow the mandatory batch chain: `new changes (uncommitted) -> owner review & approval -> commit and push to the active working branch -> next batch`. When a feature branch is used, all merges into `main` are performed exclusively by the project owner.
+The intended Core design is a modular monolith with explicit layers:
 
-### 5. Mandatory Review Notification
+- **API:** HTTP routing, transport validation, authentication dependencies, response serialization.
+- **Application:** use cases, workflow orchestration, transaction coordination.
+- **Domain:** business rules, entities, value objects, and ports/contracts.
+- **Infrastructure:** database, external providers, storage, and concrete adapters.
+- **Scientific Core (target):** independently testable scientific algorithms, independent of HTTP/database/UI.
 
-Immediately after completing each increment (while leaving the changes uncommitted):
+Dependency direction: API → Application → Domain; Infrastructure implements Domain/Application ports. Domain and Scientific Core must not depend on FastAPI, SQLAlchemy, HTTP clients, storage implementations, or frontend code.
 
-- STOP all further implementation work.
-- Notify the project owner that the uncommitted increment is ready for review.
-- Report the number of added and deleted source-code lines in the working tree.
-- List all modified and untracked files.
-- Summarize the implemented changes.
-- Report tests, linting, type checks, and build results.
-- Explicitly disclose any failures or unfinished work.
+ADR-0002 makes GHS a deliberate independently deployable exception for the heavy geospatial ingestion/decoding stack. Preserve this boundary unless the owner approves an ADR-backed change. Do not merge GHS into Core or create additional services merely by preference.
 
-The notification must request project owner review and approval to commit, push, and proceed.
+General backend rules:
 
-### 6. Approval Gate
+- Follow existing `auth`, `layers`, and `regions` patterns; do not create speculative or empty modules merely to match a template.
+- Keep route handlers thin. Put workflows in application use cases/services, not route handlers or repositories.
+- For persisted business data, use focused repository/port contracts and infrastructure implementations. Keep SQLAlchemy models and session lifecycle inside Infrastructure; inject dependencies through the established wiring layer.
+- Use a Unit of Work only when multiple repositories need one atomic transaction. Static catalogs and analytical read paths may use focused query services/adapters instead of forced CRUD repositories.
+- Preserve versioned Core routes under the configured prefix (`/api/v1` by default) and separate health endpoints.
+- Do not assume PostGIS is installed or used by Core. Verify database support before introducing spatial SQL/extensions.
+- Treat schema changes, migrations, and destructive data operations as high-risk. Never drop, truncate, or migrate production data without explicit owner approval and a documented backup/rollback plan.
+- Keep Core lightweight. Heavy native geospatial dependencies belong in GHS unless an ADR approves otherwise.
 
-After sending the review notification:
+## 10. Frontend Rules and API Contracts
 
-- Leave the increment uncommitted and do not start the next implementation increment.
-- Wait for explicit approval from the project owner.
-- Once approved, commit the approved changes to the active working branch, push that branch to `origin`, and begin the next increment.
-- Do NOT merge branches or squash commits after approval or at the end of the task (and when working on a `feat/` or other non-`main` branch, do NOT switch to `main` to integrate it).
-- Apply requested corrections before committing or proceeding.
-- Never interpret silence as approval.
-
-### 7. Exceptional Cases
-
-If a task started directly on `main` (or another non-`feat/` branch) grows beyond **1500 changed source-code lines**:
-
-- Create and switch to a `feat/<descriptive-name>` branch before committing or pushing any changes exceeding the threshold.
-- Keep `main` free of >1500-line feature work.
-
-If tests fail, do not commit or push the change as successfully completed. Report the failure and request review of the issue or corrective action.
-
-**Core principle: Every implementation increment must follow the chain `new changes (uncommitted) -> explicit owner approval -> commit and push to the active working branch -> next increment`. Never merge commits or branches.**
-
-## 1. Project Context
-
-PROJECT TERRA is an open-source environmental analysis platform focused on ecosystem response, environmental stress, and resilience assessment.
-
-Core principles:
-- Scientific correctness.
-- Explicit architectural boundaries.
-- Reproducibility.
-- Data provenance.
-- Maintainability.
-- Incremental development.
-
-## 2. General Engineering Rules
-
-- Inspect existing architecture before modifying code.
-- Prefer simple, explicit, maintainable implementations.
-- Keep modules focused and responsibilities separated.
-- Avoid unnecessary abstractions and dependencies.
-- Do not duplicate existing functionality.
-- Do not modify unrelated files.
-- Never silently introduce breaking changes.
-- Never claim verification without executing the relevant checks.
-
-## 3. Architecture
-
-TERRA follows a **Modular Monolith** architecture.
-
-The API and Worker are separate runtime processes that share application, domain, and scientific packages.
-
-Backend architectural layers:
-
-- API Layer — HTTP routing, request validation, response serialization.
-- Application Layer — use cases, orchestration, application services.
-- Domain Layer — business rules, domain entities, repository contracts.
-- Infrastructure Layer — database implementations, external integrations, storage adapters.
-- Scientific Core — independent scientific calculations and algorithms.
-
-Dependency direction:
-
-`API → Application → Domain`
-
-`Infrastructure → Domain / Application Contracts`
-
-The Domain Layer must not depend on FastAPI, SQLAlchemy, HTTP, or infrastructure implementations.
-
-Modules must have explicit boundaries. Avoid cyclic dependencies and direct access to another module's internal implementation.
-
-Do not introduce microservices or distributed infrastructure without a demonstrated requirement.
-
-## Project Overview & Global Context (Mandatory)
-
-Before starting any non-trivial task, you MUST read:
-
-- `docs/PROJECT_OVERVIEW.md`
-
-This file captures the live repository-wide state: currently implemented modules and services, runtime boundaries, mock/synthetic placeholders, verification baseline, and known integration gaps.
-
-Whenever a task introduces **global or cross-cutting changes** — including new services or modules, stack or dependency changes, architectural boundary shifts, integration of previously mocked/placeholder workflows, API domain additions/removals, or CI/build tooling changes — you MUST update `docs/PROJECT_OVERVIEW.md` in the same increment (or an accompanying documentation increment) so it always reflects the actual state of the project. Never document planned work as implemented.
-
-## Architecture Reference
-
-Before making any non-trivial architectural, cross-module, data-processing, or infrastructure changes, you MUST read:
-
-- `docs/architecture/SYSTEM_ARCHITECTURE.md`
-
-This document defines the intended system architecture, component responsibilities, boundaries, integrations, and data flows.
-
-`AGENTS.md` defines engineering rules.
-`SYSTEM_ARCHITECTURE.md` defines system design.
-
-All implementations must respect both documents.
-
-If an implementation requires deviating from the architecture:
-1. Explain the reason.
-2. Identify affected components.
-3. Propose an Architecture Decision Record (ADR).
-4. Do not silently change architectural boundaries.
-
-## 4. Frontend Engineering
-
-Technology:
-- React 19
-- TypeScript
-- Vite
-- MapLibre GL JS 5
-- deck.gl
-- Zustand
-- TanStack Query
-- Apache ECharts
-
-Use **Feature-Sliced Design (FSD-lite)**.
-
-Layers:
-- `app` — initialization, routing, providers.
-- `pages` — route-level pages.
-- `widgets` — compositional UI blocks.
-- `features` — user actions and functionality.
-- `entities` — domain entities and representations.
-- `shared` — reusable utilities, infrastructure, and UI.
-
-Dependency direction:
+Use the repository's FSD-lite dependency direction:
 
 `app → pages → widgets → features → entities → shared`
 
-Rules:
-- Use strict TypeScript.
-- Avoid `any` and unjustified type assertions.
-- Keep components focused on presentation and interaction.
-- Do not implement scientific calculations inside React components.
-- Do not perform direct API calls inside UI components.
-- Use TanStack Query for server state.
-- Use Zustand for shared client-side UI state.
-- Use React state for local component state.
-- Use URL parameters for shareable analysis configuration where appropriate.
-- Centralize API communication.
-- Handle loading, error, empty, and insufficient-data states.
-
-## 5. Backend Engineering
-
-Technology:
-- Python
-- FastAPI
-- Granian
-- Pydantic
-- uv
-- SQLAlchemy
-- PostgreSQL
-- PostGIS
-
-### 5.1 Mandatory Backend Module Structure
-
-Use a modular structure in which each business module owns its API, application logic, domain definitions, and infrastructure implementations.
-
-Example:
-
-```text
-backend/core/
-└── terra/
-    ├── main.py
-    ├── api/
-    │   ├── dependencies.py
-    │   └── v1/
-    │       └── router.py
-    │
-    ├── modules/
-    │   ├── regions/
-    │   │   ├── api/
-    │   │   │   ├── router.py
-    │   │   │   └── schemas.py
-    │   │   ├── application/
-    │   │   │   ├── services.py
-    │   │   │   └── use_cases/
-    │   │   ├── domain/
-    │   │   │   ├── entities.py
-    │   │   │   └── repositories.py
-    │   │   └── infrastructure/
-    │   │       ├── models.py
-    │   │       └── repositories/
-    │   │           └── sqlalchemy.py
-    │   │
-    │   ├── analyses/
-    │   ├── assessments/
-    │   ├── data_sources/
-    │   └── reports/
-    │
-    └── infrastructure/
-        └── database/
-            ├── session.py
-            └── base.py
-```
-
-This is a reference structure. Adapt it when necessary, but preserve the architectural boundaries.
-
-### 5.2 Routing Architecture
-
-Routing must be explicit, modular, and versioned.
-
-Mandatory requirements:
-
-- Use FastAPI `APIRouter`.
-- Each business module owns its own router.
-- The version-level router aggregates module routers.
-- The main application registers the root API router.
-- All business endpoints must be grouped under `/api/v1`.
-- Health endpoints must be separate from business routes.
-- Use consistent URL naming and HTTP methods.
-- Define request and response schemas explicitly.
-- Use appropriate HTTP status codes.
-- Keep route handlers thin.
-
-Example routing hierarchy:
-
-```text
-main.py
-  └── api/v1/router.py
-        ├── regions/router.py
-        ├── analyses/router.py
-        ├── assessments/router.py
-        ├── data_sources/router.py
-        └── reports/router.py
-```
-
-Example endpoints:
-
-```text
-GET    /api/v1/regions
-POST   /api/v1/regions
-GET    /api/v1/regions/{region_id}
+Upper layers may depend on lower layers; lower layers must not import upper layers. Follow existing public entry points and slice boundaries.
 
-POST   /api/v1/analyses
-GET    /api/v1/analyses/{analysis_id}
+- Preserve strict TypeScript; avoid `any`, unjustified casts, and suppression comments without a reason.
+- Keep UI components focused on presentation/interaction. Do not put scientific calculations or ad-hoc network calls in presentation components.
+- Use the shared API client and established adapters/hooks. Use TanStack Query for remote state, Zustand for genuinely shared client UI state, React state for local state, and URL parameters for shareable configuration where appropriate.
+- Handle loading, error, empty, unavailable, and insufficient-data states explicitly.
+- Preserve responsive behavior, keyboard accessibility, semantic controls, and visible focus states.
+- Follow `frontend/DESIGN.md`; do not introduce a competing visual language without owner approval.
 
-GET    /api/v1/assessments/{assessment_id}
-GET    /api/v1/reports/{report_id}
+**OpenAPI is the Core API contract source of truth.** Use `make contracts` (or `pnpm contracts:generate` from `frontend/`) after changing Core routes/schemas. Never hand-edit `frontend/src/shared/api/generated/openapi.json` or `schema.d.ts`; change the backend contract, regenerate, and review the generated diff. Keep frontend calls typed through the shared `openapi-fetch` client. Verify both sides when changing public API behavior.
 
-GET    /health
-```
+Exact frontend/backend dependency versions are defined by package manifests and lockfiles. Inspect them; do not duplicate patch versions here.
 
-Route handlers must not contain business logic, complex database queries, or scientific calculations.
+## 11. GHS-Specific Rules
 
-Their responsibility is limited to:
-1. Receiving and validating requests.
-2. Invoking the appropriate application use case.
-3. Returning the appropriate response.
+GHS is under `backend/services/geospatial_harmonization/` and has its own environment, manifest/lockfile, API, application/domain/infrastructure, readers, handlers, transformations, migrations, storage adapters, and service-local worker.
 
-Do not register all endpoints in one large router file.
+- Read its README and ADRs before changing it.
+- Preserve `api → application → domain ← infrastructure` and the declared ports/contracts.
+- Preserve local and S3-compatible storage behavior.
+- Preserve PostgreSQL job-claiming/concurrency semantics, including `FOR UPDATE SKIP LOCKED`. SQLite tests do not prove PostgreSQL concurrency correctness; run the PostgreSQL integration test when changing locking behavior and when a test database is available.
+- Do not weaken SSRF protections or casually broaden `GENERIC_HANDLER_ALLOWED_HOSTS`; the generic handler remains disabled with an empty allowlist.
+- Do not claim AppEEARS/Harmony integrations or end-to-end temporal processing are complete unless code proves they are wired and verified.
+- Do not invent a Core↔GHS RPC/HTTP contract. Define and review it first, then update architecture and overview documents.
 
-### 5.3 Repository Pattern — Mandatory
+## 12. Scientific Computing and Data Integrity
 
-Use the Repository Pattern for persistence access.
+- Never invent formulas, coefficients, thresholds, baselines, quality rules, or scientific interpretations.
+- Use authoritative product documentation and validated methodology; record method/product versions and sources.
+- Preserve product identifiers/versions, units, native grid/projection, temporal semantics, QA flags, nodata masks, retrieval timestamps, processing parameters, and lineage.
+- Surface missing data, coverage, quality limitations, and uncertainty.
+- Resampling does not create source resolution or new information.
+- Distinguish observations, reanalysis, model estimates, synthetic data, and derived products.
+- Distinguish correlation from causation; account for seasonality, autocorrelation, multiple testing, sample size, and assumptions where relevant.
+- A catalog entry is not an implemented algorithm. Experimental metrics (including TRI) must be labeled, versioned, validated, and withheld from authoritative rankings until justified.
+- Never use NASA GIBS rendered tiles as quantitative source data.
+- Scientific algorithms must be independently testable and isolated from HTTP, database, storage, and UI infrastructure.
 
-Repositories must separate business logic from database implementations.
+## 13. Testing, Dependencies, and Security
 
-Requirements:
+Prefer deterministic tests, explicit fixtures, meaningful assertions, and isolated external services. For new business logic, scientific algorithms, security-sensitive behavior, and critical bug fixes, use TDD where practical: define behavior, add a test that fails for the intended reason, implement the smallest correct change, rerun regression checks, then refactor. If strict TDD is impractical, explain why and provide equivalent verification.
 
-- Define repository interfaces using Python `Protocol` or abstract interfaces.
-- Keep repository contracts in the Domain Layer or an appropriate application port.
-- Implement concrete repositories in the Infrastructure Layer.
-- Application services and use cases must depend on repository contracts, not SQLAlchemy implementations.
-- Keep database models separate from domain entities.
-- Avoid exposing SQLAlchemy models outside the Infrastructure Layer.
-- Use explicit methods representing domain operations.
-- Keep transaction management outside individual route handlers.
+Use checks appropriate to the affected component. Common commands:
 
-Example:
+- Root: `make test`, `make lint`, `make frontend-typecheck`, `make frontend-build`.
+- Core: `make backend-test`, `make backend-lint`.
+- Frontend: `make frontend-test`, `make frontend-lint`, `make frontend-typecheck`, `make frontend-build`.
+- Contracts: `make contracts`.
+- GHS: follow commands in `backend/services/geospatial_harmonization/README.md` (`uv run pytest`, Ruff, and mypy as applicable).
 
-```text
-regions/
-├── domain/
-│   └── repositories.py
-├── application/
-│   └── use_cases/
-│       └── get_region.py
-└── infrastructure/
-    └── repositories/
-        └── sqlalchemy.py
-```
+Verification boundaries:
 
-Example contract:
+- Root `make test` currently covers Core and frontend tests; it does not automatically run GHS tests.
+- GHS PostgreSQL locking integration tests require `GHS_TEST_POSTGRES_URL`; report them skipped/not run when no test database is available.
+- Do not claim CI passed when no applicable workflow was found or run.
+- Never claim a test/build/linter/type check/migration/live integration passed unless it was actually executed and inspected.
+- Never weaken checks or security controls merely to obtain a green result; fix the cause or request approval for an exception.
 
-```python
-from typing import Protocol
-from uuid import UUID
+Dependency and security rules:
 
-class RegionRepository(Protocol):
-    async def get_by_id(self, region_id: UUID): ...
-    async def save(self, region) -> None: ...
-    async def delete(self, region_id: UUID) -> None: ...
-```
+- Inspect manifests/lockfiles and verify compatibility before adding or upgrading dependencies. Use `uv` for Python and `pnpm` for frontend; never hand-edit lockfiles.
+- Add the smallest necessary dependency set and explain why existing capabilities are insufficient.
+- Never commit secrets, tokens, credentials, private keys, or real user data. Follow the repository's `.env*` ignore policy and ADR-0001; do not commit environment files.
+- Validate external input. Preserve OAuth state validation, redirect sanitization, authentication/authorization, CORS/cookie policy, SSRF controls, and storage access restrictions.
+- Follow third-party licenses and report material unresolved security advisories.
+- Do not add infrastructure (for example PostGIS, DuckDB, TiTiler, Caddy, Redis, Kafka, RabbitMQ, Kubernetes, or additional services) just because it appears in target architecture. Require a concrete need and owner approval. Preserve existing GHS Docker support.
 
-The SQLAlchemy implementation must satisfy this contract.
+## 14. Definition of Done and Reporting
 
-Rules:
-- Do not instantiate SQLAlchemy repositories inside route handlers.
-- Inject dependencies through an explicit dependency wiring layer.
-- Do not create one universal repository for every business module.
-- Avoid generic CRUD abstractions that hide domain-specific behavior.
-- Keep repositories focused on persistence and retrieval.
-- Use Unit of Work where multiple repositories must participate in one transaction.
-- Keep database session lifecycle explicit and correctly scoped.
+An increment is **ready for review** only when its scope is implemented or gaps are disclosed, architecture/contracts are respected, pre-existing owner changes are preserved, relevant checks are run and honestly reported, generated files/docs are updated where needed, and the complete diff is reviewed. It must remain uncommitted while awaiting owner approval.
 
-Do not force the Repository Pattern onto every analytical operation. Complex analytical queries and DuckDB operations may use dedicated query services or infrastructure adapters.
+A task is **delivered** only after all required increments have been approved, committed, and pushed to the active branch, unless the owner explicitly chooses another stopping point.
 
-### 5.4 Application Layer
+Final report:
 
-Application services and use cases coordinate business operations.
+- Implemented functionality and deliberately deferred work.
+- Active branch and whether it is `main` or `feat/*`.
+- Ordered commits created during the task (hash, Conventional Commit message, actual timestamp), if any.
+- Changed files and added/deleted source-code line counts; generated/lock/binary changes separately.
+- Verification commands and actual results, including skipped/unavailable checks.
+- Architecture, ADR, overview, API contract, and migration impact.
+- Push status and any remaining uncommitted changes, clearly marked as awaiting review where applicable.
 
-They must:
-- Implement application workflows.
-- Coordinate repositories and other domain services.
-- Enforce application-level rules.
-- Manage transaction boundaries through appropriate abstractions.
-- Remain independent of HTTP and FastAPI.
-
-Do not put application workflows into repositories.
-
-### 5.5 API and Worker Responsibilities
-
-The API process handles incoming requests and application orchestration.
-
-Long-running scientific computations must execute in the Worker runtime.
-
-Both processes may reuse the same application, domain, and scientific packages.
-
-Do not duplicate business logic between API and Worker.
-
-Do not make internal HTTP calls between processes when direct shared application functionality or the task queue is appropriate.
-
-## 6. Scientific Computing & Data Integrity
-
-Scientific correctness is mandatory.
-
-- Never invent scientific formulas or coefficients.
-- Document assumptions, limitations, units, and calculation methods.
-- Preserve data provenance and product versions.
-- Account for missing observations and quality flags.
-- Consider seasonality and autocorrelation.
-- Maintain spatial reference system consistency.
-- Do not imply that resampling creates additional source-data resolution.
-- Distinguish correlation from causation.
-- Account for multiple testing where statistically relevant.
-- Distinguish observations, reanalysis, and model-derived estimates.
-- Clearly label synthetic data.
-
-Scientific algorithms must be independent of HTTP, database, and UI infrastructure.
-
-## 7. Code Quality & Testing
-
-Requirements:
-- Write tests alongside new functionality.
-- Prefer deterministic tests.
-- Use explicit types and interfaces.
-- Avoid hidden side effects.
-- Avoid broad exception handling.
-- Do not disable linting or type checks to bypass errors.
-
-Backend testing must include:
-- Unit tests for domain logic.
-- Application use-case tests using fake or mock repository implementations.
-- Repository integration tests.
-- API routing and HTTP response tests.
-- Dependency override tests where appropriate.
-
-Frontend testing must cover important components and application behavior.
-
-Run relevant tests, linting, type checking, and builds before completing a task.
-
-## 8. Dependencies & Security
-
-- Verify compatibility before introducing or upgrading dependencies.
-- Use uv for Python dependency management.
-- Preserve lockfiles.
-- Never commit secrets or credentials.
-- Validate external input.
-- Follow third-party licenses.
-- Avoid unnecessary infrastructure.
-
-Do not introduce Docker, Kubernetes, Envoy, Kafka, or additional services without a concrete architectural requirement.
-
-## 9. AI Agent Workflow
-
-Before implementing a non-trivial task:
-
-1. Read `docs/PROJECT_OVERVIEW.md` to confirm current system state, active services, and integration gaps.
-2. Inspect existing files and architecture (`docs/architecture/SYSTEM_ARCHITECTURE.md` and relevant ADRs).
-3. Identify the responsible module and architectural layer.
-4. Check existing contracts and reusable functionality.
-5. Identify affected dependencies.
-6. Present the intended file changes when architecture is affected.
-
-During implementation:
-
-- Respect module boundaries.
-- Follow routing and repository conventions.
-- Do not bypass application services.
-- Do not introduce direct database access into routes.
-- Do not make unrelated architectural changes.
-- Keep changes focused and reviewable.
-
-After implementation:
-
-1. Run relevant tests and checks.
-2. Review the final diff.
-3. Report modified files.
-4. Explain architectural decisions.
-5. Report verification results and limitations.
-
-## 10. Documentation
-
-- Keep documentation consistent with the implementation.
-- Update `docs/PROJECT_OVERVIEW.md` whenever global, cross-cutting, architectural, service, or integration-status changes occur.
-- Document public interfaces.
-- Document scientific formulas and assumptions.
-- Record significant architectural decisions in ADRs.
-- Update documentation when changing existing behavior.
-
-## 11. Commits and Branching
-
-- Use descriptive commit messages (Conventional Commits style).
-- Creating a `feat/` branch is **optional** when the task's functional changes are **1500 changed source-code lines or fewer** (excluding generated files, lockfiles, and binary assets); you may work, and after explicit owner approval commit and push, directly on the current branch (including `main`). This explicitly refines/overrides any global branch-prefix renaming rule for changes ≤ 1500 source-code lines in this repository.
-- When the functional changes exceed **1500 changed source-code lines**, you MUST create and use a `feat/` branch (`feat/<descriptive-name>`); never commit or push >1500-line feature changes directly to `main`.
-- NEVER merge changes into `main` or any other branch (`git merge` is strictly forbidden for AI agents).
-- Leave new changes uncommitted for owner review; after explicit approval, commit and push each approved increment separately on the active working branch.
-- When working on a `feat/` (or other non-`main`) branch, keep `main` untouched; branch integration and pull requests are handled solely by the project owner.
-
-## 12. Definition of Done
-
-A task is complete only when:
-
-- Requested functionality is implemented.
-- Architectural boundaries are respected.
-- Routing follows the established structure.
-- Persistence uses repository contracts and implementations.
-- Relevant tests and checks pass.
-- No unrelated functionality is modified.
-- Documentation (including `docs/PROJECT_OVERVIEW.md` for global changes) is updated where necessary.
-- All approved increments are committed separately and pushed to the active working branch without running `git merge`.
-- Remaining limitations are explicitly reported.
-
-## Final Commit Organization & History Integrity
-
-At the end of every multi-step implementation task, the agent MUST perform a final Git history audit on the active working branch without merging branches or rewriting history.
-
-### 1. Logical Commit Organization
-
-If implementation changes remain uncommitted, organize them into logically independent commits on the active working branch.
-
-Group changes by:
-- Architecture and project configuration.
-- Dependencies and tooling.
-- Core components and infrastructure.
-- Individual features and modules.
-- Tests.
-- Documentation.
-- Bug fixes and refinements.
-
-Every commit must represent one coherent implementation step.
-
-Do not group unrelated functionality into the same commit.
-
-### 2. Commit Chronology
-
-- Arrange commits in logical implementation order.
-- Dependencies and foundational components must precede features that depend on them.
-- Tests must follow or accompany the implementation they verify.
-- Documentation should reflect the implementation that actually exists.
-- Commit timestamps must reflect the actual time of committing.
-- Never fabricate, backdate, or manipulate author or committer dates to create an artificial development timeline.
-
-### 3. Existing Commits
-
-- Preserve previously approved commits as individual commits.
-- Never merge, squash, rewrite, amend, or reorder existing commits without explicit authorization.
-- Do not duplicate functionality already committed.
-- Never force-push or push unapproved changes; push only approved commits on the active working branch (and never commit/push >1500-line functional changes directly to `main`).
-
-### 4. Final History Audit
-
-Before declaring the task complete:
-
-1. Check `git status` and confirm the repository remains on the active working branch (and if a `feat/` or other non-`main` branch was used, confirm it was not merged into `main`).
-2. Inspect all commits created during the task.
-3. Verify that each commit follows Conventional Commits.
-4. Verify that a `feat/` branch was created and used if the task's functional changes exceeded 1500 changed source-code lines (excluding explicitly exempted generated files).
-5. Verify chronological and logical consistency.
-6. Confirm that no implementation changes remain unintentionally uncommitted.
-
-### 5. Final Report
-
-Provide:
-- Current working branch name.
-- Ordered list of commits.
-- Commit hashes and messages.
-- Actual commit timestamps.
-- Files and functionality covered by each commit.
-- Added and deleted source-code lines.
-- Test and verification results.
-- Any remaining uncommitted changes.
-
-**Final principle: Git history must accurately represent the actual development process, with logical, chronological, unmerged, and independently reviewable commits.**
-
-**Final principle: Build TERRA as a scientifically trustworthy, modular, reproducible, and maintainable engineering system.**
+**Final principle: build TERRA as a scientifically trustworthy, reproducible, secure, and maintainable system. Preserve the difference between what exists today and what the architecture intends to build next.**
