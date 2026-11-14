@@ -2,6 +2,7 @@
 
 import hashlib
 import ipaddress
+import json
 import socket
 from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
@@ -21,6 +22,13 @@ from geospatial_harmonization.domain.models.dataset import (
 
 _REDIRECT_CODES = frozenset({301, 302, 303, 307, 308})
 _ALLOWED_SCHEMES = frozenset({"https", "http"})
+EARTHDATA_ALLOWED_HOSTS = (
+    "*.nasa.gov",
+    "*.earthdata.nasa.gov",
+    "*.earthdatacloud.nasa.gov",
+    "*.nsidc.org",
+    "*.usgs.gov",
+)
 
 
 def parse_handler_payload[ModelT: BaseModel](
@@ -180,3 +188,53 @@ def build_provenance(
         source_urls=(url,),
         processing_steps=(f"ingest:{provider}:{product}",),
     )
+
+
+def earthdata_hosts_for(cmr_url: str) -> tuple[str, ...]:
+    """Return trusted NASA/DAAC download hosts alongside the configured CMR hostname."""
+    cmr_host = (urlparse(cmr_url).hostname or "").lower()
+    return (*EARTHDATA_ALLOWED_HOSTS, cmr_host) if cmr_host else EARTHDATA_ALLOWED_HOSTS
+
+
+async def discover_cmr_granule_url(
+    cmr_url: str,
+    product: str,
+    window_start: datetime,
+    window_end: datetime,
+    extensions: tuple[str, ...],
+    *,
+    bbox: tuple[float, float, float, float] | None = None,
+    headers: Mapping[str, str] | None = None,
+    timeout: float = 30.0,
+    max_retries: int = 2,
+    transport: httpx.AsyncBaseTransport | None = None,
+) -> str:
+    """Query NASA CMR granules API and return the first HTTPS data link matching extensions."""
+    short_name, version = product.split(".", 1)
+    t0 = window_start.astimezone(UTC).isoformat()
+    t1 = window_end.astimezone(UTC).isoformat()
+    params = {
+        "short_name": short_name,
+        "version": version,
+        "temporal": f"{t0},{t1}",
+        "page_size": "1",
+    }
+    if bbox is not None:
+        params["bounding_box"] = ",".join(str(v) for v in bbox)
+    raw, _, _ = await safe_fetch_bytes(
+        f"{cmr_url.rstrip('/')}/granules.json",
+        allowed_hosts=earthdata_hosts_for(cmr_url),
+        headers=headers,
+        params=params,
+        timeout=timeout,
+        max_retries=max_retries,
+        transport=transport,
+    )
+    doc = json.loads(raw.decode("utf-8"))
+    entries = doc.get("feed", {}).get("entry", []) if isinstance(doc, Mapping) else []
+    for entry in entries:
+        for link in entry.get("links", []) if isinstance(entry, Mapping) else []:
+            href = link.get("href", "") if isinstance(link, Mapping) else ""
+            if href.startswith("https://") and href.lower().endswith(extensions):
+                return str(href)
+    raise IncompatibleDatasetError(f"No CMR granule download URL found for '{product}'")

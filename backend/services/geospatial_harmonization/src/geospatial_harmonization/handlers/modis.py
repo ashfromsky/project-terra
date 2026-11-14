@@ -1,6 +1,5 @@
 """MODIS handler (MOD13Q1.061, MOD11A2.061) with Sinusoidal CRS and 8/16-day composites."""
 
-import json
 import tempfile
 from collections.abc import Mapping
 from dataclasses import replace
@@ -16,7 +15,6 @@ from pydantic import BaseModel, ConfigDict
 from pyproj import CRS
 
 from geospatial_harmonization.config.settings import Settings, get_settings
-from geospatial_harmonization.domain.exceptions import IncompatibleDatasetError
 from geospatial_harmonization.domain.models.dataset import (
     DataFormat,
     QualityMetadata,
@@ -27,6 +25,8 @@ from geospatial_harmonization.domain.models.dataset import (
 from geospatial_harmonization.domain.models.temporal import TemporalSpec
 from geospatial_harmonization.handlers.base import (
     build_provenance,
+    discover_cmr_granule_url,
+    earthdata_hosts_for,
     parse_handler_payload,
     safe_fetch_bytes,
     write_raw_asset,
@@ -99,7 +99,6 @@ _PRODUCT_SPECS: dict[str, tuple[int, str, dict[str, VariableSpec]]] = {
         },
     ),
 }
-_NASA_HOSTS = ("*.nasa.gov", "*.earthdata.nasa.gov", "*.earthdatacloud.nasa.gov")
 
 
 class MODISPayload(BaseModel):
@@ -143,51 +142,27 @@ class MODISHandler:
     def supported_products(self) -> tuple[str, ...]:
         return ("MOD13Q1.061", "MOD11A2.061")
 
-    def _allowed_hosts(self) -> tuple[str, ...]:
-        cmr_host = (urlparse(self._cmr_url).hostname or "").lower()
-        return (*_NASA_HOSTS, cmr_host) if cmr_host else _NASA_HOSTS
-
-    async def _resolve_granule_url(self, req: MODISPayload, headers: Mapping[str, str]) -> str:
-        if req.granule_url:
-            return req.granule_url
-        short_name, version = req.product.split(".", 1)
-        t0 = req.start_time.astimezone(UTC)
-        days = _PRODUCT_SPECS[req.product][0]
-        params = {
-            "short_name": short_name,
-            "version": version,
-            "temporal": f"{t0.isoformat()},{(t0 + timedelta(days=days)).isoformat()}",
-            "page_size": "1",
-        }
-        if req.bbox is not None:
-            params["bounding_box"] = ",".join(str(v) for v in req.bbox)
-        raw, _, _ = await safe_fetch_bytes(
-            f"{self._cmr_url}/granules.json",
-            allowed_hosts=self._allowed_hosts(),
-            headers=headers,
-            params=params,
-            timeout=self._timeout,
-            max_retries=self._max_retries,
-            transport=self._transport,
-        )
-        doc = json.loads(raw.decode("utf-8"))
-        entries = doc.get("feed", {}).get("entry", []) if isinstance(doc, Mapping) else []
-        for entry in entries:
-            for link in entry.get("links", []) if isinstance(entry, Mapping) else []:
-                href = link.get("href", "") if isinstance(link, Mapping) else ""
-                if href.startswith("https://") and href.lower().endswith((".hdf", ".tif", ".tiff")):
-                    return str(href)
-        raise IncompatibleDatasetError(f"No CMR granule download URL found for '{req.product}'")
-
     async def handle_payload(self, payload: Mapping[str, object]) -> SpatialDataset:
         """Download MODIS granule lazily via ReaderRegistry without warping or QA scaling."""
         req = parse_handler_payload(MODISPayload, payload)
         comp_days, cadence, template_specs = _PRODUCT_SPECS[req.product]
         headers = {"Authorization": f"Bearer {self._token}"} if self._token else {}
-        url = await self._resolve_granule_url(req, headers)
+        t0 = req.start_time.astimezone(UTC)
+        url = req.granule_url or await discover_cmr_granule_url(
+            self._cmr_url,
+            req.product,
+            t0,
+            t0 + timedelta(days=comp_days),
+            (".hdf", ".tif", ".tiff"),
+            bbox=req.bbox,
+            headers=headers,
+            timeout=self._timeout,
+            max_retries=self._max_retries,
+            transport=self._transport,
+        )
         raw, final_url, media = await safe_fetch_bytes(
             url,
-            allowed_hosts=self._allowed_hosts(),
+            allowed_hosts=earthdata_hosts_for(self._cmr_url),
             headers=headers,
             timeout=self._timeout,
             max_retries=self._max_retries,
