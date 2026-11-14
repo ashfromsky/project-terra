@@ -95,11 +95,18 @@ Planned components include:
 - Ruff
 - ESLint
 
-Run locally from the repository root via `Makefile`:
+Run locally from the repository root via `Makefile` (requires Node.js 20+ with `pnpm`, `uv`, and Python 3.13+):
 
-- `make contracts` — export `openapi.json` from `backend/core` and regenerate `frontend/src/shared/api/generated/schema.d.ts`
-- `make dev` — start `backend/core` and the Vite dev server concurrently (auto-regenerates API contracts on startup)
-- `make test`, `make lint`, `make frontend-typecheck` — run backend and frontend tests, linters, and strict TypeScript type checks
+- **Frontend only:** `cd frontend && pnpm dev` (or `make frontend-dev`) — regenerates OpenAPI/TypeScript contracts via `predev` and starts Vite (`http://localhost:5173`) with `/api` and `/health` proxied to `VITE_API_PROXY_TARGET` (default `http://127.0.0.1:8000`).
+- **Main development environment:** `make dev` — regenerates contracts, then starts `backend/core` (`http://127.0.0.1:8000`, `/health`, `/health/ready`) and Vite (`http://localhost:5173`).
+- **GHS-only environment:** `make dev-ghs` — starts the isolated Geospatial Harmonization Service API (`http://127.0.0.1:8080`, `/health`, `/ready`) and `WorkerRunner` as separate processes sharing the same GHS configuration, database, and storage. Run components individually with `make ghs-api-dev`, `make ghs-worker-dev`, and `make ghs-migrate`.
+- **Complete local environment:** `make dev-full` — regenerates contracts and starts all four independent processes (`CORE`, `FRONTEND`, `GHS`, `GHS-WORKER`). Starting all four processes does not imply Core ↔ GHS integration; GHS remains isolated per ADR-0002.
+- **Standalone & utility targets:** `make backend-dev`, `make contracts`, `make test` (Core + Frontend), `make ghs-test`, `make dev-check` (orchestrator tests), `make lint`, `make ghs-lint`, `make frontend-typecheck`.
+
+#### Environment & Process Supervision
+
+- **Configuration:** Core and Vite read root `.env` (and `backend/core/.env` for Core); GHS API and Worker both run from `backend/services/geospatial_harmonization/` and share its `.env` (never committed). Optional port overrides: `CORE_HOST`, `CORE_PORT` (default `8000`), `GHS_HOST`, `GHS_PORT` (default `8080`), `FRONTEND_PORT` (default `5173`).
+- **Logs & shutdown:** `scripts/dev.mjs` prefixes logs (`[CONTRACTS]`, `[CORE]`, `[FRONTEND]`, `[GHS]`, `[GHS-WORKER]`), checks port availability before launch, and shuts down all child process groups cleanly on `Ctrl+C` (`SIGINT`/`SIGTERM`) or if any child exits unexpectedly.
 
 ## Architecture
 

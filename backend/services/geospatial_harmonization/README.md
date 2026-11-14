@@ -41,6 +41,8 @@ uv run alembic upgrade head
 
 ## Running Locally & Docker
 
+From the repository root you can also use `make dev-ghs` (API + worker together), `make ghs-api-dev`, `make ghs-worker-dev`, `make ghs-migrate`, `make ghs-test`, and `make ghs-lint`.
+
 ```bash
 cd backend/services/geospatial_harmonization
 uv sync

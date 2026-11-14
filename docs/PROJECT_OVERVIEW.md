@@ -70,7 +70,12 @@ project-terra/
 
 ## 5. Tooling, Verification Baseline & Repo Quirks
 
-- **Build automation:** Root [Makefile](../Makefile) standardizes frontend package management on `pnpm` (`pnpm@12.19.0` with `pnpm-lock.yaml` / `pnpm-workspace.yaml`; `package-lock.json` removed) alongside `uv` for `backend/core`. Key root targets: `contracts`, `dev` (runs Granian + Vite concurrently), `frontend-test`, `frontend-typecheck`, `frontend-lint`, `frontend-build`, `backend-test`, `backend-lint`. `geospatial_harmonization` commands currently live only in its service README.
+- **Build automation & dev orchestration:** Root [Makefile](../Makefile) standardizes frontend package management on `pnpm` (`pnpm@12.19.0` with `pnpm-lock.yaml` / `pnpm-workspace.yaml`; `package-lock.json` removed) alongside `uv` for `backend/core` and `backend/services/geospatial_harmonization`. Multi-process presets run through Node.js built-in supervision (`scripts/dev.mjs` + `scripts/dev-orchestrator.mjs`, tested via `scripts/dev-orchestrator.test.mjs`):
+  - `cd frontend && pnpm dev` / `make frontend-dev`: Frontend-only Vite dev server (`predev` runs `contracts:generate`).
+  - `make dev`: Main everyday environment — generates contracts, then starts `CORE` (`backend/core` Granian/FastAPI on `:8000`) and `FRONTEND` (Vite on `:5173`).
+  - `make dev-ghs`: GHS-only environment — starts `GHS` API (`:8080`) and `GHS-WORKER` (`geospatial_harmonization.worker`) as separate OS processes sharing `backend/services/geospatial_harmonization` config, database, and storage. Standalone targets: `make ghs-api-dev`, `make ghs-worker-dev`, `make ghs-migrate`.
+  - `make dev-full`: Complete local stack — generates contracts and starts all four independent processes (`CORE`, `FRONTEND`, `GHS`, `GHS-WORKER`). **Note:** `make dev-full` is local process supervision only; GHS remains disconnected from `backend/core` and `frontend` with no Core ↔ GHS integration implemented.
+  - Verification targets: `make test` runs `backend-test` (Core) + `frontend-test`; `make ghs-test` runs GHS pytest separately; `make dev-check` runs orchestrator unit tests; `make lint`, `make ghs-lint`, `make frontend-typecheck`, and `make frontend-build` cover linting, typing, and builds.
 - **Asset notes:** `frontend/index.html` references `/assets/terra-logo.png`, rewritten by Vite during build from `frontend/assets/terra-logo.png` (no `frontend/public/assets/` directory exists).
 - **Previous baseline on `9b97886` (`2026-11-14`, unedited GHS):**
   - `backend/services/geospatial_harmonization`: `uv run pytest` (`79 passed, 1 skipped` — `tests/integration/test_postgres_locking.py` skips unless `GHS_TEST_POSTGRES_URL` is set), `ruff check`, `ruff format --check`, and `mypy src` (`strict`, `52` source files) passed.
