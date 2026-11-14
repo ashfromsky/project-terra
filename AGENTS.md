@@ -371,7 +371,15 @@ After implementation:
 - Record significant architectural decisions in ADRs.
 - Update documentation when changing existing behavior.
 
-## 11. Definition of Done
+## 11. Commits and branching
+- Use descriptive commit messages (conventional style).
+- Create feature branches for new development.
+- Merge changes into the main branch after review.
+- Use pull requests for code review and discussion.
+- Keep the main branch stable and deployable.
+
+
+## 12. Definition of Done
 
 A task is complete only when:
 
