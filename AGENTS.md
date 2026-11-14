@@ -55,6 +55,28 @@ Modules must have explicit boundaries. Avoid cyclic dependencies and direct acce
 
 Do not introduce microservices or distributed infrastructure without a demonstrated requirement.
 
+## Architecture Reference
+
+Before making any non-trivial architectural, cross-module,
+data-processing, or infrastructure changes, you MUST read:
+
+- `docs/architecture/SYSTEM_ARCHITECTURE.md`
+
+This document defines the intended system architecture,
+component responsibilities, boundaries, integrations,
+and data flows.
+
+`AGENTS.md` defines engineering rules.
+`SYSTEM_ARCHITECTURE.md` defines system design.
+
+All implementations must respect both documents.
+
+If an implementation requires deviating from the architecture:
+1. Explain the reason.
+2. Identify affected components.
+3. Propose an Architecture Decision Record (ADR).
+4. Do not silently change architectural boundaries.
+
 ## 4. Frontend Engineering
 
 Technology:
