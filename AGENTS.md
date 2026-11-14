@@ -6,6 +6,110 @@ These guidelines apply to the entire repository and all AI coding agents working
 
 All instructions are mandatory unless explicitly overridden by the project owner.
 
+## Mandatory Incremental Development & Review Workflow
+
+This workflow is mandatory for ALL AI coding agents and applies to both frontend and backend development.
+
+### 1. Change Size Limit
+
+- Work in small, logically independent implementation increments.
+- Target approximately 300–350 changed source-code lines per increment.
+- 400 changed source-code lines is the HARD LIMIT.
+- Count added and deleted lines together, not net line differences.
+- Exclude generated files, dependency lockfiles, binary assets, and automatically generated code from the limit. Report these separately.
+- Never artificially split a file or commit an incomplete, broken implementation just to meet the line limit.
+- If a task requires more changes, divide it into multiple independently reviewable and functional increments.
+
+### 2. Mandatory Commit Procedure
+
+When an implementation increment reaches approximately 300–350 changed source-code lines:
+
+1. Stop implementing new functionality.
+2. Review the complete staged and unstaged diff.
+3. Remove unrelated changes and temporary files.
+4. Run relevant tests, linting, type checking, and build verification.
+5. Ensure the increment leaves the repository in a working state.
+6. Stage ONLY files belonging to the current increment.
+7. Create a Git commit using Conventional Commits.
+
+Do not exceed 400 changed source-code lines in a single commit.
+
+### 3. Conventional Commits
+
+All commits MUST follow Conventional Commits:
+
+`<type>(<scope>): <description>`
+
+Allowed types include:
+
+- `feat` — new functionality.
+- `fix` — bug fixes.
+- `refactor` — structural improvements without behavior changes.
+- `test` — tests.
+- `docs` — documentation.
+- `style` — formatting and styling without logic changes.
+- `perf` — performance improvements.
+- `chore` — maintenance and configuration.
+- `build` — build system changes.
+
+Examples:
+
+- `feat(map): implement Equal Earth renderer`
+- `feat(frontend): add map explorer routing`
+- `fix(api): handle invalid region geometry`
+- `test(scientific-core): add NDVI validation tests`
+- `docs(architecture): document spatial harmonization`
+
+Commit messages must be concise, descriptive, and written in English.
+
+### 4. No Automatic Push
+
+- NEVER run `git push`.
+- NEVER push branches or commits to remote repositories.
+- NEVER force-push.
+- Create local commits only.
+- Do not amend or rewrite existing commits unless explicitly instructed.
+
+All commits must remain local until the project owner approves their review and explicitly authorizes further Git operations.
+
+### 5. Mandatory Review Notification
+
+Immediately after creating each commit:
+
+- STOP all further implementation work.
+- Notify the project owner that the increment is ready for review.
+- Provide the commit hash and Conventional Commit message.
+- Report the number of added and deleted source-code lines.
+- List all modified files.
+- Summarize the implemented changes.
+- Report tests, linting, type checks, and build results.
+- Explicitly disclose any failures or unfinished work.
+
+The notification must request project owner review and approval.
+
+### 6. Approval Gate
+
+After sending the review notification:
+
+- Do not start the next implementation increment.
+- Wait for explicit approval from the project owner.
+- Resume only after approval.
+- Apply requested corrections before proceeding.
+- Never interpret silence as approval.
+
+### 7. Exceptional Cases
+
+If the current change cannot be safely split into a working increment within the 400-line limit:
+
+- Stop before exceeding the limit.
+- Explain the dependency between the changes.
+- Propose a safe implementation breakdown.
+- Wait for approval before proceeding with an alternative approach.
+
+If tests fail, do not commit the change as successfully completed. Report the failure and request review of the issue or corrective action.
+
+**Core principle: Every implementation increment must be small, functional, committed, locally preserved, and explicitly approved before the next increment begins.**
+
 ## 1. Project Context
 
 PROJECT TERRA is an open-source environmental analysis platform focused on ecosystem response, environmental stress, and resilience assessment.
@@ -413,5 +517,66 @@ A task is complete only when:
 - No unrelated functionality is modified.
 - Documentation is updated where necessary.
 - Remaining limitations are explicitly reported.
+
+## Final Commit Organization & History Integrity
+
+At the end of every multi-step implementation task, the agent MUST perform a final Git history audit.
+
+### 1. Logical Commit Organization
+
+If implementation changes remain uncommitted, organize them into small, logically independent commits.
+
+Group changes by:
+- Architecture and project configuration.
+- Dependencies and tooling.
+- Core components and infrastructure.
+- Individual features and modules.
+- Tests.
+- Documentation.
+- Bug fixes and refinements.
+
+Every commit must represent one coherent implementation step.
+
+Do not group unrelated functionality into the same commit.
+
+### 2. Commit Chronology
+
+- Arrange commits in logical implementation order.
+- Dependencies and foundational components must precede features that depend on them.
+- Tests must follow or accompany the implementation they verify.
+- Documentation should reflect the implementation that actually exists.
+- Commit timestamps must reflect the actual time of committing.
+- Never fabricate, backdate, or manipulate author or committer dates to create an artificial development timeline.
+
+### 3. Existing Commits
+
+- Preserve previously approved commits.
+- Never rewrite, amend, squash, or reorder existing commits without explicit authorization.
+- Do not duplicate functionality already committed.
+- Do not force-push or push any changes.
+
+### 4. Final History Audit
+
+Before declaring the task complete:
+
+1. Check `git status`.
+2. Inspect all commits created during the task.
+3. Verify that each commit follows Conventional Commits.
+4. Verify that each commit respects the 400-line source-code change limit, excluding explicitly exempted generated files.
+5. Verify chronological and logical consistency.
+6. Confirm that no implementation changes remain unintentionally uncommitted.
+
+### 5. Final Report
+
+Provide:
+- Ordered list of commits.
+- Commit hashes and messages.
+- Actual commit timestamps.
+- Files and functionality covered by each commit.
+- Added and deleted source-code lines.
+- Test and verification results.
+- Any remaining uncommitted changes.
+
+**Final principle: Git history must accurately represent the actual development process, with small, logical, chronological, and independently reviewable commits.**
 
 **Final principle: Build TERRA as a scientifically trustworthy, modular, reproducible, and maintainable engineering system.**
