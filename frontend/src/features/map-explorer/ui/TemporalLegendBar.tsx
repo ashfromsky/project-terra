@@ -1,5 +1,5 @@
 import { useEffect, useMemo } from 'react'
-import { getLayerDefinition } from '../../../entities/layer/model/layer-catalog'
+import { useLayerCatalogQuery, useTemporalCoverageQuery } from '../../../shared/api/layers'
 import { BASEMAP_PROVIDER_REGISTRY } from '../../../shared/config/geospatial'
 import type { ObservationGranularity } from '../../../shared/types/geospatial'
 import {
@@ -10,8 +10,7 @@ import {
   Pause,
   Play,
 } from '../../../shared/ui/explorer-icons'
-import { useTemporalCoverageQuery } from '../api/use-map-provider-queries'
-import { useExploreStore } from '../model/use-explore-store'
+import { resolveLayerControlState, useExploreStore } from '../model/use-explore-store'
 
 function stepIsoDate(isoDate: string, cadence: ObservationGranularity, dir: 1 | -1): string {
   const parsed = new Date(`${isoDate}T00:00:00Z`)
@@ -51,14 +50,15 @@ export function TemporalLegendBar() {
   const setTemporalPlaying = useExploreStore((s) => s.setTemporalPlaying)
   const toggleTemporalPlaying = useExploreStore((s) => s.toggleTemporalPlaying)
 
-  const activeLayer = getLayerDefinition(primaryLayerId)
+  const catalogQuery = useLayerCatalogQuery()
+  const layers = catalogQuery.data ?? []
+  const activeLayer = layers.find((layer) => layer.id === primaryLayerId) ?? layers[0] ?? null
   const basemapConfig = BASEMAP_PROVIDER_REGISTRY[basemap]
-  const layerState = layerStates[primaryLayerId]
-  const coverageQuery = useTemporalCoverageQuery(primaryLayerId)
-  const cadence = activeLayer.availableTimeRange.cadence
+  const coverageQuery = useTemporalCoverageQuery(activeLayer?.id ?? '', Boolean(activeLayer))
+  const cadence: ObservationGranularity = activeLayer?.availableTimeRange.cadence ?? 'monthly'
 
   useEffect(() => {
-    if (!temporalPlaying) return
+    if (!temporalPlaying || !activeLayer) return
     const timer = window.setInterval(() => {
       const current = useExploreStore.getState().selectedDate
       const next = stepIsoDate(current, cadence, 1)
@@ -69,7 +69,7 @@ export function TemporalLegendBar() {
       }
     }, 950)
     return () => window.clearInterval(timer)
-  }, [cadence, dateRangeEnd, dateRangeStart, setSelectedDate, temporalPlaying])
+  }, [activeLayer, cadence, dateRangeEnd, dateRangeStart, setSelectedDate, temporalPlaying])
 
   const rangeMinMs = useMemo(() => dateToMs(dateRangeStart), [dateRangeStart])
   const rangeMaxMs = useMemo(
@@ -81,15 +81,11 @@ export function TemporalLegendBar() {
     return Math.min(rangeMaxMs, Math.max(rangeMinMs, val))
   }, [rangeMaxMs, rangeMinMs, selectedDate])
 
-  const minDisplay = layerState?.minValue ?? activeLayer.valueRange.defaultMin
-  const maxDisplay = layerState?.maxValue ?? activeLayer.valueRange.defaultMax
-  const midDisplay = Number(((minDisplay + maxDisplay) / 2).toFixed(2))
-
   if (!bottomPanelOpen) {
     return (
       <div className="explorer-bottom-collapsed">
         <span className="explorer-bottom-collapsed__meta">
-          {activeLayer.shortName} · {selectedDate} · {basemapConfig.shortName}
+          {activeLayer ? activeLayer.shortName : 'Layer catalog'} · {selectedDate} · {basemapConfig.shortName}
         </span>
         <button
           type="button"
@@ -103,6 +99,13 @@ export function TemporalLegendBar() {
     )
   }
 
+  const activeControl = activeLayer
+    ? resolveLayerControlState(activeLayer, layerStates[activeLayer.id], primaryLayerId)
+    : null
+  const minDisplay = activeControl?.minValue ?? 0
+  const maxDisplay = activeControl?.maxValue ?? 1
+  const midDisplay = Number(((minDisplay + maxDisplay) / 2).toFixed(2))
+
   return (
     <section
       className="explorer-bottom-dock"
@@ -114,6 +117,7 @@ export function TemporalLegendBar() {
             <button
               type="button"
               className="explorer-icon-mini"
+              disabled={!activeLayer}
               onClick={() => {
                 setTemporalPlaying(false)
                 const prev = stepIsoDate(selectedDate, cadence, -1)
@@ -127,6 +131,7 @@ export function TemporalLegendBar() {
             <button
               type="button"
               className={`explorer-icon-mini ${temporalPlaying ? 'is-active' : ''}`}
+              disabled={!activeLayer}
               onClick={toggleTemporalPlaying}
               aria-label={temporalPlaying ? 'Pause timeline' : 'Play timeline'}
               title={temporalPlaying ? 'Pause' : 'Play observation timeline'}
@@ -136,6 +141,7 @@ export function TemporalLegendBar() {
             <button
               type="button"
               className="explorer-icon-mini"
+              disabled={!activeLayer}
               onClick={() => {
                 setTemporalPlaying(false)
                 const next = stepIsoDate(selectedDate, cadence, 1)
@@ -167,20 +173,20 @@ export function TemporalLegendBar() {
               type="date"
               className="explorer-mini-date"
               value={dateRangeStart}
-              min={activeLayer.availableTimeRange.start}
+              min={activeLayer?.availableTimeRange.start ?? '2000-01-01'}
               max={dateRangeEnd}
               onChange={(e) => {
                 if (e.target.value) setDateRange(e.target.value, dateRangeEnd)
               }}
               aria-label="Range start date"
             />
-            <span aria-hidden="true">–</span>
+            <span aria-hidden="true">-</span>
             <input
               type="date"
               className="explorer-mini-date"
               value={dateRangeEnd}
               min={dateRangeStart}
-              max={activeLayer.availableTimeRange.end}
+              max={activeLayer?.availableTimeRange.end ?? '2030-12-31'}
               onChange={(e) => {
                 if (e.target.value) setDateRange(dateRangeStart, e.target.value)
               }}
@@ -207,53 +213,87 @@ export function TemporalLegendBar() {
       </div>
 
       <div className="explorer-legend-pane">
-        <div className="explorer-legend-pane__head">
-          <div className="explorer-legend-pane__title-wrap">
-            <span className="explorer-legend-pane__title">
-              {activeLayer.legend.title}
-            </span>
-            <span className="explorer-legend-pane__unit">({activeLayer.legend.unit})</span>
-            {activeLayer.isSyntheticPreview && syntheticPreviewEnabled ? (
-              <span className="explorer-status-pill is-preview">Synthetic Preview</span>
-            ) : (
-              <span className="explorer-status-pill is-unavailable">No Connected Raster</span>
-            )}
-          </div>
+        {!activeLayer ? (
+          <>
+            <div className="explorer-legend-pane__head">
+              <div className="explorer-legend-pane__title-wrap">
+                <span className="explorer-legend-pane__title">
+                  {catalogQuery.isPending ? 'Loading layer legend…' : 'Layer legend unavailable'}
+                </span>
+                {catalogQuery.isError && (
+                  <button
+                    type="button"
+                    className="explorer-inline-reset"
+                    onClick={() => void catalogQuery.refetch()}
+                  >
+                    Retry API
+                  </button>
+                )}
+              </div>
+              <button
+                type="button"
+                className="explorer-icon-mini"
+                onClick={() => setBottomPanelOpen(false)}
+                aria-label="Collapse bottom timeline and legend bar"
+                title="Collapse bar"
+              >
+                <ChevronDown size={14} />
+              </button>
+            </div>
+            <div className="explorer-attribution-line">
+              <span>Basemap: {basemapConfig.attribution}</span>
+              <span>Layer: TERRA Core API /api/v1/layers not connected</span>
+            </div>
+          </>
+        ) : (
+          <>
+            <div className="explorer-legend-pane__head">
+              <div className="explorer-legend-pane__title-wrap">
+                <span className="explorer-legend-pane__title">{activeLayer.legend.title}</span>
+                <span className="explorer-legend-pane__unit">({activeLayer.legend.unit})</span>
+                {activeLayer.isSyntheticPreview && syntheticPreviewEnabled ? (
+                  <span className="explorer-status-pill is-preview">Synthetic Preview</span>
+                ) : (
+                  <span className="explorer-status-pill is-unavailable">No Connected Raster</span>
+                )}
+              </div>
 
-          <button
-            type="button"
-            className="explorer-icon-mini"
-            onClick={() => setBottomPanelOpen(false)}
-            aria-label="Collapse bottom timeline and legend bar"
-            title="Collapse bar"
-          >
-            <ChevronDown size={14} />
-          </button>
-        </div>
+              <button
+                type="button"
+                className="explorer-icon-mini"
+                onClick={() => setBottomPanelOpen(false)}
+                aria-label="Collapse bottom timeline and legend bar"
+                title="Collapse bar"
+              >
+                <ChevronDown size={14} />
+              </button>
+            </div>
 
-        <div className="explorer-legend-bar-wrap">
-          <div
-            className="explorer-legend-gradient"
-            style={{ background: activeLayer.legend.gradientCss }}
-          />
-          <div className="explorer-legend-ticks">
-            <span>{minDisplay}</span>
-            <span>{midDisplay}</span>
-            <span>{maxDisplay}</span>
-          </div>
-          <div className="explorer-nodata-chip">
-            <span
-              className="explorer-nodata-swatch"
-              style={{ backgroundColor: activeLayer.legend.nodataColor }}
-            />
-            <span>{activeLayer.legend.nodataLabel}</span>
-          </div>
-        </div>
+            <div className="explorer-legend-bar-wrap">
+              <div
+                className="explorer-legend-gradient"
+                style={{ background: activeLayer.legend.gradientCss }}
+              />
+              <div className="explorer-legend-ticks">
+                <span>{minDisplay}</span>
+                <span>{midDisplay}</span>
+                <span>{maxDisplay}</span>
+              </div>
+              <div className="explorer-nodata-chip">
+                <span
+                  className="explorer-nodata-swatch"
+                  style={{ backgroundColor: activeLayer.legend.nodataColor }}
+                />
+                <span>{activeLayer.legend.nodataLabel}</span>
+              </div>
+            </div>
 
-        <div className="explorer-attribution-line">
-          <span>Basemap: {basemapConfig.attribution}</span>
-          <span>Layer: {activeLayer.attribution}</span>
-        </div>
+            <div className="explorer-attribution-line">
+              <span>Basemap: {basemapConfig.attribution}</span>
+              <span>Layer: {activeLayer.attribution}</span>
+            </div>
+          </>
+        )}
       </div>
     </section>
   )

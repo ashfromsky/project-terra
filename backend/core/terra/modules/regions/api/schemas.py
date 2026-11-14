@@ -1,30 +1,74 @@
 """Pydantic schemas for the Regions API aligned with frontend AoiFeature types."""
 
 from datetime import datetime
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 from uuid import UUID
 
-from pydantic import Field
+from pydantic import BaseModel, Field
 
 from terra.api.schemas import CamelModel
 from terra.modules.regions.application.services import RegionStatistics
 from terra.modules.regions.domain.entities import Region, RegionRole, RegionShapeType
+
+Position2D = tuple[float, float]
+PositionInput = tuple[float, float] | tuple[float, float, float]
+BoundingBox2D = tuple[float, float, float, float]
+RegionObservationStatus = Literal["connected", "preview", "planned", "unavailable"]
+
+
+class GeoJsonPolygonSchema(BaseModel):
+    """Normalized 2D EPSG:4326 GeoJSON Polygon geometry."""
+
+    type: Literal["Polygon"]
+    coordinates: list[list[Position2D]]
+
+
+class GeoJsonMultiPolygonSchema(BaseModel):
+    """Normalized 2D EPSG:4326 GeoJSON MultiPolygon geometry."""
+
+    type: Literal["MultiPolygon"]
+    coordinates: list[list[list[Position2D]]]
+
+
+class GeoJsonPolygonInputSchema(BaseModel):
+    """Accepted EPSG:4326 GeoJSON Polygon input geometry."""
+
+    type: Literal["Polygon"]
+    coordinates: list[list[PositionInput]]
+
+
+class GeoJsonMultiPolygonInputSchema(BaseModel):
+    """Accepted EPSG:4326 GeoJSON MultiPolygon input geometry."""
+
+    type: Literal["MultiPolygon"]
+    coordinates: list[list[list[PositionInput]]]
+
+
+RegionGeometry = Annotated[
+    GeoJsonPolygonSchema | GeoJsonMultiPolygonSchema,
+    Field(discriminator="type"),
+]
+
+RegionGeometryInput = Annotated[
+    GeoJsonPolygonInputSchema | GeoJsonMultiPolygonInputSchema,
+    Field(discriminator="type"),
+]
 
 
 def _spatial_fields(r: Region) -> dict[str, Any]:
     return {
         "source_crs": r.source_crs,
         "approx_area_km2": r.metrics.approx_area_km2,
-        "bbox": list(r.metrics.bbox),
-        "centroid": list(r.metrics.centroid),
+        "bbox": r.metrics.bbox,
+        "centroid": r.metrics.centroid,
     }
 
 
 class _SpatialSummarySchema(CamelModel):
     source_crs: Literal["EPSG:4326"]
     approx_area_km2: float
-    bbox: list[float]
-    centroid: list[float]
+    bbox: BoundingBox2D
+    centroid: Position2D
 
 
 class RegionCreateRequest(CamelModel):
@@ -35,7 +79,7 @@ class RegionCreateRequest(CamelModel):
     role: RegionRole = "primary"
     shape_type: RegionShapeType = "polygon"
     iso_a3: str | None = Field(default=None, min_length=3, max_length=3)
-    geometry: dict[str, Any]
+    geometry: RegionGeometryInput
 
 
 class RegionUpdateMetadataRequest(CamelModel):
@@ -51,7 +95,7 @@ class RegionUpdateMetadataRequest(CamelModel):
 class RegionUpdateGeometryRequest(CamelModel):
     """Replacement GeoJSON geometry payload for an existing region."""
 
-    geometry: dict[str, Any]
+    geometry: RegionGeometryInput
     shape_type: RegionShapeType | None = None
 
 
@@ -66,30 +110,32 @@ class RegionResponse(_SpatialSummarySchema):
     iso_a3: str | None
     vertex_count: int
     polygon_count: int
-    geometry: dict[str, Any]
+    geometry: RegionGeometry
     created_at: datetime
     updated_at: datetime
 
     @classmethod
     def from_domain(cls, r: Region) -> "RegionResponse":
-        return cls(
-            id=r.id,
-            name=r.name,
-            description=r.description,
-            role=r.role,
-            shape_type=r.shape_type,
-            iso_a3=r.iso_a3,
-            vertex_count=r.metrics.vertex_count,
-            polygon_count=r.metrics.polygon_count,
-            geometry=r.geometry,
-            created_at=r.created_at,
-            updated_at=r.updated_at,
-            **_spatial_fields(r),
+        return cls.model_validate(
+            {
+                "id": r.id,
+                "name": r.name,
+                "description": r.description,
+                "role": r.role,
+                "shape_type": r.shape_type,
+                "iso_a3": r.iso_a3,
+                "vertex_count": r.metrics.vertex_count,
+                "polygon_count": r.metrics.polygon_count,
+                "geometry": r.geometry,
+                "created_at": r.created_at,
+                "updated_at": r.updated_at,
+                **_spatial_fields(r),
+            }
         )
 
 
 class AoiPropertiesResponse(_SpatialSummarySchema):
-    """GeoJSON Feature properties matching frontend AoiProperties."""
+    """GeoJSON Feature properties matching frontend AoiFeature contract."""
 
     id: UUID
     name: str
@@ -105,7 +151,7 @@ class RegionGeometryResponse(CamelModel):
     type: Literal["Feature"] = "Feature"
     id: UUID
     properties: AoiPropertiesResponse
-    geometry: dict[str, Any]
+    geometry: RegionGeometry
 
     @classmethod
     def from_domain(cls, r: Region) -> "RegionGeometryResponse":
@@ -118,7 +164,7 @@ class RegionGeometryResponse(CamelModel):
             iso_a3=r.iso_a3,
             **_spatial_fields(r),
         )
-        return cls(id=r.id, properties=props, geometry=r.geometry)
+        return cls.model_validate({"id": r.id, "properties": props, "geometry": r.geometry})
 
 
 class RegionStatisticsResponse(_SpatialSummarySchema):
@@ -128,20 +174,28 @@ class RegionStatisticsResponse(_SpatialSummarySchema):
     region_name: str
     vertex_count: int
     polygon_count: int
-    observation_status: str
+    observation_status: RegionObservationStatus
     message: str
     available_metrics: list[str]
 
     @classmethod
     def from_domain(cls, stats: RegionStatistics) -> "RegionStatisticsResponse":
         r = stats.region
-        return cls(
-            region_id=r.id,
-            region_name=r.name,
-            vertex_count=r.metrics.vertex_count,
-            polygon_count=r.metrics.polygon_count,
-            observation_status=stats.observation_status,
-            message=stats.message,
-            available_metrics=["approxAreaKm2", "bbox", "centroid", "vertexCount", "polygonCount"],
-            **_spatial_fields(r),
+        return cls.model_validate(
+            {
+                "region_id": r.id,
+                "region_name": r.name,
+                "vertex_count": r.metrics.vertex_count,
+                "polygon_count": r.metrics.polygon_count,
+                "observation_status": stats.observation_status,
+                "message": stats.message,
+                "available_metrics": [
+                    "approxAreaKm2",
+                    "bbox",
+                    "centroid",
+                    "vertexCount",
+                    "polygonCount",
+                ],
+                **_spatial_fields(r),
+            }
         )

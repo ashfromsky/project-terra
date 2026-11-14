@@ -1,7 +1,5 @@
-import {
-  ENVIRONMENTAL_LAYER_CATALOG,
-  LAYER_GROUPS,
-} from '../../../entities/layer/model/layer-catalog'
+import { LAYER_GROUPS } from '../../../entities/layer/model/layer-catalog'
+import { useLayerCatalogQuery } from '../../../shared/api/layers'
 import type { DataAvailabilityStatus, MapLayerDefinition } from '../../../shared/types/geospatial'
 import {
   AlertTriangle,
@@ -11,8 +9,7 @@ import {
   SlidersHorizontal,
   X,
 } from '../../../shared/ui/explorer-icons'
-import { useLayerCatalogQuery } from '../api/use-map-provider-queries'
-import { useExploreStore } from '../model/use-explore-store'
+import { resolveLayerControlState, useExploreStore } from '../model/use-explore-store'
 
 function getStatusBadgeMeta(layer: MapLayerDefinition): {
   label: string
@@ -52,11 +49,18 @@ export function LayerCatalogSidebar() {
   const showRegionBoundaries = useExploreStore((s) => s.showRegionBoundaries)
   const setShowRegionBoundaries = useExploreStore((s) => s.setShowRegionBoundaries)
 
-  const { data: layers = ENVIRONMENTAL_LAYER_CATALOG, isLoading } = useLayerCatalogQuery()
+  const catalogQuery = useLayerCatalogQuery()
+  const layers = catalogQuery.data ?? []
 
   if (!leftSidebarOpen) {
     return null
   }
+
+  const subtitle = catalogQuery.isPending
+    ? 'Connecting to TERRA Core API…'
+    : catalogQuery.isError
+      ? 'Catalog unavailable · Core API offline'
+      : `${layers.length} cataloged products · backend raster pending`
 
   return (
     <aside
@@ -66,9 +70,7 @@ export function LayerCatalogSidebar() {
       <div className="explorer-panel-header">
         <div>
           <h2 className="explorer-panel-title">Layer Catalog</h2>
-          <p className="explorer-panel-subtitle">
-            {layers.length} cataloged products · backend raster pending
-          </p>
+          <p className="explorer-panel-subtitle">{subtitle}</p>
         </div>
         <button
           type="button"
@@ -138,8 +140,26 @@ export function LayerCatalogSidebar() {
           </div>
         </section>
 
-        {isLoading ? (
-          <div className="explorer-state-card">Loading geospatial catalog...</div>
+        {catalogQuery.isPending ? (
+          <div className="explorer-state-card" role="status">
+            Loading environmental layers from TERRA Core API…
+          </div>
+        ) : catalogQuery.isError ? (
+          <div className="explorer-state-card explorer-state-card--error" role="alert">
+            <p className="explorer-state-card__title">Could not load layer catalog</p>
+            <p className="explorer-muted-copy">
+              Ensure the TERRA Core API is running and reachable at <code>/api/v1/layers</code>.
+            </p>
+            <button
+              type="button"
+              className="explorer-action-btn"
+              onClick={() => void catalogQuery.refetch()}
+            >
+              Retry
+            </button>
+          </div>
+        ) : layers.length === 0 ? (
+          <div className="explorer-state-card">No layers returned by TERRA Core API.</div>
         ) : (
           LAYER_GROUPS.map((group) => {
             const groupLayers = layers.filter((l) => l.groupId === group.id)
@@ -152,12 +172,11 @@ export function LayerCatalogSidebar() {
                 <div className="explorer-layer-list">
                   {groupLayers.map((layer) => {
                     const isPrimary = layer.id === primaryLayerId
-                    const control = layerStates[layer.id] ?? {
-                      visible: isPrimary,
-                      opacity: 0.85,
-                      minValue: layer.valueRange.defaultMin,
-                      maxValue: layer.valueRange.defaultMax,
-                    }
+                    const control = resolveLayerControlState(
+                      layer,
+                      layerStates[layer.id],
+                      primaryLayerId,
+                    )
                     const badge = getStatusBadgeMeta(layer)
 
                     return (

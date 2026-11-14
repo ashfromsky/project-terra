@@ -225,6 +225,47 @@ export function buildAoiFeatureCollection(
   }
 }
 
+export function normalizeAoiGeometry(geometry: unknown): AoiGeometry | null {
+  if (!geometry || typeof geometry !== 'object') return null
+  const candidate = geometry as { type?: unknown; coordinates?: unknown }
+  const toPair = (pt: unknown): [number, number] | null => {
+    if (!Array.isArray(pt) || pt.length < 2) return null
+    const lon = Number(pt[0])
+    const lat = Number(pt[1])
+    if (!Number.isFinite(lon) || !Number.isFinite(lat)) return null
+    return [lon, lat]
+  }
+  const toRing = (ring: unknown): [number, number][] | null => {
+    if (!Array.isArray(ring)) return null
+    const pairs = ring.map(toPair)
+    if (pairs.some((p) => p === null)) return null
+    return pairs.filter((p): p is [number, number] => p !== null)
+  }
+
+  if (candidate.type === 'Polygon' && Array.isArray(candidate.coordinates)) {
+    const rings = candidate.coordinates.map(toRing)
+    if (rings.some((r) => r === null)) return null
+    return {
+      type: 'Polygon',
+      coordinates: rings.filter((r): r is [number, number][] => r !== null),
+    }
+  }
+  if (candidate.type === 'MultiPolygon' && Array.isArray(candidate.coordinates)) {
+    const polys = candidate.coordinates.map((poly) => {
+      if (!Array.isArray(poly)) return null
+      const rings = poly.map(toRing)
+      if (rings.some((r) => r === null)) return null
+      return rings.filter((r): r is [number, number][] => r !== null)
+    })
+    if (polys.some((p) => p === null)) return null
+    return {
+      type: 'MultiPolygon',
+      coordinates: polys.filter((p): p is [number, number][][] => p !== null),
+    }
+  }
+  return null
+}
+
 export function exportAoiGeoJsonFile(
   aois: readonly AoiFeature[],
   filename = 'terra-aoi-wgs84.geojson',
