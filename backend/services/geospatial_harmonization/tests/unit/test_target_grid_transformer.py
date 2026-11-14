@@ -1,6 +1,7 @@
 """Unit tests for provider-agnostic TargetGridTransformer."""
 
 import hashlib
+from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 from uuid import uuid4
@@ -8,7 +9,13 @@ from uuid import uuid4
 import netCDF4
 import numpy as np
 import pytest
+import rasterio
+from rasterio.transform import from_origin
 
+from geospatial_harmonization.domain.exceptions import (
+    IncompatibleDatasetError,
+    QualityPolicyViolationError,
+)
 from geospatial_harmonization.domain.models import dataset as dm
 from geospatial_harmonization.domain.models.grid import GridSpec, SpatialBounds
 from geospatial_harmonization.domain.models.harmonization import TargetGridTransformRequest
@@ -88,6 +95,91 @@ def test_transform_netcdf_mixed_semantics_conserves_flux_and_raw_immutability(
     qa_a = next(a for a in res.dataset.assets if a.asset_id.endswith("_QC"))
     qa_dec = GeoTIFFReader().read(qa_a, Path(qa_a.uri.removeprefix("file://")))
     assert set(np.unique(qa_dec.arrays["QC"]).tolist()).issubset({0, 1, 8, 255})
+
+
+def test_transform_cross_crs_upsampling_sidecar_and_error_guards(tmp_path: Path) -> None:
+    ndvi_tif = tmp_path / "NDVI.tif"
+    with rasterio.open(
+        ndvi_tif,
+        "w",
+        driver="GTiff",
+        height=4,
+        width=4,
+        count=1,
+        dtype="int16",
+        crs="EPSG:4326",
+        transform=from_origin(10.0, 51.0, 0.25, 0.25),
+        nodata=-3000,
+    ) as dst:
+        dst.write(np.full((4, 4), 5000, dtype=np.int16), 1)
+        dst.set_band_description(1, "NDVI")
+    sidecar = tmp_path / "meta.json"
+    sidecar.write_text('{"sidecar": true}', encoding="utf-8")
+
+    src_geo = GridSpec(
+        "EPSG:4326", 0.25, 0.25, "degree", SpatialBounds(10.0, 50.0, 11.0, 51.0)
+    ).resolved()
+    dst_merc = GridSpec(
+        "EPSG:3857",
+        5000.0,
+        5000.0,
+        "meter",
+        SpatialBounds(1120000.0, 6450000.0, 1140000.0, 6470000.0),
+    ).resolved()
+    now = datetime(2026, 6, 1, tzinfo=UTC)
+    v_ndvi = {
+        "NDVI": dm.VariableSpec(
+            "NDVI", "1", "int16", ("y", "x"), "continuous_intensive", -3000, 0.0001
+        )
+    }
+    ds = dm.SpatialDataset(
+        uuid4(),
+        "s2",
+        "generic",
+        "p",
+        v_ndvi,
+        {"NDVI": "1"},
+        dm.SpatialMetadata("raster", src_geo.crs, src_geo.bounds, src_geo),
+        TemporalSpec(now, now, "daily", "instantaneous"),
+        dm.QualityMetadata("raw"),
+        (
+            dm.AssetReference("m", sidecar.as_uri(), "json", "application/json"),
+            dm.AssetReference("n", ndvi_tif.as_uri(), "geotiff", "image/tiff"),
+        ),
+        dm.ProvenanceRecord("generic", "p", "1.0", now, "0.1.0"),
+    )
+    res = TargetGridTransformer(output_dir=tmp_path / "out").transform(
+        TargetGridTransformRequest(ds, dst_merc, resampling_overrides={"NDVI": "cubic"})
+    )
+    assert res.methods_applied["NDVI"] == "cubic" and any(
+        "upsampling" in w.lower() for w in res.warnings
+    )
+    dec = GeoTIFFReader().read(
+        res.dataset.assets[0], Path(res.dataset.assets[0].uri.removeprefix("file://"))
+    )
+    assert np.nanmean(dec.arrays["NDVI"]) == pytest.approx(0.5, abs=1e-4)
+
+    far_geo = GridSpec(
+        "EPSG:4326", 0.25, 0.25, "degree", SpatialBounds(40.0, 50.0, 41.0, 51.0)
+    ).resolved()
+    non_ov = TargetGridTransformer(output_dir=tmp_path / "out").transform(
+        TargetGridTransformRequest(ds, far_geo)
+    )
+    assert non_ov.quality_report.passed is False and non_ov.quality_report.nodata_fraction == 1.0
+
+    with pytest.raises(QualityPolicyViolationError, match="bilinear"):
+        qc_v = {"QC": dm.VariableSpec("QC", "bitmask", "uint8", ("y", "x"), "qa_flag")}
+        TargetGridTransformRequest(
+            replace(ds, variables=qc_v, units={"QC": "bitmask"}),
+            dst_merc,
+            resampling_overrides={"QC": "bilinear"},
+        )
+
+    rem_ds = replace(ds, assets=(dm.AssetReference("r", "s3://b/k.tif", "geotiff", "image/tiff"),))
+    with pytest.raises(IncompatibleDatasetError, match="local path or file://"):
+        TargetGridTransformer(output_dir=tmp_path / "out").transform(
+            TargetGridTransformRequest(rem_ds, src_geo)
+        )
 
 
 def test_transformations_package_has_no_provider_conditionals() -> None:
