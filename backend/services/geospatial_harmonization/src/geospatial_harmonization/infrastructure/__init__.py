@@ -2,12 +2,16 @@
 
 from geospatial_harmonization.infrastructure.storage import (
     LocalObjectStore,
+    S3ObjectStore,
+    build_storage_port,
     infer_data_format,
     normalize_object_key,
 )
 
 __all__ = [
     "LocalObjectStore",
+    "S3ObjectStore",
+    "build_storage_port",
     "infer_data_format",
     "normalize_object_key",
 ]
