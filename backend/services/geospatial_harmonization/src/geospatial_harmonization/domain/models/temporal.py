@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Literal
 
-from geospatial_harmonization.domain.exceptions import InvalidTemporalSpecError
+from geospatial_harmonization.domain.exceptions import DomainError, InvalidTemporalSpecError
 
 TemporalSemantics = Literal["instantaneous", "interval", "composite", "climatology"]
 TemporalAggregationKind = Literal[
@@ -12,9 +12,11 @@ TemporalAggregationKind = Literal[
 ]
 
 
-def _require_tz_aware(dt: datetime, field_name: str) -> None:
+def require_tz_aware(
+    dt: datetime, field_name: str, error_cls: type[DomainError] = InvalidTemporalSpecError
+) -> None:
     if dt.tzinfo is None or dt.utcoffset() is None:
-        raise InvalidTemporalSpecError(f"{field_name} must be timezone-aware")
+        raise error_cls(f"{field_name} must be timezone-aware")
 
 
 @dataclass(frozen=True, slots=True)
@@ -29,8 +31,8 @@ class TemporalSpec:
     composite_days: int | None = None
 
     def __post_init__(self) -> None:
-        _require_tz_aware(self.start, "start")
-        _require_tz_aware(self.end, "end")
+        require_tz_aware(self.start, "start")
+        require_tz_aware(self.end, "end")
         if not self.cadence.strip():
             raise InvalidTemporalSpecError("cadence must be a non-empty string")
         if self.semantics == "instantaneous":
