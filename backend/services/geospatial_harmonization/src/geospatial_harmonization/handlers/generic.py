@@ -4,7 +4,6 @@ import tempfile
 from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
-from urllib.parse import urlparse
 from uuid import uuid4
 
 import httpx
@@ -22,8 +21,7 @@ from geospatial_harmonization.domain.models.temporal import TemporalSemantics, T
 from geospatial_harmonization.handlers.base import (
     build_provenance,
     parse_handler_payload,
-    safe_fetch_bytes,
-    write_raw_asset,
+    safe_fetch_to_file,
 )
 from geospatial_harmonization.readers import ReaderRegistry, build_default_reader_registry
 
@@ -65,6 +63,8 @@ class GenericHandler:
         self._allowed_hosts = hosts
         self._timeout = cfg.http_timeout_seconds
         self._max_retries = cfg.http_max_retries
+        self._max_object_bytes = cfg.ghs_storage_max_object_bytes
+        self._chunk_bytes = cfg.ghs_storage_stream_chunk_bytes
         self._readers = reader_registry or build_default_reader_registry()
         self._raw_dir = raw_dir
         self._transport = transport
@@ -84,16 +84,19 @@ class GenericHandler:
             raise IncompatibleDatasetError(
                 "GenericHandler is disabled because generic_handler_allowed_hosts is empty"
             )
-        raw, final_url, media = await safe_fetch_bytes(
+        base_dir = self._raw_dir or Path(tempfile.mkdtemp(prefix="ghs_generic_"))
+        path, asset, final_url = await safe_fetch_to_file(
             req.url,
+            base_dir,
+            data_format=req.data_format,
             allowed_hosts=self._allowed_hosts,
             timeout=self._timeout,
             max_retries=self._max_retries,
             transport=self._transport,
+            max_bytes=self._max_object_bytes,
+            chunk_bytes=self._chunk_bytes,
         )
-        base_dir = self._raw_dir or Path(tempfile.mkdtemp(prefix="ghs_generic_"))
-        fname = Path(urlparse(final_url).path).name or "generic_asset"
-        path, asset = write_raw_asset(base_dir, fname, raw, req.data_format, media)
+        fname = path.name
         decoded = self._readers.read(asset, path, variables=req.variables)
         if not decoded.variables:
             raise IncompatibleDatasetError("Decoded generic asset exposed zero variables")

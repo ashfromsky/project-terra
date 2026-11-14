@@ -12,6 +12,11 @@ from geospatial_harmonization.infrastructure.database.models import (
     GhsAssetModel,
     GhsDatasetModel,
     GhsHarmonizationJobModel,
+    GhsStorageAssetRefModel,
+    GhsStorageAuditEventModel,
+    GhsStorageLedgerStateModel,
+    GhsStorageObjectModel,
+    GhsStorageReservationModel,
 )
 from geospatial_harmonization.infrastructure.database.session import (
     build_async_engine,
@@ -24,6 +29,11 @@ __all__ = [
     "GhsBase",
     "GhsDatasetModel",
     "GhsHarmonizationJobModel",
+    "GhsStorageAssetRefModel",
+    "GhsStorageAuditEventModel",
+    "GhsStorageLedgerStateModel",
+    "GhsStorageObjectModel",
+    "GhsStorageReservationModel",
     "build_async_engine",
     "build_session_factory",
     "check_database_health",

@@ -7,8 +7,13 @@ from sqlalchemy.dialects import postgresql
 from sqlalchemy.schema import CreateTable
 
 from geospatial_harmonization.config.settings import Settings
-from geospatial_harmonization.infrastructure.database import GhsHarmonizationJobModel
+from geospatial_harmonization.infrastructure.database import (
+    GhsHarmonizationJobModel,
+    GhsStorageAssetRefModel,
+    GhsStorageLedgerStateModel,
+)
 from geospatial_harmonization.infrastructure.repositories import build_claim_statement
+from geospatial_harmonization.infrastructure.storage_ledger import build_ledger_lock_statement
 from geospatial_harmonization.worker.__main__ import build_worker_runtime
 
 
@@ -17,8 +22,19 @@ def test_postgres_dialect_renders_skip_locked_and_jsonb() -> None:
     compiled = str(stmt.compile(dialect=postgresql.dialect()))
     assert "FOR UPDATE SKIP LOCKED" in compiled
 
+    lock_stmt = build_ledger_lock_statement(for_update=True)
+    assert "FOR UPDATE" in str(lock_stmt.compile(dialect=postgresql.dialect()))
+
     ddl = str(CreateTable(GhsHarmonizationJobModel.__table__).compile(dialect=postgresql.dialect()))
     assert "JSONB" in ddl
+    ref_ddl = str(
+        CreateTable(GhsStorageAssetRefModel.__table__).compile(dialect=postgresql.dialect())
+    )
+    assert "JSONB" in ref_ddl
+    ledger_ddl = str(
+        CreateTable(GhsStorageLedgerStateModel.__table__).compile(dialect=postgresql.dialect())
+    )
+    assert "ghs_storage_ledger_state" in ledger_ddl
 
 
 async def test_build_worker_runtime_initializes_and_drains(tmp_path: Path) -> None:
