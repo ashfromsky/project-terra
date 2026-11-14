@@ -7,8 +7,9 @@ from terra.modules.layers.domain.entities import (
 )
 from terra.modules.layers.infrastructure.derived_layers import DERIVED_LAYERS
 from terra.modules.layers.infrastructure.observation_layers import OBSERVATION_LAYERS
+from terra.modules.layers.infrastructure.resilience_layers import RESILIENCE_LAYERS
 
-ALL_LAYERS: tuple[LayerDefinition, ...] = OBSERVATION_LAYERS + DERIVED_LAYERS
+ALL_LAYERS: tuple[LayerDefinition, ...] = OBSERVATION_LAYERS + DERIVED_LAYERS + RESILIENCE_LAYERS
 
 
 class StaticLayerCatalogRepository:
