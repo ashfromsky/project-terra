@@ -1,5 +1,7 @@
 """GitHub OAuth and session endpoints under ``/api/v1/auth``."""
 
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+
 from fastapi import APIRouter, HTTPException, Query, Response, status
 from fastapi.responses import RedirectResponse
 
@@ -29,15 +31,39 @@ from terra.modules.auth.domain.exceptions import (
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 
+def _build_frontend_redirect_url(
+    base_url: str,
+    return_to: str | None = None,
+    *,
+    auth_error: str | None = None,
+) -> str:
+    parsed = urlsplit(base_url)
+    target_path = parsed.path
+    target_query = parsed.query
+    if return_to:
+        rel = urlsplit(return_to)
+        if rel.path:
+            target_path = rel.path
+        target_query = rel.query
+    query_params = dict(parse_qsl(target_query, keep_blank_values=True))
+    if auth_error:
+        query_params["authError"] = auth_error
+    return urlunsplit((parsed.scheme, parsed.netloc, target_path, urlencode(query_params), ""))
+
+
 @router.get("/github/login", response_model=GitHubLoginResponse)
 async def github_login(
     github_client: GitHubOAuthClientDep,
     token_service: TokenServiceDep,
     redirect: bool = Query(default=False),
+    return_to: str | None = Query(default=None, alias="returnTo"),
 ) -> GitHubLoginResponse | RedirectResponse:
     """Initiate GitHub OAuth flow via JSON URL or HTTP redirect."""
     try:
-        authorize_url, _ = StartGitHubLoginUseCase(github_client, token_service).execute()
+        authorize_url, _ = StartGitHubLoginUseCase(github_client, token_service).execute(
+            redirect_to_frontend=redirect,
+            return_to=return_to,
+        )
     except OAuthConfigurationError as exc:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -56,11 +82,37 @@ async def github_callback(
     users: UserRepositoryDep,
     github_client: GitHubOAuthClientDep,
     token_service: TokenServiceDep,
-    code: str = Query(..., min_length=1),
     state: str = Query(..., min_length=1),
+    code: str | None = Query(default=None, min_length=1),
+    error: str | None = Query(default=None),
     redirect: bool = Query(default=False),
 ) -> AuthCallbackResponse | RedirectResponse:
     """Handle GitHub OAuth callback, upsert user by GitHub ID, and issue session."""
+    if error is not None:
+        try:
+            claims = token_service.verify_oauth_state(state)
+        except AuthenticationError as exc:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(exc)) from exc
+        if redirect or claims.redirect_to_frontend:
+            return RedirectResponse(
+                url=_build_frontend_redirect_url(
+                    settings.frontend_auth_redirect_url,
+                    claims.return_to,
+                    auth_error=error,
+                ),
+                status_code=status.HTTP_302_FOUND,
+            )
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=f"GitHub OAuth error: {error}",
+        )
+
+    if code is None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="Missing GitHub authorization code",
+        )
+
     use_case = AuthenticateGitHubCallbackUseCase(users, github_client, token_service)
     try:
         session = await use_case.execute(code=code, state=state)
@@ -72,6 +124,19 @@ async def github_callback(
             detail=str(exc),
         ) from exc
     except OAuthExchangeError as exc:
+        try:
+            claims = token_service.verify_oauth_state(state)
+        except AuthenticationError:
+            claims = None
+        if claims is not None and (redirect or claims.redirect_to_frontend):
+            return RedirectResponse(
+                url=_build_frontend_redirect_url(
+                    settings.frontend_auth_redirect_url,
+                    claims.return_to,
+                    auth_error="oauth_exchange_failed",
+                ),
+                status_code=status.HTTP_302_FOUND,
+            )
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
 
     cookie_kwargs = {
@@ -83,9 +148,12 @@ async def github_callback(
         "max_age": settings.jwt_access_token_expire_minutes * 60,
         "path": "/",
     }
-    if redirect:
+    if redirect or session.redirect_to_frontend:
         redirect_resp = RedirectResponse(
-            url=settings.frontend_auth_redirect_url,
+            url=_build_frontend_redirect_url(
+                settings.frontend_auth_redirect_url,
+                session.return_to,
+            ),
             status_code=status.HTTP_302_FOUND,
         )
         redirect_resp.set_cookie(**cookie_kwargs)
