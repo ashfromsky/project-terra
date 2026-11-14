@@ -170,10 +170,16 @@ class StorageZoneManager:
         return zone
 
     def assert_deletable(self, key: str, *, reason: str) -> StorageZone:
-        """Prevent unsafe automatic deletion of source data upon job completion."""
+        """Prevent unsafe automatic deletion of source data upon job completion or sweeps."""
         zone = self.infer_zone(key)
         policy = self.policy_for(zone)
-        if zone == "raw" and reason in ("job_completed", "auto_intermediate_cleanup"):
+        if zone == "raw" and reason in (
+            "job_completed",
+            "job_failed",
+            "auto_intermediate_cleanup",
+            "expired_ttl",
+            "orphan_sweep",
+        ):
             raise StorageImmutabilityError(
                 f"Source asset '{key}' in raw zone cannot be automatically deleted on '{reason}'"
             )
