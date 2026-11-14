@@ -25,6 +25,7 @@ from geospatial_harmonization.domain.models.storage import (
     StorageReservation,
     StorageUsageMetricsSnapshot,
     StorageZone,
+    StoredObjectInfo,
 )
 
 
@@ -64,9 +65,28 @@ class StoragePort(Protocol):
     async def put_file(
         self, key: str, path: Path, media_type: str = "application/octet-stream"
     ) -> AssetReference: ...
+    async def put_file_stream(
+        self,
+        key: str,
+        source_path: Path,
+        *,
+        media_type: str = "application/octet-stream",
+        chunk_size: int = 1_048_576,
+        verify_sha256: str | None = None,
+    ) -> StoredObjectInfo: ...
     async def get_bytes(self, key: str) -> bytes: ...
     async def materialize_to_path(self, key: str, dest: Path) -> Path: ...
+    async def stream_to_path(
+        self, key: str, destination_path: Path, *, chunk_size: int = 1_048_576
+    ) -> Path: ...
     async def exists(self, key: str) -> bool: ...
+    async def head_object(self, key: str) -> StoredObjectInfo | None: ...
+    async def list_objects(self, prefix: str = "") -> list[StoredObjectInfo]: ...
+    async def delete_object(self, key: str) -> bool: ...
+    async def abort_incomplete_multipart_uploads(
+        self, *, older_than_seconds: int = 3600
+    ) -> int: ...
+    async def cleanup_abandoned_temp_files(self, *, older_than_seconds: int = 1800) -> int: ...
 
 
 class StorageLedgerRepository(Protocol):
@@ -137,6 +157,14 @@ class StorageLedgerRepository(Protocol):
         saved_bytes: int,
         details: dict[str, object],
         now: datetime,
+    ) -> None: ...
+    async def record_reconciliation_snapshot(
+        self,
+        *,
+        diff_bytes: int,
+        orphaned_objects_count: int,
+        missing_referenced_objects_count: int,
+        checked_at: datetime,
     ) -> None: ...
     async def get_usage_metrics(self, now: datetime) -> StorageUsageMetricsSnapshot: ...
 
