@@ -1,0 +1,188 @@
+.explorer-stage-wrap {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+}
+
+.explorer-single-stage {
+  flex: 1 1 auto;
+  min-height: 0;
+  position: relative;
+  overflow: hidden;
+  background-color: var(--color-bg-observatory);
+}
+
+.explorer-map-viewport {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.explorer-map-viewport .maplibregl-canvas {
+  outline: none;
+}
+
+.explorer-stage-overlay-pill,
+.explorer-stage-error {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  padding: 8px 14px;
+  border-radius: 8px;
+  background-color: var(--color-bg-glass);
+  border: 1px solid var(--color-border-glass);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+  z-index: 15;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  box-shadow: var(--shadow-glass-panel);
+  backdrop-filter: blur(8px);
+}
+
+.explorer-stage-error {
+  border-color: var(--color-status-error-border);
+  background-color: var(--color-status-error-bg);
+  color: var(--color-status-error-text);
+}
+
+.explorer-stage-hud-tl {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  z-index: 12;
+  pointer-events: none;
+}
+
+.explorer-hud-badge {
+  padding: 4px 9px;
+  border-radius: 6px;
+  background-color: var(--color-bg-glass);
+  border: 1px solid var(--color-border-glass);
+  box-shadow: var(--shadow-map-callout);
+  backdrop-filter: blur(8px);
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--color-text-primary);
+}
+
+.explorer-hud-badge.is-highlight {
+  border-color: var(--color-border-teal);
+  color: var(--color-brand-teal);
+  background-color: var(--color-teal-subtle);
+  font-weight: 600;
+}
+
+.explorer-hud-badge.is-warning {
+  border-color: var(--color-status-warning-border);
+  background-color: var(--color-status-warning-bg);
+  color: var(--color-status-warning-text);
+}
+
+.explorer-draw-hud {
+  position: absolute;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 10px;
+  border-radius: 999px;
+  background-color: var(--color-bg-inverse);
+  color: #ffffff;
+  font-size: 11px;
+  font-weight: 600;
+  box-shadow: var(--shadow-glass-panel);
+  z-index: 14;
+}
+
+.explorer-hud-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 22px;
+  padding: 0 8px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.32);
+  background: transparent;
+  color: #ffffff;
+  font-size: 10.5px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.explorer-hud-btn.is-primary {
+  background-color: var(--color-brand-teal);
+  border-color: var(--color-brand-teal);
+}
+
+.explorer-stage-hud-bl {
+  position: absolute;
+  bottom: 12px;
+  left: 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 9px;
+  border-radius: 6px;
+  background-color: var(--color-bg-glass);
+  border: 1px solid var(--color-border-glass);
+  box-shadow: var(--shadow-map-callout);
+  backdrop-filter: blur(8px);
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--color-text-primary);
+  z-index: 12;
+  pointer-events: none;
+}
+
+.explorer-hud-deck-tag {
+  color: var(--color-signal-blue);
+  font-weight: 600;
+}
+
+.explorer-zoom-stack {
+  position: absolute;
+  right: 14px;
+  bottom: 14px;
+  width: 40px;
+  padding: 4px;
+  border-radius: 10px;
+  background-color: var(--color-bg-surface);
+  border: 1px solid var(--color-border-glass);
+  box-shadow: var(--shadow-map-callout);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  z-index: 12;
+}
+
+.explorer-zoom-btn {
+  width: 30px;
+  height: 30px;
+  border-radius: 7px;
+  border: none;
+  background-color: transparent;
+  color: var(--color-text-primary);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background-color 120ms ease, color 120ms ease;
+}
+
+.explorer-zoom-btn:hover {
+  background-color: var(--color-teal-active-tool);
+  color: var(--color-brand-teal);
+}
