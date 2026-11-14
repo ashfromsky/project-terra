@@ -1,0 +1,70 @@
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { apiFetchClient, ApiError, buildApiUrl, extractErrorDetail, unwrapApiResponse } from './client'
+import type { LogoutResponse, UserResponse } from './contracts'
+import { REGIONS_QUERY_KEY } from './regions'
+
+export type { LogoutResponse, UserResponse }
+
+export const AUTH_ME_QUERY_KEY = ['auth', 'me'] as const
+
+export async function fetchCurrentUser(): Promise<UserResponse | null> {
+  try {
+    const result = await apiFetchClient.GET('/api/v1/auth/me')
+    if (result.response.status === 401) {
+      return null
+    }
+    if (!result.response.ok || result.data === undefined) {
+      const detail = extractErrorDetail(result.error)
+      throw new ApiError(
+        result.response.status,
+        detail ?? `GET /api/v1/auth/me failed with status ${result.response.status}`,
+        detail,
+      )
+    }
+    return result.data
+  } catch (cause) {
+    if (cause instanceof ApiError) throw cause
+    throw new ApiError(0, `Network error calling /api/v1/auth/me: ${String(cause)}`)
+  }
+}
+
+export async function logoutSession(): Promise<LogoutResponse> {
+  try {
+    const result = await apiFetchClient.POST('/api/v1/auth/logout')
+    return unwrapApiResponse(result, 'POST /api/v1/auth/logout')
+  } catch (cause) {
+    if (cause instanceof ApiError) throw cause
+    throw new ApiError(0, `Network error calling /api/v1/auth/logout: ${String(cause)}`)
+  }
+}
+
+export function buildGitHubLoginUrl(returnTo?: string): string {
+  const params = new URLSearchParams({ redirect: 'true' })
+  if (returnTo && returnTo.startsWith('/') && !returnTo.startsWith('//')) {
+    params.set('returnTo', returnTo)
+  }
+  return buildApiUrl(`/api/v1/auth/github/login?${params.toString()}`)
+}
+
+export function useCurrentUserQuery() {
+  return useQuery({
+    queryKey: AUTH_ME_QUERY_KEY,
+    queryFn: fetchCurrentUser,
+    staleTime: 60_000,
+    retry: (failureCount, error) => {
+      if (error instanceof ApiError && error.status === 401) return false
+      return failureCount < 1
+    },
+  })
+}
+
+export function useLogoutMutation() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: logoutSession,
+    onSuccess: () => {
+      queryClient.setQueryData(AUTH_ME_QUERY_KEY, null)
+      queryClient.removeQueries({ queryKey: REGIONS_QUERY_KEY })
+    },
+  })
+}
