@@ -20,17 +20,23 @@ This workflow is mandatory for ALL AI coding agents and applies to both frontend
 - Never artificially split a file or commit an incomplete, broken implementation just to meet the line limit.
 - If a task requires more changes, divide it into multiple independently reviewable and functional increments.
 
-### 2. Mandatory Commit Procedure
+### 2. Mandatory Review, Commit & Push Procedure
 
 When an implementation increment reaches approximately 300–350 changed source-code lines:
 
 1. Stop implementing new functionality.
-2. Review the complete staged and unstaged diff.
+2. Review the complete unstaged and staged diff.
 3. Remove unrelated changes and temporary files.
 4. Run relevant tests, linting, type checking, and build verification.
 5. Ensure the increment leaves the repository in a working state.
-6. Stage ONLY files belonging to the current increment.
-7. Create a Git commit using Conventional Commits on the current working branch.
+6. Leave the increment changes **uncommitted** in the working tree and request project owner review.
+
+Only AFTER explicit project owner approval:
+
+7. Stage ONLY files belonging to the approved increment.
+8. Create a Git commit using Conventional Commits on the current working branch.
+9. Push the current working branch (`git push origin <working-branch>`).
+10. Proceed to the next implementation increment.
 
 Do not exceed 400 changed source-code lines in a single commit.
 
@@ -62,41 +68,40 @@ Examples:
 
 Commit messages must be concise, descriptive, and written in English.
 
-### 4. Prohibited Git Operations (No Push, Merge, or History Rewrite)
+### 4. Prohibited Git Operations (No Merge, Rewrite, or Unapproved Push)
 
 - NEVER run `git merge` (including fast-forward merges, `--no-ff`, or `--squash`).
 - NEVER run `git rebase` or `git cherry-pick`.
 - NEVER merge feature or working branches into `main` (or any other branch), even after receiving review approval or completing the entire task.
-- NEVER run `git push`, push branches or commits to remote repositories, or force-push.
+- NEVER push directly to `main`, push unapproved changes, or force-push.
 - NEVER amend, squash, or rewrite existing commits unless explicitly instructed.
-- Create local commits on the current working branch only.
+- Commit and push ONLY to the current working branch after explicit project owner approval of the uncommitted increment.
 
-Review approval from the project owner ONLY authorizes starting the next implementation increment on the same working branch—it NEVER authorizes merging branches or consolidating commits. All merges are performed exclusively by the project owner.
+Follow the mandatory batch chain: `new changes (uncommitted) -> owner review & approval -> commit and push to the working branch -> next batch`. All merges into `main` are performed exclusively by the project owner.
 
 ### 5. Mandatory Review Notification
 
-Immediately after creating each commit:
+Immediately after completing each increment (while leaving the changes uncommitted):
 
 - STOP all further implementation work.
-- Notify the project owner that the increment is ready for review.
-- Provide the commit hash and Conventional Commit message.
-- Report the number of added and deleted source-code lines.
-- List all modified files.
+- Notify the project owner that the uncommitted increment is ready for review.
+- Report the number of added and deleted source-code lines in the working tree.
+- List all modified and untracked files.
 - Summarize the implemented changes.
 - Report tests, linting, type checks, and build results.
 - Explicitly disclose any failures or unfinished work.
 
-The notification must request project owner review and approval.
+The notification must request project owner review and approval to commit, push, and proceed.
 
 ### 6. Approval Gate
 
 After sending the review notification:
 
-- Do not start the next implementation increment.
+- Leave the increment uncommitted and do not start the next implementation increment.
 - Wait for explicit approval from the project owner.
-- Resume only after approval, continuing strictly as a new incremental commit on the current working branch.
+- Once approved, commit the approved changes to the current working branch, push the working branch to `origin`, and begin the next increment.
 - Do NOT merge branches, switch to `main`, or squash commits after approval or at the end of the task.
-- Apply requested corrections before proceeding.
+- Apply requested corrections before committing or proceeding.
 - Never interpret silence as approval.
 
 ### 7. Exceptional Cases
@@ -108,9 +113,9 @@ If the current change cannot be safely split into a working increment within the
 - Propose a safe implementation breakdown.
 - Wait for approval before proceeding with an alternative approach.
 
-If tests fail, do not commit the change as successfully completed. Report the failure and request review of the issue or corrective action.
+If tests fail, do not commit or push the change as successfully completed. Report the failure and request review of the issue or corrective action.
 
-**Core principle: Every implementation increment must be small, functional, committed as an individual local commit on the working branch, and explicitly approved before the next increment begins. Never merge commits or branches.**
+**Core principle: Every implementation increment must follow the chain `new changes (uncommitted) -> explicit owner approval -> commit and push to the working branch -> next increment`. Never merge commits or branches.**
 
 ## 1. Project Context
 
@@ -499,9 +504,9 @@ After implementation:
 ## 11. Commits and Branching
 
 - Use descriptive commit messages (Conventional Commits style).
-- Create or use a feature branch for new development; never commit directly to `main`.
+- Create or use a feature branch for new development; never commit or push directly to `main`.
 - NEVER merge changes into `main` or any other branch (`git merge` is strictly forbidden for AI agents).
-- Leave all approved increments as separate, unmerged local commits on the working branch.
+- Leave new changes uncommitted for owner review; after explicit approval, commit and push each approved increment separately on the working branch.
 - Keep the `main` branch completely untouched; branch integration and pull requests are handled solely by the project owner.
 
 ## 12. Definition of Done
@@ -515,7 +520,7 @@ A task is complete only when:
 - Relevant tests and checks pass.
 - No unrelated functionality is modified.
 - Documentation is updated where necessary.
-- All increments are committed separately on the working branch without merging into `main`.
+- All approved increments are committed separately and pushed to the working branch without merging into `main`.
 - Remaining limitations are explicitly reported.
 
 ## Final Commit Organization & History Integrity
@@ -553,7 +558,7 @@ Do not group unrelated functionality into the same commit.
 - Preserve previously approved commits as individual commits.
 - Never merge, squash, rewrite, amend, or reorder existing commits without explicit authorization.
 - Do not duplicate functionality already committed.
-- Do not force-push or push any changes.
+- Never force-push, push unapproved changes, or push directly to `main`; push only approved commits on the working branch.
 
 ### 4. Final History Audit
 
