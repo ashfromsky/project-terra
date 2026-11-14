@@ -10,19 +10,18 @@ All instructions are mandatory unless explicitly overridden by the project owner
 
 This workflow is mandatory for ALL AI coding agents and applies to both frontend and backend development.
 
-### 1. Change Size Limit
+### 1. Incremental Change Scope & Branch Threshold
 
-- Work in small, logically independent implementation increments.
-- Target approximately 300–350 changed source-code lines per increment.
-- 400 changed source-code lines is the HARD LIMIT.
-- Count added and deleted lines together, not net line differences.
-- Exclude generated files, dependency lockfiles, binary assets, and automatically generated code from the limit. Report these separately.
-- Never artificially split a file or commit an incomplete, broken implementation just to meet the line limit.
-- If a task requires more changes, divide it into multiple independently reviewable and functional increments.
+- Work in logically independent, coherent implementation increments.
+- There is **no line-count limit** per increment or commit; never artificially split a file or a cohesive feature just to satisfy a line count.
+- If a task spans multiple independent concerns or large subsystems, divide it into independently reviewable and functional increments.
+- Creating a `feat/` branch is **optional** for tasks whose total functional changes are **1500 changed source-code lines or fewer**. Work directly on the current branch (including `main` when already on `main`).
+- When the functional changes of a task **exceed 1500 changed source-code lines**, you MUST create and work on a `feat/` branch (`feat/<descriptive-name>`) rather than committing or pushing directly to `main`.
+- When counting changed source-code lines (for reporting and for the 1500-line `feat/` branch threshold), count added and deleted lines together, not net line differences, and exclude generated files, dependency lockfiles, binary assets, and automatically generated code (report those separately).
 
 ### 2. Mandatory Review, Commit & Push Procedure
 
-When an implementation increment reaches approximately 300–350 changed source-code lines:
+Upon completing a logical implementation increment:
 
 1. Stop implementing new functionality.
 2. Review the complete unstaged and staged diff.
@@ -34,11 +33,9 @@ When an implementation increment reaches approximately 300–350 changed source-
 Only AFTER explicit project owner approval:
 
 7. Stage ONLY files belonging to the approved increment.
-8. Create a Git commit using Conventional Commits on the current working branch.
-9. Push the current working branch (`git push origin <working-branch>`).
+8. Create a Git commit using Conventional Commits on the active working branch (including `main` when changes are 1500 source-code lines or fewer and no `feat/` branch is used).
+9. Push the active working branch (`git push origin <working-branch>`).
 10. Proceed to the next implementation increment.
-
-Do not exceed 400 changed source-code lines in a single commit.
 
 ### 3. Conventional Commits
 
@@ -73,11 +70,12 @@ Commit messages must be concise, descriptive, and written in English.
 - NEVER run `git merge` (including fast-forward merges, `--no-ff`, or `--squash`).
 - NEVER run `git rebase` or `git cherry-pick`.
 - NEVER merge feature or working branches into `main` (or any other branch), even after receiving review approval or completing the entire task.
-- NEVER push directly to `main`, push unapproved changes, or force-push.
+- NEVER push unapproved changes or force-push.
+- NEVER commit or push directly to `main` without explicit owner approval, or when the task's functional changes exceed 1500 changed source-code lines (which require a `feat/` branch).
 - NEVER amend, squash, or rewrite existing commits unless explicitly instructed.
-- Commit and push ONLY to the current working branch after explicit project owner approval of the uncommitted increment.
+- Commit and push ONLY to the active working branch after explicit project owner approval of the uncommitted increment.
 
-Follow the mandatory batch chain: `new changes (uncommitted) -> owner review & approval -> commit and push to the working branch -> next batch`. All merges into `main` are performed exclusively by the project owner.
+Follow the mandatory batch chain: `new changes (uncommitted) -> owner review & approval -> commit and push to the active working branch -> next batch`. When a feature branch is used, all merges into `main` are performed exclusively by the project owner.
 
 ### 5. Mandatory Review Notification
 
@@ -99,23 +97,21 @@ After sending the review notification:
 
 - Leave the increment uncommitted and do not start the next implementation increment.
 - Wait for explicit approval from the project owner.
-- Once approved, commit the approved changes to the current working branch, push the working branch to `origin`, and begin the next increment.
-- Do NOT merge branches, switch to `main`, or squash commits after approval or at the end of the task.
+- Once approved, commit the approved changes to the active working branch, push that branch to `origin`, and begin the next increment.
+- Do NOT merge branches or squash commits after approval or at the end of the task (and when working on a `feat/` or other non-`main` branch, do NOT switch to `main` to integrate it).
 - Apply requested corrections before committing or proceeding.
 - Never interpret silence as approval.
 
 ### 7. Exceptional Cases
 
-If the current change cannot be safely split into a working increment within the 400-line limit:
+If a task started directly on `main` (or another non-`feat/` branch) grows beyond **1500 changed source-code lines**:
 
-- Stop before exceeding the limit.
-- Explain the dependency between the changes.
-- Propose a safe implementation breakdown.
-- Wait for approval before proceeding with an alternative approach.
+- Create and switch to a `feat/<descriptive-name>` branch before committing or pushing any changes exceeding the threshold.
+- Keep `main` free of >1500-line feature work.
 
 If tests fail, do not commit or push the change as successfully completed. Report the failure and request review of the issue or corrective action.
 
-**Core principle: Every implementation increment must follow the chain `new changes (uncommitted) -> explicit owner approval -> commit and push to the working branch -> next increment`. Never merge commits or branches.**
+**Core principle: Every implementation increment must follow the chain `new changes (uncommitted) -> explicit owner approval -> commit and push to the active working branch -> next increment`. Never merge commits or branches.**
 
 ## 1. Project Context
 
@@ -516,10 +512,11 @@ After implementation:
 ## 11. Commits and Branching
 
 - Use descriptive commit messages (Conventional Commits style).
-- Create or use a feature branch for new development; never commit or push directly to `main`.
+- Creating a `feat/` branch is **optional** when the task's functional changes are **1500 changed source-code lines or fewer** (excluding generated files, lockfiles, and binary assets); you may work, and after explicit owner approval commit and push, directly on the current branch (including `main`). This explicitly refines/overrides any global branch-prefix renaming rule for changes ≤ 1500 source-code lines in this repository.
+- When the functional changes exceed **1500 changed source-code lines**, you MUST create and use a `feat/` branch (`feat/<descriptive-name>`); never commit or push >1500-line feature changes directly to `main`.
 - NEVER merge changes into `main` or any other branch (`git merge` is strictly forbidden for AI agents).
-- Leave new changes uncommitted for owner review; after explicit approval, commit and push each approved increment separately on the working branch.
-- Keep the `main` branch completely untouched; branch integration and pull requests are handled solely by the project owner.
+- Leave new changes uncommitted for owner review; after explicit approval, commit and push each approved increment separately on the active working branch.
+- When working on a `feat/` (or other non-`main`) branch, keep `main` untouched; branch integration and pull requests are handled solely by the project owner.
 
 ## 12. Definition of Done
 
@@ -532,16 +529,16 @@ A task is complete only when:
 - Relevant tests and checks pass.
 - No unrelated functionality is modified.
 - Documentation (including `docs/PROJECT_OVERVIEW.md` for global changes) is updated where necessary.
-- All approved increments are committed separately and pushed to the working branch without merging into `main`.
+- All approved increments are committed separately and pushed to the active working branch without running `git merge`.
 - Remaining limitations are explicitly reported.
 
 ## Final Commit Organization & History Integrity
 
-At the end of every multi-step implementation task, the agent MUST perform a final Git history audit on the current working branch without merging branches or rewriting history.
+At the end of every multi-step implementation task, the agent MUST perform a final Git history audit on the active working branch without merging branches or rewriting history.
 
 ### 1. Logical Commit Organization
 
-If implementation changes remain uncommitted, organize them into small, logically independent commits on the current working branch.
+If implementation changes remain uncommitted, organize them into logically independent commits on the active working branch.
 
 Group changes by:
 - Architecture and project configuration.
@@ -570,16 +567,16 @@ Do not group unrelated functionality into the same commit.
 - Preserve previously approved commits as individual commits.
 - Never merge, squash, rewrite, amend, or reorder existing commits without explicit authorization.
 - Do not duplicate functionality already committed.
-- Never force-push, push unapproved changes, or push directly to `main`; push only approved commits on the working branch.
+- Never force-push or push unapproved changes; push only approved commits on the active working branch (and never commit/push >1500-line functional changes directly to `main`).
 
 ### 4. Final History Audit
 
 Before declaring the task complete:
 
-1. Check `git status` and confirm the repository remains on the working branch (not merged into `main`).
+1. Check `git status` and confirm the repository remains on the active working branch (and if a `feat/` or other non-`main` branch was used, confirm it was not merged into `main`).
 2. Inspect all commits created during the task.
 3. Verify that each commit follows Conventional Commits.
-4. Verify that each commit respects the 400-line source-code change limit, excluding explicitly exempted generated files.
+4. Verify that a `feat/` branch was created and used if the task's functional changes exceeded 1500 changed source-code lines (excluding explicitly exempted generated files).
 5. Verify chronological and logical consistency.
 6. Confirm that no implementation changes remain unintentionally uncommitted.
 
@@ -595,6 +592,6 @@ Provide:
 - Test and verification results.
 - Any remaining uncommitted changes.
 
-**Final principle: Git history must accurately represent the actual development process, with small, logical, chronological, unmerged, and independently reviewable commits.**
+**Final principle: Git history must accurately represent the actual development process, with logical, chronological, unmerged, and independently reviewable commits.**
 
 **Final principle: Build TERRA as a scientifically trustworthy, modular, reproducible, and maintainable engineering system.**
