@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react'
 import { Link, NavLink, useLocation } from 'react-router'
-import { figmaAssets } from '../../shared/config/assets'
+import { brandAssets, figmaAssets } from '../../shared/config/assets'
 import { APP_ROUTES, WORKSPACE_NAV_ITEMS } from '../../shared/config/routes'
 import { useUiStore } from '../../shared/store/ui-store'
 
@@ -40,20 +40,38 @@ export function TopNavigation() {
   return (
     <header className="workspace-nav" data-node-id="14:3">
       <div className="workspace-nav__inner">
-        <Link to={APP_ROUTES.home} className="workspace-nav__brand" aria-label="TERRA Home">
-          <span className="workspace-nav__symbol-box" data-node-id="14:48">
-            <span className="workspace-nav__symbol-frame" data-node-id="14:49">
-              <img
-                src={figmaAssets.terraSymbol}
-                alt=""
-                className="workspace-nav__symbol-img"
+        <Link
+          to={APP_ROUTES.home}
+          className="workspace-nav__brand"
+          aria-label="Project Terra home"
+        >
+          <span className="workspace-nav__brand-emblem">
+            <svg
+              className="workspace-nav__brand-orbit"
+              viewBox="0 0 48 48"
+              fill="none"
+              aria-hidden="true"
+            >
+              <circle
+                cx="24"
+                cy="24"
+                r="20.25"
+                stroke="currentColor"
+                strokeOpacity="0.28"
+                strokeWidth="1.15"
+                strokeDasharray="46 17.6"
+                strokeDashoffset="10"
+                strokeLinecap="round"
               />
-            </span>
-          </span>
-          <span className="workspace-nav__wordmark" data-node-id="14:54">
-            TERRA
+            </svg>
+            <img
+              src={brandAssets.terraLogo}
+              alt=""
+              className="workspace-nav__symbol-img"
+            />
           </span>
         </Link>
+        <span className="workspace-nav__brand-divider" aria-hidden="true" />
 
         <nav className="workspace-nav__links" aria-label="Workspace navigation">
           {WORKSPACE_NAV_ITEMS.map((item) => (
