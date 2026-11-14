@@ -3,6 +3,7 @@
 from geospatial_harmonization.transformations._warp import (
     WarpedVariable,
     check_upsampling_warning,
+    clip_raster_to_aoi,
     orient_to_north_up,
     warp_variable,
     write_variable_geotiff,
@@ -29,6 +30,7 @@ __all__ = [
     "aggregate_temporal_stack",
     "check_temporal_alignment",
     "check_upsampling_warning",
+    "clip_raster_to_aoi",
     "default_local_asset_resolver",
     "integrate_rate_to_depth",
     "normalize_to_utc",

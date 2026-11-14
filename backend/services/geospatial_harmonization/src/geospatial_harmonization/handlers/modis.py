@@ -6,7 +6,6 @@ from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Literal
-from urllib.parse import urlparse
 from uuid import uuid4
 
 import httpx
@@ -28,8 +27,7 @@ from geospatial_harmonization.handlers.base import (
     discover_cmr_granule_url,
     earthdata_hosts_for,
     parse_handler_payload,
-    safe_fetch_bytes,
-    write_raw_asset,
+    safe_fetch_to_file,
 )
 from geospatial_harmonization.readers import ReaderRegistry, build_default_reader_registry
 
@@ -130,6 +128,8 @@ class MODISHandler:
         self._token = cfg.earthdata_token.get_secret_value() if cfg.earthdata_token else None
         self._timeout = cfg.http_timeout_seconds
         self._max_retries = cfg.http_max_retries
+        self._max_object_bytes = cfg.ghs_storage_max_object_bytes
+        self._chunk_bytes = cfg.ghs_storage_stream_chunk_bytes
         self._readers = reader_registry or build_default_reader_registry()
         self._raw_dir = raw_dir
         self._transport = transport
@@ -160,17 +160,21 @@ class MODISHandler:
             max_retries=self._max_retries,
             transport=self._transport,
         )
-        raw, final_url, media = await safe_fetch_bytes(
+        base_dir = self._raw_dir or Path(tempfile.mkdtemp(prefix="ghs_modis_"))
+        path, asset, final_url = await safe_fetch_to_file(
             url,
+            base_dir,
+            fallback_filename=f"{req.product}.hdf",
+            data_format=req.data_format,
             allowed_hosts=earthdata_hosts_for(self._cmr_url),
             headers=headers,
             timeout=self._timeout,
             max_retries=self._max_retries,
             transport=self._transport,
+            max_bytes=self._max_object_bytes,
+            chunk_bytes=self._chunk_bytes,
         )
-        base_dir = self._raw_dir or Path(tempfile.mkdtemp(prefix="ghs_modis_"))
-        fname = Path(urlparse(final_url).path).name or f"{req.product}.hdf"
-        path, asset = write_raw_asset(base_dir, fname, raw, req.data_format, media)
+        fname = path.name
         decoded = self._readers.read(asset, path, variables=req.variables)
 
         variables: dict[str, VariableSpec] = {}
