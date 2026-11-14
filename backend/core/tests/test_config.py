@@ -57,3 +57,16 @@ def test_unknown_environment_variables_are_ignored(
 
     assert settings.environment == "test"
     assert settings.cors_origins == []
+
+
+def test_production_environment_rejects_default_jwt_secret() -> None:
+    with pytest.raises(ValueError, match="JWT_SECRET_KEY"):
+        Settings(environment="production")
+
+
+def test_production_environment_accepts_strong_jwt_secret() -> None:
+    settings = Settings(
+        environment="production",
+        jwt_secret_key="a" * 32,
+    )
+    assert settings.environment == "production"
