@@ -48,8 +48,8 @@ def test_cors_origins_read_from_environment_json(
 def test_unknown_environment_variables_are_ignored(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Copying the root `.env.example` (which contains VITE_* variables)
-    into the service directory must not break settings construction."""
+    """Unrelated environment variables (for example frontend `VITE_*`
+    entries) must not break settings construction."""
     monkeypatch.setenv("VITE_API_BASE_URL", "http://localhost:8000")
     monkeypatch.setenv("TERRA_UNRELATED_VARIABLE", "value")
 

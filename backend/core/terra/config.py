@@ -1,9 +1,10 @@
 """Centralized application settings.
 
 Values are read from the process environment or from a `.env` file placed in
-the working directory the server is started from (see `.env.example` at the
-repository root). Unknown variables (for example `VITE_*` entries when the
-root example file is copied verbatim) are ignored.
+the working directory the server is started from. Environment files are never
+committed; every field of `Settings` maps to an environment variable of the
+same name (with the defaults documented below). Unknown variables (for
+example frontend `VITE_*` entries) are ignored.
 """
 
 import json

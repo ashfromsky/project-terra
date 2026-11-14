@@ -3,7 +3,7 @@
  *
  * All backend communication goes through `request()` so error handling,
  * base-URL resolution, and typing stay in one place. `VITE_API_BASE_URL`
- * comes from the root `.env` (see `.env.example`).
+ * comes from the root `.env`.
  */
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8000'
