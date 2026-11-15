@@ -34,6 +34,8 @@ from terra_scientific.domain.enums import (
     SeasonalGrouping,
     StageStatus,
     TemporalCadence,
+    TrendDirection,
+    VariableSemanticKind,
 )
 from terra_scientific.domain.exceptions import ScientificCoreError, ScientificInputError
 from terra_scientific.domain.models.dataset import (
@@ -65,7 +67,13 @@ from terra_scientific.domain.models.result import (
 from terra_scientific.domain.models.temporal import ensure_utc
 from terra_scientific.methods.registry import DEFAULT_METHOD_REGISTRY
 from terra_scientific.pipeline.artifacts import JsonArtifactWriter
+from terra_scientific.pipeline.merging import merge_compatible_datasets
 from terra_scientific.quality.validator import screen_dataset_variable, screen_grid_stack
+from terra_scientific.readiness import (
+    evaluate_assessment_readiness,
+    resolve_aggregation_min_coverage,
+    resolve_trend_requirements,
+)
 from terra_scientific.recovery.analyzer import analyze_post_event_recovery
 from terra_scientific.resilience.metrics import compute_resilience_dimensions
 from terra_scientific.spatial.autocorrelation import compute_morans_i_and_hotspots
@@ -164,7 +172,8 @@ class ScientificAssessmentService:
                 summary_warnings=["No quantitative datasets supplied to assessment pipeline."],
             )
 
-        stacks = dict(grid_stacks or {})
+        datasets, stacks, merge_warnings = merge_compatible_datasets(datasets, grid_stacks)
+        summary_warnings.extend(merge_warnings)
         digest = _compute_input_digest(request, datasets)
 
         # Stage 1 & 2: Quality Screening & Temporal Harmonization
@@ -247,8 +256,21 @@ class ScientificAssessmentService:
                             )
                         )
                         harmonization_steps.append(f"{key}: converted IMERG rate (mm/hr) to mm")
+                    elif (
+                        op == AggregationOperator.SUM
+                        and var_meta.semantic_kind == VariableSemanticKind.CONTINUOUS_INTENSIVE
+                    ):
+                        op = AggregationOperator.MEAN
+                        harmonization_steps.append(
+                            f"{key}: used MEAN instead of SUM for intensive ({var_meta.units})"
+                        )
 
-                    min_cov = 0.5 if ds.source_id == DataSourceId.GPM_IMERG else 0.7
+                    min_cov, _ = resolve_aggregation_min_coverage(
+                        ds.source_id,
+                        ds.temporal_metadata.cadence,
+                        request.target_cadence,
+                        request.qa_level,
+                    )
                     temp_res = aggregate_temporal_series(
                         values=screened_1d,
                         timestamps=raw_ts,
@@ -316,11 +338,19 @@ class ScientificAssessmentService:
         )
 
         if not prepared:
-            return ScientificAssessmentResult(
+            early_readiness = evaluate_assessment_readiness(
+                request,
+                datasets=datasets,
+                grid_stacks=stacks,
+                quality_reports=quality_reports,
+                temporal_series=[],
+            )
+            early_result = ScientificAssessmentResult(
                 assessment_id=run_id,
                 request=request,
                 status=AssessmentStatus.INSUFFICIENT_DATA,
                 quality_reports=quality_reports,
+                readiness=early_readiness,
                 stages=stages,
                 summary_warnings=partial_failures,
                 limitations=limitations,
@@ -334,6 +364,12 @@ class ScientificAssessmentService:
                     input_digest_sha256=digest,
                 ),
             )
+            if request.output_artifact_dir is not None:
+                manifest = self._artifact_writer.write_assessment_result(
+                    early_result, Path(request.output_artifact_dir)
+                )
+                early_result = early_result.model_copy(update={"artifact_manifest": manifest})
+            return early_result
 
         # Stage 3 & 4: Baselines & Anomalies
         t_base = time.perf_counter()
@@ -378,29 +414,15 @@ class ScientificAssessmentService:
             if (
                 pv.temporal.timestamps
                 and finite_ts
-                and (
-                    retained_valid == 0
-                    or (
-                        base_cfg.baseline_type == BaselineType.FIXED_REFERENCE
-                        and span_years < base_cfg.min_years_required
-                        and retained_valid < base_cfg.min_samples_per_bin
-                    )
-                )
+                and retained_valid == 0
+                and base_cfg.baseline_type
+                in {BaselineType.FIXED_REFERENCE, BaselineType.OUT_OF_SAMPLE}
             ):
-                base_cfg = base_cfg.model_copy(
-                    update={
-                        "baseline_type": BaselineType.FULL_PERIOD_EXPLICIT,
-                        "allow_explicit_full_period": True,
-                        "start": None,
-                        "end": None,
-                        "exclude_assessment_overlap": False,
-                        "min_years_required": 1,
-                        "min_samples_per_bin": 1,
-                    }
-                )
                 adapted_notes.append(
-                    f"{pv.key}: observation series spans {span_years:.2f} yr with insufficient "
-                    "non-overlapping reference samples; adapted to full-period baseline."
+                    f"{pv.key}: 0 valid reference observations in requested "
+                    f"{base_cfg.baseline_type.value} baseline window (series spans "
+                    f"{span_years:.2f} yr); historical reference data is required unless "
+                    "full_period_explicit is explicitly selected."
                 )
 
             clim = compute_climatology(
@@ -417,10 +439,14 @@ class ScientificAssessmentService:
             )
 
             valid_vals = pv.array[finite_mask]
-            if valid_vals.size >= 2 and any(
-                b.sample_count >= 1
-                and (b.std is None or b.std <= 1e-12 or b.mad is None or b.mad <= 1e-12)
-                for b in clim.bins
+            if (
+                base_cfg.baseline_type == BaselineType.FULL_PERIOD_EXPLICIT
+                and valid_vals.size >= 2
+                and any(
+                    b.sample_count >= 1
+                    and (b.std is None or b.std <= 1e-12 or b.mad is None or b.mad <= 1e-12)
+                    for b in clim.bins
+                )
             ):
                 pooled_std = float(np.std(valid_vals, ddof=1))
                 med_all = float(np.median(valid_vals))
@@ -486,13 +512,17 @@ class ScientificAssessmentService:
                 request.anomaly.model_dump(mode="json")
             )
         )
+        if baselines and all(not b.sufficient for b in baselines):
+            baseline_stage_status = StageStatus.INSUFFICIENT_DATA
+        elif any(not b.sufficient for b in baselines):
+            baseline_stage_status = StageStatus.PARTIAL
+        else:
+            baseline_stage_status = StageStatus.COMPLETED
         stages.append(
             StageExecutionReport(
                 stage_name="baseline_and_anomalies",
                 priority=PriorityTier.P0,
-                status=StageStatus.PARTIAL
-                if any(not b.sufficient for b in baselines)
-                else StageStatus.COMPLETED,
+                status=baseline_stage_status,
                 duration_ms=(time.perf_counter() - t_base) * 1000.0,
                 warnings=base_warnings,
             )
@@ -503,22 +533,29 @@ class ScientificAssessmentService:
         trends: list[TrendResult] = []
         seasonal_trends: list[SeasonalTrendResult] = []
         if _is_stage_enabled(request, "trend_analysis"):
+            min_trend_req, _, _ = resolve_trend_requirements(request.target_cadence, request.trend)
+            effective_trend_cfg = (
+                request.trend.model_copy(update={"min_samples": min_trend_req})
+                if "min_samples" not in request.trend.model_fields_set
+                and min_trend_req != request.trend.min_samples
+                else request.trend
+            )
             for pv in prepared:
                 tr = compute_mann_kendall(
                     pv.temporal.timestamps,
                     pv.array,
-                    request.trend,
+                    effective_trend_cfg,
                     dataset_id=pv.dataset.dataset_id,
                     variable_name=pv.variable_name,
                     units=pv.var_meta.units,
                 )
-                eff_grp = request.trend.seasonal_grouping
+                eff_grp = effective_trend_cfg.seasonal_grouping
                 if (
                     pv.temporal.cadence in {TemporalCadence.EIGHT_DAY, TemporalCadence.SIXTEEN_DAY}
                     and eff_grp == SeasonalGrouping.CALENDAR_MONTH
                 ):
                     eff_grp = SeasonalGrouping.COMPOSITE_DOY_BIN
-                t_cfg = request.trend.model_copy(update={"seasonal_grouping": eff_grp})
+                t_cfg = effective_trend_cfg.model_copy(update={"seasonal_grouping": eff_grp})
                 str_res = compute_seasonal_mann_kendall(
                     pv.temporal.timestamps,
                     pv.array,
@@ -547,12 +584,28 @@ class ScientificAssessmentService:
                     ),
                 ]
             )
+            trend_warnings = [
+                f"{t.dataset_id}:{t.variable_name}: {w}"
+                for t in trends
+                if t.direction == TrendDirection.INSUFFICIENT_DATA
+                for w in t.warnings
+            ]
+            trend_stage_status = (
+                StageStatus.INSUFFICIENT_DATA
+                if trends and all(t.direction == TrendDirection.INSUFFICIENT_DATA for t in trends)
+                else (
+                    StageStatus.PARTIAL
+                    if any(t.direction == TrendDirection.INSUFFICIENT_DATA for t in trends)
+                    else StageStatus.COMPLETED
+                )
+            )
             stages.append(
                 StageExecutionReport(
                     stage_name="trend_analysis",
                     priority=PriorityTier.P0,
-                    status=StageStatus.COMPLETED,
+                    status=trend_stage_status,
                     duration_ms=(time.perf_counter() - t_tr) * 1000.0,
+                    warnings=trend_warnings,
                 )
             )
         else:
@@ -694,6 +747,25 @@ class ScientificAssessmentService:
                 resp_pv.dataset.spatial_support.native_footprint_m
                 or resp_pv.dataset.spatial_support.nominal_resolution_m,
             )
+            cv_warnings: list[str] = []
+            if not request.cross_variable.allow_power_precip_with_gpm:
+                has_gpm_cv = resp_pv.dataset.source_id == DataSourceId.GPM_IMERG or any(
+                    b[3] == DataSourceId.GPM_IMERG for b in pred_map.values()
+                )
+                power_precip_keys = [
+                    k
+                    for k, b in pred_map.items()
+                    if b[3] == DataSourceId.NASA_POWER and "PRECTOTCORR" in b[2].name.upper()
+                ]
+                if has_gpm_cv and power_precip_keys and len(pred_map) > len(power_precip_keys):
+                    for k in power_precip_keys:
+                        pred_map.pop(k, None)
+                    msg = (
+                        "Excluded NASA POWER PRECTOTCORR from cross-variable pairings because "
+                        "GPM IMERG is present and allow_power_precip_with_gpm=False."
+                    )
+                    cv_warnings.append(msg)
+                    summary_warnings.append(msg)
             try:
                 cross_var = analyze_cross_variables(
                     response_name=resp_pv.key,
@@ -710,9 +782,9 @@ class ScientificAssessmentService:
                     StageExecutionReport(
                         stage_name="cross_variable_analysis",
                         priority=PriorityTier.P1,
-                        status=StageStatus.COMPLETED,
+                        status=StageStatus.PARTIAL if cv_warnings else StageStatus.COMPLETED,
                         duration_ms=(time.perf_counter() - t_cv) * 1000.0,
-                        warnings=cross_var.warnings,
+                        warnings=[*cv_warnings, *cross_var.warnings],
                     )
                 )
             except ScientificInputError as exc:
@@ -867,9 +939,29 @@ class ScientificAssessmentService:
         )
         _add_limitations(uncertainty.methodological_limitations)
 
-        overall_status = (
-            AssessmentStatus.COMPLETED_PARTIAL if partial_failures else AssessmentStatus.COMPLETED
+        readiness = evaluate_assessment_readiness(
+            request,
+            datasets=datasets,
+            grid_stacks=stacks,
+            quality_reports=quality_reports,
+            temporal_series=[pv.temporal for pv in prepared],
         )
+
+        all_baselines_insufficient = (not baselines) or all(not b.sufficient for b in baselines)
+        all_trends_insufficient = (not trends) or all(
+            t.direction == TrendDirection.INSUFFICIENT_DATA for t in trends
+        )
+        no_spatial_stats = not spatial_stats
+        has_stage_issues = any(
+            s.status in {StageStatus.PARTIAL, StageStatus.INSUFFICIENT_DATA, StageStatus.FAILED}
+            for s in stages
+        )
+        if all_baselines_insufficient and all_trends_insufficient and no_spatial_stats:
+            overall_status = AssessmentStatus.INSUFFICIENT_DATA
+        elif partial_failures or has_stage_issues:
+            overall_status = AssessmentStatus.COMPLETED_PARTIAL
+        else:
+            overall_status = AssessmentStatus.COMPLETED
 
         provenance = ProvenanceTrace(
             trace_id=f"trace-{run_id}",
@@ -899,6 +991,7 @@ class ScientificAssessmentService:
             recoveries=recoveries,
             resilience=resilience_list,
             uncertainty=uncertainty,
+            readiness=readiness,
             stages=stages,
             provenance=provenance,
             summary_warnings=summary_warnings,
