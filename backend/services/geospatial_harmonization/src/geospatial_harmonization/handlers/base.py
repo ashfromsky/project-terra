@@ -910,3 +910,296 @@ async def discover_cmr_observations(
         )
         for g in granules[:limit]
     )
+
+
+async def gather_bounded_granules(
+    items: Sequence[Any],
+    worker: Any,
+    *,
+    max_items: int = 12,
+    max_concurrency: int = 3,
+    key_fn: Any = None,
+) -> tuple[list[Any], list[dict[str, str]]]:
+    """Deduplicate items, execute bounded async fetches, and isolate per-granule failures."""
+    seen_keys: set[str] = set()
+    unique_items: list[tuple[str, Any]] = []
+    limit = max(1, max_items)
+    for item in items:
+        key = str(key_fn(item) if key_fn is not None else item)
+        if key in seen_keys:
+            continue
+        seen_keys.add(key)
+        unique_items.append((key, item))
+        if len(unique_items) >= limit:
+            break
+
+    if not unique_items:
+        raise ProviderValidationError("No candidate granules or URLs supplied for ingestion")
+
+    sem = asyncio.Semaphore(max(1, max_concurrency))
+    outcomes: list[tuple[int, Any | None, dict[str, str] | None, Exception | None]] = []
+
+    async def _run_one(idx: int, item_key: str, item_val: Any) -> None:
+        async with sem:
+            try:
+                res = await worker(item_val)
+                outcomes.append((idx, res, None, None))
+            except (ProviderAuthenticationError, ProviderDisabledError):
+                raise
+            except Exception as exc:
+                outcomes.append((idx, None, {"item": item_key, "error": str(exc)}, exc))
+
+    await asyncio.gather(*(_run_one(i, k, v) for i, (k, v) in enumerate(unique_items)))
+    outcomes.sort(key=lambda row: row[0])
+
+    successes = [res for _, res, err, _ in outcomes if err is None and res is not None]
+    failures = [err for _, _, err, _ in outcomes if err is not None]
+    if not successes:
+        first_exc = next((exc for _, _, _, exc in outcomes if exc is not None), None)
+        if first_exc is not None:
+            raise first_exc
+        raise ProviderResponseError("All candidate granule acquisitions failed")
+    return successes, failures
+
+
+def _mask_from_lon_lat(
+    lons: Any,
+    lats: Any,
+    bbox: tuple[float, float, float, float],
+) -> Any:
+    import numpy as np
+
+    min_lon, min_lat, max_lon, max_lat = bbox
+    valid_geo = (
+        np.isfinite(lons)
+        & np.isfinite(lats)
+        & (lons >= -180.0)
+        & (lons <= 180.0)
+        & (lats >= -90.0)
+        & (lats <= 90.0)
+    )
+    mask = valid_geo & (lons >= min_lon) & (lons <= max_lon) & (lats >= min_lat) & (lats <= max_lat)
+    if np.any(mask):
+        return mask
+
+    rows, cols = lons.shape
+    half_dlon = 0.0
+    half_dlat = 0.0
+    if cols > 1:
+        diffs_x = np.abs(np.diff(np.where(valid_geo, lons, np.nan), axis=1))
+        finite_x = diffs_x[np.isfinite(diffs_x) & (diffs_x > 0)]
+        if finite_x.size > 0:
+            half_dlon = 0.5 * float(np.median(finite_x))
+    if rows > 1:
+        diffs_y = np.abs(np.diff(np.where(valid_geo, lats, np.nan), axis=0))
+        finite_y = diffs_y[np.isfinite(diffs_y) & (diffs_y > 0)]
+        if finite_y.size > 0:
+            half_dlat = 0.5 * float(np.median(finite_y))
+    if half_dlon == 0.0 and half_dlat == 0.0:
+        return mask
+    return (
+        valid_geo
+        & ((lons + half_dlon) >= min_lon)
+        & ((lons - half_dlon) <= max_lon)
+        & ((lats + half_dlat) >= min_lat)
+        & ((lats - half_dlat) <= max_lat)
+    )
+
+
+def _find_coord_pair(
+    decoded: Any,
+    shape: tuple[int, int],
+    dims: Sequence[str] | None = None,
+) -> tuple[Any, Any] | None:
+    import numpy as np
+
+    rows, cols = shape
+    lat_tokens = {"lat", "latitude"}
+    lon_tokens = {"lon", "longitude"}
+
+    def _pick(tokens: set[str], expected_1d: int) -> Any | None:
+        arrays = getattr(decoded, "arrays", {}) or {}
+        coords = getattr(decoded, "coordinates", {}) or {}
+        for mapping in (arrays, coords):
+            for name, raw in mapping.items():
+                leaf = str(name).rsplit("/", 1)[-1].lower()
+                if leaf not in tokens:
+                    continue
+                arr = np.asarray(raw, dtype=np.float64)
+                if arr.shape == shape:
+                    return arr
+                if arr.ndim == 1 and arr.size == expected_1d:
+                    return arr
+        return None
+
+    lon_lat_order = (
+        dims is not None
+        and len(dims) >= 2
+        and str(dims[-2]).rsplit("/", 1)[-1].lower() in lon_tokens
+        and str(dims[-1]).rsplit("/", 1)[-1].lower() in lat_tokens
+    )
+    if lon_lat_order:
+        lon_arr = _pick(lon_tokens, rows)
+        lat_arr = _pick(lat_tokens, cols)
+        if lat_arr is None or lon_arr is None:
+            return None
+        if lon_arr.ndim == 1 and lat_arr.ndim == 1:
+            lons, lats = np.meshgrid(lon_arr, lat_arr, indexing="ij")
+            return lons, lats
+        if lon_arr.shape == shape and lat_arr.shape == shape:
+            return lon_arr, lat_arr
+        return None
+
+    lat_arr = _pick(lat_tokens, rows)
+    lon_arr = _pick(lon_tokens, cols)
+    if lat_arr is None or lon_arr is None:
+        return None
+    if lat_arr.ndim == 1 and lon_arr.ndim == 1:
+        lats, lons = np.meshgrid(lat_arr, lon_arr, indexing="ij")
+        return lons, lats
+    if lat_arr.shape == shape and lon_arr.shape == shape:
+        return lon_arr, lat_arr
+    return None
+
+
+def extract_aoi_mask_for_decoded(
+    decoded: Any,
+    shape: tuple[int, int],
+    bbox: tuple[float, float, float, float] | None,
+    dims: Sequence[str] | None = None,
+) -> Any | None:
+    """Compute a 2D boolean mask of pixels falling inside a WGS84 AOI bbox."""
+    if bbox is None:
+        return None
+    validate_wgs84_bbox(bbox)
+    import numpy as np
+
+    lon_lat_order = (
+        dims is not None
+        and len(dims) >= 2
+        and str(dims[-2]).rsplit("/", 1)[-1].lower() in {"lon", "longitude"}
+        and str(dims[-1]).rsplit("/", 1)[-1].lower() in {"lat", "latitude"}
+    )
+    if lon_lat_order:
+        pair = _find_coord_pair(decoded, shape, dims=dims)
+        if pair is not None:
+            lons, lats = pair
+            return _mask_from_lon_lat(lons, lats, bbox)
+
+    rows, cols = shape
+    grid = getattr(decoded, "grid", None)
+    if grid is not None and getattr(grid, "crs", None):
+        try:
+            from pyproj import CRS, Transformer
+
+            resolved = grid.resolved()
+            transform = resolved.transform
+            if transform is not None and resolved.width == cols and resolved.height == rows:
+                offset = 0.0 if grid.pixel_convention == "center" else 0.5
+                cc, rr = np.meshgrid(
+                    np.arange(cols, dtype=np.float64) + offset,
+                    np.arange(rows, dtype=np.float64) + offset,
+                )
+                xs = transform.c + transform.a * cc + transform.b * rr
+                ys = transform.f + transform.d * cc + transform.e * rr
+                src_crs = CRS.from_user_input(grid.crs)
+                if not src_crs.is_geographic or src_crs.to_epsg() != 4326:
+                    transformer = Transformer.from_crs(src_crs, "EPSG:4326", always_xy=True)
+                    lons, lats = transformer.transform(xs, ys)
+                    lons = np.asarray(lons, dtype=np.float64)
+                    lats = np.asarray(lats, dtype=np.float64)
+                else:
+                    lons, lats = xs, ys
+                return _mask_from_lon_lat(lons, lats, bbox)
+        except Exception:
+            pass
+
+    pair = _find_coord_pair(decoded, shape, dims=dims)
+    if pair is not None:
+        lons, lats = pair
+        return _mask_from_lon_lat(lons, lats, bbox)
+    return None
+
+
+def build_time_series_extension(
+    *,
+    timestamps: Sequence[datetime | str],
+    values: Sequence[float | None],
+    units: str | None = None,
+    qa_layers: Mapping[str, Sequence[int | float | None]] | None = None,
+    overpass_tags: Sequence[str] | None = None,
+    valid_pixel_counts: Sequence[int] | None = None,
+    total_pixel_counts: Sequence[int] | None = None,
+    is_scaled: bool = True,
+) -> dict[str, Any]:
+    """Assemble sorted JSON-serializable observation time series for dataset extensions."""
+    import math
+
+    count = len(timestamps)
+    if len(values) != count:
+        raise ProviderValidationError("timestamps and values must share identical length")
+    for qa_name, qa_seq in (qa_layers or {}).items():
+        if len(qa_seq) != count:
+            raise ProviderValidationError(
+                f"QA layer '{qa_name}' length ({len(qa_seq)}) does not match timestamps ({count})"
+            )
+    if overpass_tags is not None and len(overpass_tags) != count:
+        raise ProviderValidationError("overpass_tags length must match timestamps")
+    if valid_pixel_counts is not None and len(valid_pixel_counts) != count:
+        raise ProviderValidationError("valid_pixel_counts length must match timestamps")
+    if total_pixel_counts is not None and len(total_pixel_counts) != count:
+        raise ProviderValidationError("total_pixel_counts length must match timestamps")
+
+    parsed_rows: list[tuple[datetime, str, int]] = []
+    for idx, raw_ts in enumerate(timestamps):
+        if isinstance(raw_ts, datetime):
+            dt = raw_ts.replace(tzinfo=UTC) if raw_ts.tzinfo is None else raw_ts.astimezone(UTC)
+        else:
+            parsed_dt = _parse_iso_utc(raw_ts)
+            if parsed_dt is None:
+                raise ProviderValidationError(f"Invalid time series timestamp: {raw_ts!r}")
+            dt = parsed_dt
+        tag = str(overpass_tags[idx]) if overpass_tags is not None else ""
+        parsed_rows.append((dt, tag, idx))
+
+    parsed_rows.sort(key=lambda item: (item[0], item[1]))
+    sorted_indices = [row[2] for row in parsed_rows]
+    out_ts = [row[0].isoformat().replace("+00:00", "Z") for row in parsed_rows]
+    out_vals: list[float | None] = []
+    for idx in sorted_indices:
+        v = values[idx]
+        if v is None:
+            out_vals.append(None)
+        else:
+            fv = float(v)
+            out_vals.append(fv if math.isfinite(fv) else None)
+
+    out_qa: dict[str, list[int | float | None]] = {}
+    for qa_name, qa_seq in (qa_layers or {}).items():
+        qa_out: list[int | float | None] = []
+        for idx in sorted_indices:
+            q_val = qa_seq[idx]
+            if q_val is None:
+                qa_out.append(None)
+            elif isinstance(q_val, int) and not isinstance(q_val, bool):
+                qa_out.append(int(q_val))
+            else:
+                fq = float(q_val)
+                qa_out.append(fq if math.isfinite(fq) else None)
+        out_qa[qa_name] = qa_out
+
+    payload: dict[str, Any] = {
+        "timestamps": out_ts,
+        "values": out_vals,
+        "qa_layers": out_qa,
+        "is_scaled": is_scaled,
+    }
+    if units is not None:
+        payload["units"] = units
+    if overpass_tags is not None:
+        payload["overpass_tags"] = [str(overpass_tags[idx]) for idx in sorted_indices]
+    if valid_pixel_counts is not None:
+        payload["valid_pixel_counts"] = [int(valid_pixel_counts[idx]) for idx in sorted_indices]
+    if total_pixel_counts is not None:
+        payload["total_pixel_counts"] = [int(total_pixel_counts[idx]) for idx in sorted_indices]
+    return payload

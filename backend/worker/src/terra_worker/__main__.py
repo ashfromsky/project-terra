@@ -25,8 +25,8 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--poll-interval",
         type=float,
-        default=2.0,
-        help="Idle polling interval in seconds (default: 2.0).",
+        default=None,
+        help="Idle polling interval in seconds (defaults to TERRA_WORKER_POLL_SECONDS).",
     )
     return parser.parse_args()
 
@@ -36,9 +36,13 @@ async def _run_async(args: argparse.Namespace) -> None:
         level=logging.INFO,
         format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
     )
+    settings = get_settings()
+    poll_interval = (
+        args.poll_interval if args.poll_interval is not None else settings.terra_worker_poll_seconds
+    )
     runner = AssessmentWorkerRunner(
-        settings=get_settings(),
-        poll_interval_seconds=args.poll_interval,
+        settings=settings,
+        poll_interval_seconds=poll_interval,
     )
     if args.once:
         await runner.initialize()

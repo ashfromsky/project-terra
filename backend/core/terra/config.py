@@ -9,6 +9,7 @@ example frontend `VITE_*` entries) are ignored.
 
 import json
 from functools import lru_cache
+from pathlib import Path
 from typing import Annotated, Any, Literal
 
 from pydantic import Field, SecretStr, field_validator, model_validator
@@ -16,13 +17,22 @@ from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 Environment = Literal["development", "test", "production"]
 _DEFAULT_DEV_JWT_SECRET = "dev-insecure-jwt-secret-change-in-production"
+_REPO_ROOT = Path(__file__).resolve().parents[3]
+
+
+def _default_dev_database_url() -> str:
+    return f"sqlite+aiosqlite:///{(_REPO_ROOT / '.data' / 'terra.db').resolve()}"
+
+
+def _default_dev_artifact_dir() -> str:
+    return str((_REPO_ROOT / ".data" / "artifacts").resolve())
 
 
 class Settings(BaseSettings):
     """Application settings loaded from environment variables."""
 
     model_config = SettingsConfigDict(
-        env_file=("../../.env", ".env"),
+        env_file=(_REPO_ROOT / ".env", Path(".env")),
         env_file_encoding="utf-8",
         extra="ignore",
     )
@@ -37,9 +47,10 @@ class Settings(BaseSettings):
     database_echo: bool = False
     database_auto_create_tables: bool = True
 
-    ghs_base_url: str = "http://localhost:8100"
-    ghs_timeout_seconds: float = 15.0
+    ghs_base_url: str = "http://127.0.0.1:8080"
+    ghs_timeout_seconds: float = 30.0
     scientific_artifact_dir: str | None = None
+    terra_worker_poll_seconds: float = Field(default=2.0, gt=0.0, le=60.0)
 
     github_client_id: str = ""
     github_client_secret: SecretStr = SecretStr("")
@@ -77,7 +88,16 @@ class Settings(BaseSettings):
     def _validate_production_secrets(self) -> "Settings":
         """Apply safe dev storage default and reject insecure production secrets."""
         if self.environment == "development" and "database_url" not in self.model_fields_set:
-            self.database_url = "sqlite+aiosqlite:///./terra.dev.db"
+            self.database_url = _default_dev_database_url()
+        if (
+            self.environment == "development"
+            and "scientific_artifact_dir" not in self.model_fields_set
+            and self.scientific_artifact_dir is None
+        ):
+            self.scientific_artifact_dir = _default_dev_artifact_dir()
+        if self.database_url.startswith("sqlite+aiosqlite:///./"):
+            rel_part = self.database_url.removeprefix("sqlite+aiosqlite:///./")
+            self.database_url = f"sqlite+aiosqlite:///{(_REPO_ROOT / rel_part).resolve()}"
         if self.environment == "production":
             secret = self.jwt_secret_key.get_secret_value()
             if not secret or secret == _DEFAULT_DEV_JWT_SECRET or len(secret) < 32:

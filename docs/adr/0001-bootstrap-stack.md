@@ -80,3 +80,4 @@ balance the mandated stack against current ecosystem compatibility.
 - Note (P0 API integration): `frontend/src/shared/api/generated/openapi.json` is exported directly from
   `backend/core` and compiled into `frontend/src/shared/api/generated/schema.d.ts`
   via `openapi-typescript` as the single source of truth for frontend API types.
+- Note (Environment template & 5-process development stack): `.gitignore` now allows a non-secret `.env.example` template (`!**/.env.example`) while continuing to ignore every real `.env*` secret file. `make dev-full` runs all five local processes (`CORE`, `GHS`, `CORE-WORKER`, `GHS-WORKER`, `FRONTEND`) with unified ports (`8000`, `8080`, `5173`) and independent Core vs. GHS databases; see [`docs/ENVIRONMENT_SETUP.md`](../ENVIRONMENT_SETUP.md).

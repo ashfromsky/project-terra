@@ -243,7 +243,44 @@ class AssessmentApplicationService:
             for var_name in ds.raster_refs:
                 if var_name in ds.series:
                     continue
+                if ds.ghs_dataset_id is not None:
+                    ref_path = Path(ds.raster_refs[var_name])
+                    if not (
+                        ref_path.is_file() and ref_path.suffix.lower() in {".npz", ".tif", ".tiff"}
+                    ):
+                        continue
                 stack = loader.load_grid_stack(ds, var_name)
                 if stack is not None:
                     stacks[f"{ds.dataset_id}:{var_name}"] = stack
         return stacks
+
+    async def compare_assessments(
+        self,
+        owner_id: UUID,
+        primary_id: UUID,
+        comparison_id: UUID,
+    ) -> Any:
+        """Compare two completed user assessments across shared environmental variables."""
+        from terra.modules.assessments.application.comparison import (
+            COMPLETED_STATUSES,
+            build_assessment_comparison,
+        )
+
+        if primary_id == comparison_id:
+            raise AssessmentValidationError(
+                "Select two distinct assessments to perform a comparison."
+            )
+
+        primary = await self.get_assessment(owner_id, primary_id)
+        comparison = await self.get_assessment(owner_id, comparison_id)
+
+        if str(primary.status) not in COMPLETED_STATUSES or primary.result_payload is None:
+            raise AssessmentValidationError(
+                f"Primary assessment {primary_id} has not completed with scientific results."
+            )
+        if str(comparison.status) not in COMPLETED_STATUSES or comparison.result_payload is None:
+            raise AssessmentValidationError(
+                f"Comparison assessment {comparison_id} has not completed with scientific results."
+            )
+
+        return build_assessment_comparison(primary, comparison)

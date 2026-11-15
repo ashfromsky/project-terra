@@ -6,7 +6,7 @@ TERRA is an open-source environmental analysis platform designed to investigate 
 
 The project aims to transform Earth observation data into interpretable environmental insights through remote sensing, time-series analysis, and ecosystem resilience assessment.
 
-> Project status: Active development. Core API (`auth`, `layers`, `regions`, `assessments`), P0/P1 Scientific Core (`terra-scientific`), Core Worker (`terra-worker`), isolated Geospatial Harmonization Service (`GHS`, ADR-0002), React/Vite frontend flows (`/explore`, `/assessments`, `/data-sources`), and offline GitHub Actions CI are implemented. Remaining UI pages (`/overview`, `/comparative-analysis`, `/reports`), full GHS temporal/transport wiring into Core, P2 scientific methods (`composite_tri`, `critical_slowing_down`, `causal_attribution`), and external production deployment remain in progress or deferred.
+> Project status: Active development. Core API (`auth`, `layers`, `regions`, `data_sources`, `assessments`), P0/P1 Scientific Core (`terra-scientific`), Core Worker (`terra-worker`), isolated Geospatial Harmonization Service (`GHS`, ADR-0002) with bounded multi-granule ingestion and temporal harmonization, all six analytical/workspace React/Vite routes (`/overview`, `/explore`, `/data-sources`, `/assessments`, `/comparative-analysis`, `/reports`), and offline GitHub Actions CI are implemented. P2 scientific methods (`composite_tri`, `critical_slowing_down`, `causal_attribution`), AppEEARS/Harmony task polling, and external production deployment remain in progress or deferred.
 
 ## Overview
 
@@ -104,15 +104,15 @@ No external hosting provider, container registry target, or deployment credentia
 Run locally from the repository root via `Makefile` (requires Node.js 20+ with `pnpm`, `uv`, and Python 3.13+):
 
 - **Frontend only:** `cd frontend && pnpm dev` (or `make frontend-dev`) — regenerates OpenAPI/TypeScript contracts via `predev` and starts Vite (`http://localhost:5173`) with `/api` and `/health` proxied to `VITE_API_PROXY_TARGET` (default `http://127.0.0.1:8000`).
-- **Main development environment:** `make dev` — regenerates contracts, then starts `backend/core` (`http://127.0.0.1:8000`, `/health`, `/health/ready`) and Vite (`http://localhost:5173`).
-- **GHS-only environment:** `make dev-ghs` — starts the isolated Geospatial Harmonization Service API (`http://127.0.0.1:8080`, `/health`, `/ready`) and `WorkerRunner` as separate processes sharing the same GHS configuration, database, and storage. Run components individually with `make ghs-api-dev`, `make ghs-worker-dev`, and `make ghs-migrate`.
-- **Complete local environment:** `make dev-full` — regenerates contracts and starts all four independent processes (`CORE`, `FRONTEND`, `GHS`, `GHS-WORKER`). Starting all four processes does not imply Core ↔ GHS integration; GHS remains isolated per ADR-0002.
-- **Standalone & utility targets:** `make backend-dev`, `make worker-dev`, `make contracts`, `make test` (Core + Scientific + Worker + Frontend), `make ghs-test`, `make dev-check` (orchestrator tests), `make lint`, `make ghs-lint`, `make frontend-typecheck`, `make frontend-build`.
+- **Main development environment:** `make dev` — regenerates contracts, then starts `backend/core` (`http://127.0.0.1:8000`, `/health`, `/health/ready`), `CORE-WORKER` (`terra-worker`), and Vite (`http://localhost:5173`).
+- **GHS-only environment:** `make dev-ghs` — starts the isolated Geospatial Harmonization Service API (`http://127.0.0.1:8080`, `/health`, `/ready`) and `GHS-WORKER` as separate processes sharing `GHS_DATABASE_URL` and local/S3 storage. Run components individually with `make ghs-api-dev`, `make ghs-worker-dev`, and `make ghs-migrate`.
+- **Complete local environment:** `make dev-full` — regenerates contracts and starts all five independent processes (`CORE`, `GHS`, `CORE-WORKER`, `GHS-WORKER`, `FRONTEND`) with health checks, shared Core `DATABASE_URL` / independent `GHS_DATABASE_URL`, and unified addressing (`8000` / `8080` / `5173`). Core consumes GHS over HTTP (`GHS_BASE_URL`) per ADR-0002.
+- **Environment diagnostics & utilities:** `make doctor` (validates CLIs, config, DB isolation, ports `8000`/`8080`/`5173`, workers, storage, and credential readiness without printing secrets), `make backend-dev`, `make worker-dev`, `make contracts`, `make test` (Core + Scientific + Worker + Frontend), `make ghs-test`, `make dev-check` (orchestrator tests), `make lint`, `make ghs-lint`, `make frontend-typecheck`, `make frontend-build`. See [`docs/ENVIRONMENT_SETUP.md`](docs/ENVIRONMENT_SETUP.md).
 
 #### Environment & Process Supervision
 
-- **Configuration:** Core and Vite read root `.env` (and `backend/core/.env` for Core); GHS API and Worker both run from `backend/services/geospatial_harmonization/` and share its `.env` (never committed). Optional port overrides: `CORE_HOST`, `CORE_PORT` (default `8000`), `GHS_HOST`, `GHS_PORT` (default `8080`), `FRONTEND_PORT` (default `5173`).
-- **Logs & shutdown:** `scripts/dev.mjs` prefixes logs (`[CONTRACTS]`, `[CORE]`, `[FRONTEND]`, `[GHS]`, `[GHS-WORKER]`), checks port availability before launch, and shuts down all child process groups cleanly on `Ctrl+C` (`SIGINT`/`SIGTERM`) or if any child exits unexpectedly.
+- **Configuration:** All services read the root `.env` (copied from `.env.example`, never committed) with default SQLite persistence isolated in `<repo>/.data/terra.db` (shared by `CORE` + `CORE-WORKER` via `DATABASE_URL`) and `<repo>/.data/ghs.db` (shared by `GHS` + `GHS-WORKER` via `GHS_DATABASE_URL`). Optional port overrides: `CORE_HOST`, `CORE_PORT` (default `8000`), `GHS_HOST`, `GHS_PORT` (default `8080`), `FRONTEND_PORT` (default `5173`).
+- **Logs & shutdown:** `scripts/dev.mjs` prefixes logs (`[CONTRACTS]`, `[CORE]`, `[CORE-WORKER]`, `[GHS]`, `[GHS-WORKER]`, `[FRONTEND]`), validates port availability, waits for `/health` before launching dependent workers, and shuts down all child process groups cleanly on `Ctrl+C` (`SIGINT`/`SIGTERM`).
 
 ## Architecture
 
@@ -142,15 +142,15 @@ TERRA aims to follow several principles:
 
 ## Project Status
 
-TERRA is in active development with Core API (`auth`, `layers`, `regions`, `assessments`), `terra-scientific` v1.1.0, `terra-worker`, GHS (isolated geospatial ingestion service), and frontend integration for `/assessments` and `/data-sources` implemented. Several scientific methods, GHS temporal/transport paths, and analytical frontend pages remain partial or deferred:
+TERRA is in active development with Core API (`auth`, `layers`, `regions`, `data_sources`, `assessments`), `terra-scientific` v1.1.0, `terra-worker`, GHS (isolated geospatial ingestion service with bounded multi-granule workflows & temporal harmonization), and all six workspace routes connected (`/overview`, `/explore`, `/data-sources`, `/assessments`, `/comparative-analysis`, `/reports`). Several P2 scientific methods, AppEEARS/Harmony polling, and production deployment remain deferred:
 
-- [x] Repository and development environment initialization.
-- [x] Frontend and backend Core API foundation (`auth`, `layers`, `regions`, `assessments`).
-- [x] Offline Scientific Core time-series pipeline (`terra-scientific`: climatology, disturbance detection, OLS cross-variable regression, consecutive-step recovery, and Resistance/Stability/Sensitivity resilience dimensions).
-- [x] GHS raster ingestion, harmonization, and `terra-worker` job execution.
-- [ ] GHS temporal aggregation wiring into `HarmonizationService.execute_plan`, AppEEARS/Harmony providers, and unified Core→GHS time-series transport (`extensions.time_series`).
-- [ ] P2 scientific methods (spatial trend mapping, regime shifts, counterfactual assessment) and calibrated composite TRI benchmarks.
-- [ ] Live Core API integration for analytical pages still using synthetic/placeholder views (`/overview`, `/comparative-analysis`, `/reports`).
+- [x] Repository and development environment initialization (`make dev-full`, `make doctor`, unified ports `8000`/`8080`/`5173`).
+- [x] Frontend and backend Core API integration (`auth` including dev-only `dev-session`, `layers`, `regions`, `data_sources`, `assessments` + `compare`).
+- [x] Offline Scientific Core time-series pipeline (`terra-scientific`: climatology, disturbance detection, OLS cross-variable regression, consecutive-step recovery, and Resistance/Recovery/Stability/Sensitivity resilience dimensions).
+- [x] GHS multi-granule ingestion, `temporal.py` harmonization (`integrate_rate_to_depth` / `aggregate_temporal_stack`) wired into `HarmonizationService.execute_plan`, and `extensions["time_series"]` consumption by Core/`terra-scientific`.
+- [x] Live Core API integration across `/overview`, `/explore`, `/data-sources`, `/assessments`, `/comparative-analysis`, and `/reports` (including Apache ECharts diagnostics & JSON/CSV/Markdown/PDF exports).
+- [ ] AppEEARS/Harmony task submission workflows and streaming COG/Zarr tile serving (TiTiler).
+- [ ] P2 scientific methods (spatial trend mapping, regime shifts, causal attribution) and calibrated composite TRI benchmarks (`composite_tri` remains withheld/`unavailable_unvalidated`).
 - [ ] Production deployment environment, container registry, and hosting secrets configuration.
 
 ## Open Source

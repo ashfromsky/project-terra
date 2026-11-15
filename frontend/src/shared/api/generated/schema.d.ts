@@ -184,6 +184,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/auth/dev-session": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Dev Session
+         * @description Issue a local researcher session cookie and bearer token in development mode.
+         */
+        post: operations["dev_session_api_v1_auth_dev_session_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/regions": {
         parameters: {
             query?: never;
@@ -380,6 +400,130 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/data-sources/providers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Providers
+         * @description List registered GHS environmental data providers and their capability metadata.
+         */
+        get: operations["list_providers_api_v1_data_sources_providers_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/data-sources/discover": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Discover Observations
+         * @description Discover real satellite granules or station series for an AOI and time window.
+         */
+        post: operations["discover_observations_api_v1_data_sources_discover_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/data-sources/ingestions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Ingestions
+         * @description List persisted user ingestion operations synced with current GHS job status.
+         */
+        get: operations["list_ingestions_api_v1_data_sources_ingestions_get"];
+        put?: never;
+        /**
+         * Start Ingestion
+         * @description Launch a bounded GHS multi-observation ingestion job for an AOI.
+         */
+        post: operations["start_ingestion_api_v1_data_sources_ingestions_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/data-sources/ingestions/{operation_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Ingestion
+         * @description Get detailed status and dataset summary for one ingestion operation.
+         */
+        get: operations["get_ingestion_api_v1_data_sources_ingestions__operation_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/data-sources/datasets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Prepared Datasets
+         * @description List harmonized datasets persisted in GHS with Core lineage annotations.
+         */
+        get: operations["list_prepared_datasets_api_v1_data_sources_datasets_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/data-sources/datasets/{dataset_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Prepared Dataset
+         * @description Inspect metadata, provenance, quality summary, and series preview for one GHS dataset.
+         */
+        get: operations["get_prepared_dataset_api_v1_data_sources_datasets__dataset_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/assessments/methods": {
         parameters: {
             query?: never;
@@ -464,6 +608,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/assessments/compare": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Compare Assessments
+         * @description Compare two completed Scientific Assessments owned by the current user.
+         */
+        post: operations["compare_assessments_api_v1_assessments_compare_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -516,6 +680,26 @@ export interface components {
             createdAt: string;
             /** Isoa3 */
             isoA3?: string | null;
+        };
+        /**
+         * AssessmentComparisonResponse
+         * @description Side-by-side scientific comparison payload between two assessments.
+         */
+        AssessmentComparisonResponse: {
+            primary: components["schemas"]["AssessmentDetailResponse"];
+            comparison: components["schemas"]["AssessmentDetailResponse"];
+            /** Sharedvariables */
+            sharedVariables: string[];
+            /** Primaryonlyvariables */
+            primaryOnlyVariables: string[];
+            /** Comparisononlyvariables */
+            comparisonOnlyVariables: string[];
+            /** Variablecomparisons */
+            variableComparisons: components["schemas"]["VariableComparisonSummary"][];
+            /** Compatibilitywarnings */
+            compatibilityWarnings: string[];
+            /** Methodologynotes */
+            methodologyNotes: string[];
         };
         /**
          * AssessmentDetailResponse
@@ -660,6 +844,22 @@ export interface components {
             label?: string | null;
         };
         /**
+         * CompareAssessmentsRequest
+         * @description Request payload selecting two completed user assessments for comparison.
+         */
+        CompareAssessmentsRequest: {
+            /**
+             * Primaryassessmentid
+             * Format: uuid
+             */
+            primaryAssessmentId: string;
+            /**
+             * Comparisonassessmentid
+             * Format: uuid
+             */
+            comparisonAssessmentId: string;
+        };
+        /**
          * CreateAssessmentRequest
          * @description Request payload creating and optionally executing a Scientific Assessment.
          */
@@ -694,6 +894,96 @@ export interface components {
              * @enum {string}
              */
             status: "ok" | "unavailable";
+        };
+        /**
+         * DiscoverObservationsRequest
+         * @description Discovery query parameters for searching real observations for an AOI.
+         */
+        DiscoverObservationsRequest: {
+            /** Provider */
+            provider: string;
+            /** Product */
+            product: string;
+            /** Regionid */
+            regionId?: string | null;
+            /** Bbox */
+            bbox?: [
+                number,
+                number,
+                number,
+                number
+            ] | null;
+            /**
+             * Starttime
+             * Format: date-time
+             */
+            startTime: string;
+            /**
+             * Endtime
+             * Format: date-time
+             */
+            endTime: string;
+            /**
+             * Limit
+             * @default 20
+             */
+            limit: number;
+        };
+        /**
+         * DiscoverObservationsResponse
+         * @description Collection of candidate observations matching AOI and period.
+         */
+        DiscoverObservationsResponse: {
+            /** Provider */
+            provider: string;
+            /** Product */
+            product: string;
+            /** Count */
+            count: number;
+            /** Bbox */
+            bbox: [
+                number,
+                number,
+                number,
+                number
+            ];
+            /** Observations */
+            observations?: components["schemas"]["DiscoveredObservationResponse"][];
+        };
+        /**
+         * DiscoveredObservationResponse
+         * @description Single candidate satellite granule or station observation.
+         */
+        DiscoveredObservationResponse: {
+            /** Observationid */
+            observationId: string;
+            /** Provider */
+            provider: string;
+            /** Product */
+            product: string;
+            /** Productversion */
+            productVersion: string;
+            /** Title */
+            title: string;
+            /** Timestart */
+            timeStart?: string | null;
+            /** Timeend */
+            timeEnd?: string | null;
+            /** Bbox */
+            bbox?: [
+                number,
+                number,
+                number,
+                number
+            ] | null;
+            /** Querymode */
+            queryMode?: string | null;
+            /** Accesshint */
+            accessHint?: string | null;
+            /** Metadata */
+            metadata?: {
+                [key: string]: unknown;
+            };
         };
         /**
          * GeoJsonMultiPolygonInputSchema
@@ -797,6 +1087,44 @@ export interface components {
             service: string;
             /** Version */
             version: string;
+        };
+        /**
+         * IngestionOperationResponse
+         * @description Persisted Core tracking record for a submitted GHS ingestion workflow.
+         */
+        IngestionOperationResponse: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Regionid */
+            regionId?: string | null;
+            /** Ghsjobid */
+            ghsJobId: string;
+            /** Provider */
+            provider: string;
+            /** Product */
+            product: string;
+            /** Status */
+            status: string;
+            /** Progresspct */
+            progressPct: number;
+            /** Datasetid */
+            datasetId?: string | null;
+            /** Errormessage */
+            errorMessage?: string | null;
+            /** Errorcategory */
+            errorCategory?: string | null;
+            /** Requestsummary */
+            requestSummary?: {
+                [key: string]: unknown;
+            };
+            datasetSummary?: components["schemas"]["PreparedDatasetSummaryResponse"] | null;
+            /** Createdat */
+            createdAt?: string | null;
+            /** Updatedat */
+            updatedAt?: string | null;
         };
         /**
          * LayerDefinitionResponse
@@ -1031,6 +1359,157 @@ export interface components {
             reference: string;
         };
         /**
+         * PreparedDatasetSummaryResponse
+         * @description Summary and provenance view of a harmonized dataset stored in GHS.
+         */
+        PreparedDatasetSummaryResponse: {
+            /** Datasetid */
+            datasetId: string;
+            /** Sourceid */
+            sourceId: string;
+            /** Provider */
+            provider: string;
+            /** Product */
+            product: string;
+            /** Productversion */
+            productVersion?: string | null;
+            /** Granuleid */
+            granuleId?: string | null;
+            /** Units */
+            units?: {
+                [key: string]: string;
+            };
+            /** Variables */
+            variables?: string[];
+            /** Temporalstart */
+            temporalStart?: string | null;
+            /** Temporalend */
+            temporalEnd?: string | null;
+            /** Temporalcadence */
+            temporalCadence?: string | null;
+            /** Temporalsemantics */
+            temporalSemantics?: string | null;
+            /** Spatialcrs */
+            spatialCrs?: string | null;
+            /** Nominalresolutionm */
+            nominalResolutionM?: number | null;
+            /**
+             * Observationcount
+             * @default 0
+             */
+            observationCount: number;
+            /** Validfraction */
+            validFraction?: number | null;
+            /** Qapolicy */
+            qaPolicy?: string | null;
+            /** Regionid */
+            regionId?: string | null;
+            /** Ingestionoperationid */
+            ingestionOperationId?: string | null;
+            /** Warnings */
+            warnings?: string[];
+            /** Timeseriespreviews */
+            timeSeriesPreviews?: components["schemas"]["PreparedDatasetTimeSeriesPreviewSchema"][];
+            /** Provenance */
+            provenance?: {
+                [key: string]: unknown;
+            };
+            /** Qualitymetadata */
+            qualityMetadata?: {
+                [key: string]: unknown;
+            };
+            /** Spatialmetadata */
+            spatialMetadata?: {
+                [key: string]: unknown;
+            };
+            /** Temporalmetadata */
+            temporalMetadata?: {
+                [key: string]: unknown;
+            };
+        };
+        /**
+         * PreparedDatasetTimeSeriesPreviewSchema
+         * @description Reduced AOI time-series preview extracted from a prepared GHS dataset.
+         */
+        PreparedDatasetTimeSeriesPreviewSchema: {
+            /** Variable */
+            variable: string;
+            /** Count */
+            count: number;
+            /** Start */
+            start?: string | null;
+            /** End */
+            end?: string | null;
+            /** Units */
+            units?: string | null;
+            /** Timestamps */
+            timestamps?: string[];
+            /** Values */
+            values?: (number | null)[];
+        };
+        /**
+         * ProviderProductSchema
+         * @description Product metadata registered in GHS.
+         */
+        ProviderProductSchema: {
+            /** Product */
+            product: string;
+            /** Version */
+            version: string;
+            /** Title */
+            title: string;
+            /** Spatialresolution */
+            spatialResolution: string;
+            /** Temporalresolution */
+            temporalResolution: string;
+            /** Crs */
+            crs: string;
+            /** Sourceformat */
+            sourceFormat: string;
+            /** Variables */
+            variables?: components["schemas"]["ProviderVariableSchema"][];
+        };
+        /**
+         * ProviderStatusResponse
+         * @description Capability, configuration, and credential readiness status of a GHS provider.
+         */
+        ProviderStatusResponse: {
+            /** Provider */
+            provider: string;
+            /** Title */
+            title: string;
+            /** Enabled */
+            enabled: boolean;
+            /** Authrequired */
+            authRequired: boolean;
+            /** Authconfigured */
+            authConfigured: boolean;
+            /** Authmechanism */
+            authMechanism: string;
+            /** Status */
+            status: string;
+            /** Supportsdiscovery */
+            supportsDiscovery: boolean;
+            /** Registeredproducts */
+            registeredProducts?: string[];
+            /** Products */
+            products?: components["schemas"]["ProviderProductSchema"][];
+        };
+        /**
+         * ProviderVariableSchema
+         * @description Variable metadata exposed by a registered GHS environmental provider.
+         */
+        ProviderVariableSchema: {
+            /** Name */
+            name: string;
+            /** Units */
+            units: string;
+            /** Semantics */
+            semantics: string;
+            /** Description */
+            description: string;
+        };
+        /**
          * ReadinessResponse
          * @description Readiness probe payload reporting dependency availability.
          */
@@ -1229,6 +1708,61 @@ export interface components {
             isoA3?: string | null;
         };
         /**
+         * StartIngestionRequest
+         * @description Request to launch bounded GHS ingestion and harmonization for an AOI.
+         */
+        StartIngestionRequest: {
+            /** Provider */
+            provider: string;
+            /** Product */
+            product: string;
+            /** Regionid */
+            regionId?: string | null;
+            /** Bbox */
+            bbox?: [
+                number,
+                number,
+                number,
+                number
+            ] | null;
+            /**
+             * Starttime
+             * Format: date-time
+             */
+            startTime: string;
+            /**
+             * Endtime
+             * Format: date-time
+             */
+            endTime: string;
+            /**
+             * Maxgranules
+             * @default 24
+             */
+            maxGranules: number;
+            /** Variables */
+            variables?: string[];
+            /** Targetcadence */
+            targetCadence?: string | null;
+            /** Targetaggregation */
+            targetAggregation?: string | null;
+            /** Runtype */
+            runType?: string | null;
+            /** Overpass */
+            overpass?: string | null;
+            /** Parameters */
+            parameters?: string[];
+            /** Community */
+            community?: string | null;
+            /**
+             * Executenow
+             * @default false
+             */
+            executeNow: boolean;
+            /** Idempotencykey */
+            idempotencyKey?: string | null;
+        };
+        /**
          * SystemInfoResponse
          * @description Version, environment, and capability metadata for the API.
          */
@@ -1247,6 +1781,11 @@ export interface components {
             defaultCrs: string;
             /** Githuboauthconfigured */
             githubOauthConfigured: boolean;
+            /**
+             * Devauthenabled
+             * @default false
+             */
+            devAuthEnabled: boolean;
         };
         /**
          * TemporalCoverageResponse
@@ -1334,6 +1873,60 @@ export interface components {
             defaultMax: number;
             /** Step */
             step: number;
+        };
+        /**
+         * VariableComparisonSummary
+         * @description Variable-level trend, resilience, and series mean deltas between two runs.
+         */
+        VariableComparisonSummary: {
+            /** Variablename */
+            variableName: string;
+            /** Primarysensslope */
+            primarySensSlope?: number | null;
+            /** Comparisonsensslope */
+            comparisonSensSlope?: number | null;
+            /** Sensslopedelta */
+            sensSlopeDelta?: number | null;
+            /** Slopeunit */
+            slopeUnit?: string | null;
+            /** Primarydirection */
+            primaryDirection?: string | null;
+            /** Comparisondirection */
+            comparisonDirection?: string | null;
+            /** Primarypvalue */
+            primaryPValue?: number | null;
+            /** Comparisonpvalue */
+            comparisonPValue?: number | null;
+            /** Primaryresistance */
+            primaryResistance?: number | null;
+            /** Comparisonresistance */
+            comparisonResistance?: number | null;
+            /** Resistancedelta */
+            resistanceDelta?: number | null;
+            /** Primaryrecovery */
+            primaryRecovery?: number | null;
+            /** Comparisonrecovery */
+            comparisonRecovery?: number | null;
+            /** Recoverydelta */
+            recoveryDelta?: number | null;
+            /** Primarystability */
+            primaryStability?: number | null;
+            /** Comparisonstability */
+            comparisonStability?: number | null;
+            /** Stabilitydelta */
+            stabilityDelta?: number | null;
+            /** Primarysensitivity */
+            primarySensitivity?: number | null;
+            /** Comparisonsensitivity */
+            comparisonSensitivity?: number | null;
+            /** Sensitivitydelta */
+            sensitivityDelta?: number | null;
+            /** Primarymeanvalue */
+            primaryMeanValue?: number | null;
+            /** Comparisonmeanvalue */
+            comparisonMeanValue?: number | null;
+            /** Meanvaluedelta */
+            meanValueDelta?: number | null;
         };
     };
     responses: never;
@@ -1546,6 +2139,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["UserResponse"];
+                };
+            };
+        };
+    };
+    dev_session_api_v1_auth_dev_session_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuthCallbackResponse"];
                 };
             };
         };
@@ -1951,6 +2564,206 @@ export interface operations {
             };
         };
     };
+    list_providers_api_v1_data_sources_providers_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProviderStatusResponse"][];
+                };
+            };
+        };
+    };
+    discover_observations_api_v1_data_sources_discover_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DiscoverObservationsRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DiscoverObservationsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_ingestions_api_v1_data_sources_ingestions_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IngestionOperationResponse"][];
+                };
+            };
+        };
+    };
+    start_ingestion_api_v1_data_sources_ingestions_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StartIngestionRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IngestionOperationResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_ingestion_api_v1_data_sources_ingestions__operation_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                operation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IngestionOperationResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_prepared_datasets_api_v1_data_sources_datasets_get: {
+        parameters: {
+            query?: {
+                provider?: string | null;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PreparedDatasetSummaryResponse"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_prepared_dataset_api_v1_data_sources_datasets__dataset_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                dataset_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PreparedDatasetSummaryResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     list_scientific_methods_api_v1_assessments_methods_get: {
         parameters: {
             query?: never;
@@ -2073,6 +2886,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AssessmentDetailResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    compare_assessments_api_v1_assessments_compare_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CompareAssessmentsRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AssessmentComparisonResponse"];
                 };
             };
             /** @description Validation Error */

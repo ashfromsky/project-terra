@@ -3,7 +3,7 @@
 # Requirements: Node.js 20+ with pnpm (frontend & orchestration), uv (backend & GHS).
 # Each component runs independently, or together via `make dev`, `make dev-ghs`, or `make dev-full`.
 
-.PHONY: help contracts dev dev-ghs dev-full dev-check \
+.PHONY: help install doctor contracts dev dev-ghs dev-full dev-check \
         frontend-install frontend-dev frontend-build frontend-typecheck frontend-lint frontend-test \
         backend-install backend-dev backend-test backend-lint \
         scientific-install scientific-test scientific-lint \
@@ -14,16 +14,21 @@
 help: ## List available commands
 	@grep -E '^[a-zA-Z0-9_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  %-24s %s\n", $$1, $$2}'
 
+install: frontend-install backend-install scientific-install worker-install ghs-install ## Install all frontend, backend, worker, and GHS dependencies
+
+doctor: ## Validate environment, databases, ports, workers, and credentials
+	node scripts/doctor.mjs
+
 contracts: ## Generate OpenAPI + TypeScript contracts from backend/core into frontend
 	cd frontend && pnpm contracts:generate
 
-dev: ## Generate contracts and start Core + Frontend together
+dev: ## Generate contracts and start Core API + Core Worker + Frontend together
 	node scripts/dev.mjs dev
 
 dev-ghs: ## Start GHS API + GHS Worker together
 	node scripts/dev.mjs dev-ghs
 
-dev-full: ## Generate contracts and start Core + Frontend + GHS API + GHS Worker
+dev-full: ## Generate contracts and start all 5 services (Core, Core Worker, GHS, GHS Worker, Frontend)
 	node scripts/dev.mjs dev-full
 
 dev-check: ## Run development orchestration unit tests
@@ -63,10 +68,10 @@ scientific-install: ## Sync Scientific Core dependencies with uv
 	cd backend/scientific && uv sync --extra dev
 
 scientific-test: ## Run Scientific Core tests (pytest)
-	cd backend/scientific && uv run pytest
+	cd backend/scientific && uv run --extra dev pytest
 
 scientific-lint: ## Lint and type-check Scientific Core (ruff + mypy)
-	cd backend/scientific && uv run ruff check . && uv run ruff format --check . && uv run mypy src
+	cd backend/scientific && uv run --extra dev ruff check . && uv run --extra dev ruff format --check . && uv run --extra dev mypy src
 
 worker-install: ## Sync Shared Core Worker dependencies with uv
 	cd backend/worker && uv sync --extra dev
@@ -75,10 +80,10 @@ worker-dev: ## Start Shared Core Worker polling loop
 	cd backend/worker && uv run python -m terra_worker
 
 worker-test: ## Run Shared Core Worker tests (pytest)
-	cd backend/worker && uv run pytest
+	cd backend/worker && uv run --extra dev pytest
 
 worker-lint: ## Lint and type-check Shared Core Worker (ruff + mypy)
-	cd backend/worker && uv run ruff check . && uv run ruff format --check . && uv run mypy src
+	cd backend/worker && uv run --extra dev ruff check . && uv run --extra dev ruff format --check . && uv run --extra dev mypy src
 
 ghs-install: ## Sync GHS dependencies with uv
 	cd backend/services/geospatial_harmonization && uv sync

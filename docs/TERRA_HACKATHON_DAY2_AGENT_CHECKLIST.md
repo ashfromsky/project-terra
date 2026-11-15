@@ -1,5 +1,7 @@
 # PROJECT TERRA — Day 2 Execution Checklist
 
+> **Historical Note (2026-11-15):** This Day 2 planning checklist reflects the pre-integration hackathon starting point when `backend/scientific/` was still a placeholder. For the current implemented state (5-process `make dev-full`, `terra-scientific`, Core `data_sources` + `assessments/compare`, GHS multi-granule & `temporal.py` wiring, and connected UI workspaces), see [`docs/PROJECT_OVERVIEW.md`](./PROJECT_OVERVIEW.md) and [`docs/ENVIRONMENT_SETUP.md`](./ENVIRONMENT_SETUP.md).
+
 **Deadline:** Sunday, 15 November 2026, 23:59 (local event time, Europe/Kyiv)  
 **Working start:** 09:00  
 **Primary goal:** deliver one scientifically credible, reproducible end-to-end Earth System Trend Detective workflow — not the entire long-term TERRA architecture.
