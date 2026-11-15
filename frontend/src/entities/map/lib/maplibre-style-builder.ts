@@ -42,7 +42,7 @@ export function resolveScienceRasterConfig(
   }
   const effectiveDate = resolveLayerEffectiveDate(activeLayer.layer, selectedDate)
   let tileUrl: string
-  if (activeLayer.layer.tileSource.urlTemplate) {
+  if (hasExternalTemplate && activeLayer.layer.tileSource.urlTemplate) {
     const rawTemplate = activeLayer.layer.tileSource.urlTemplate
     const withTime = rawTemplate
       .replace('{time}', effectiveDate || 'default')
@@ -52,6 +52,8 @@ export function resolveScienceRasterConfig(
         ? withTime
         : buildApiUrl(withTime)
   } else {
+    // Always build an absolute, date-aware tile URL. MapLibre does not reliably
+    // expand relative raster templates after the first style load.
     tileUrl = buildLayerTileUrlTemplate(activeLayer.layer.id, {
       timestamp: effectiveDate,
       vmin: activeLayer.minValue,

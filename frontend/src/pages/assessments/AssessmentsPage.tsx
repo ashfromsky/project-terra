@@ -404,14 +404,20 @@ function AssessmentVisualizationsSection(props: {
 export default function AssessmentsPage() {
   const [searchParams] = useSearchParams()
   const [activeTab, setActiveTab] = useState<WorkspaceTab>('results')
-  const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [selectedId, setSelectedId] = useState<string | null>(
+    () => searchParams.get('assessmentId') ?? null,
+  )
   const [title, setTitle] = useState('')
   const [regionId, setRegionId] = useState(() => searchParams.get('regionId') ?? '')
   const [analysisProfile, setAnalysisProfile] = useState<
     'quick' | 'seasonal' | 'historical' | 'custom'
   >('quick')
-  const [analysisStart, setAnalysisStart] = useState('2024-01-01')
-  const [analysisEnd, setAnalysisEnd] = useState('2024-12-31')
+  const [analysisStart, setAnalysisStart] = useState(
+    () => searchParams.get('start') ?? '2024-01-01',
+  )
+  const [analysisEnd, setAnalysisEnd] = useState(
+    () => searchParams.get('end') ?? '2024-12-31',
+  )
   const [baselineType, setBaselineType] = useState<'fixed_reference' | 'full_period_explicit'>(
     'full_period_explicit',
   )
@@ -473,6 +479,15 @@ export default function AssessmentsPage() {
 
   const detailQuery = useAssessmentDetailQuery(activeAssessmentId, isAuthenticated)
   const createMutation = useCreateAssessmentMutation()
+
+  const deepLinkedAssessmentId = searchParams.get('assessmentId')
+  const deepLinkedDetail = useMemo(
+    () =>
+      deepLinkedAssessmentId && detailQuery.data?.id === deepLinkedAssessmentId
+        ? detailQuery.data
+        : null,
+    [deepLinkedAssessmentId, detailQuery.data],
+  )
   const executeMutation = useExecuteAssessmentMutation()
   const autoProvisionMutation = useAutoProvisionMutation()
 
@@ -486,8 +501,12 @@ export default function AssessmentsPage() {
       .split(',')
       .map((item) => item.trim())
       .filter(Boolean)
-    return Array.from(new Set([...selectedDatasetIds, ...manualIds]))
-  }, [ghsDatasetIdsText, selectedDatasetIds])
+    const merged = Array.from(new Set([...selectedDatasetIds, ...manualIds]))
+    if (merged.length === 0 && deepLinkedDetail) {
+      return deepLinkedDetail.ghsDatasetIds ?? []
+    }
+    return merged
+  }, [deepLinkedDetail, ghsDatasetIdsText, selectedDatasetIds])
 
   const scientificRequestConfig = useMemo<Record<string, unknown>>(
     () => ({
@@ -1350,8 +1369,9 @@ export default function AssessmentsPage() {
 
                     {detail.status === 'queued' ? (
                       <div className="sci-banner sci-banner--warning">
-                        Assessment is queued and has not executed yet. Click &ldquo;Execute
-                        assessment&rdquo; to run Scientific Core synchronously in Core.
+                        Assessment is queued for <code>terra-worker</code>; this page polls until
+                        the worker reports a terminal status. You may also run it synchronously
+                        here.
                       </div>
                     ) : null}
 
@@ -1390,6 +1410,96 @@ export default function AssessmentsPage() {
                         </span>
                       </div>
                     )}
+
+                    {(() => {
+                      const linkedRegion =
+                        regionsQuery.data?.find((reg) => reg.id === detail.regionId) ?? null
+                      const config = detail.requestConfig as Record<string, unknown>
+                      const requestStart =
+                        typeof config.analysis_start === 'string'
+                          ? config.analysis_start.slice(0, 10)
+                          : null
+                      const requestEnd =
+                        typeof config.analysis_end === 'string'
+                          ? config.analysis_end.slice(0, 10)
+                          : null
+                      const targetCadence =
+                        typeof config.target_cadence === 'string'
+                          ? config.target_cadence
+                          : null
+                      return (
+                        <section
+                          className="sci-panel"
+                          aria-label="Selected AOI and analysis period"
+                        >
+                          <div className="sci-panel__header">
+                            <div>
+                              <h3 className="sci-panel__title">
+                                Selected AOI &amp; Analysis Period
+                              </h3>
+                              <p className="sci-panel__subtitle">
+                                Geographic and temporal inputs submitted to the Scientific Core.
+                              </p>
+                            </div>
+                          </div>
+                          <div className="sci-kpi-grid">
+                            <div className="sci-dim-card">
+                              <span className="sci-dim-card__name">Region / AOI</span>
+                              <p className="sci-dim-card__value sci-dim-card__value--small">
+                                {linkedRegion?.name ?? detail.regionId ?? 'No persisted region'}
+                              </p>
+                              {linkedRegion ? (
+                                <p className="sci-dim-card__note">
+                                  {linkedRegion.approxAreaKm2.toLocaleString()} km² ·{' '}
+                                  {linkedRegion.sourceCrs}
+                                </p>
+                              ) : null}
+                            </div>
+                            <div className="sci-dim-card">
+                              <span className="sci-dim-card__name">Analysis period</span>
+                              <p className="sci-dim-card__value">
+                                {requestStart ?? '—'} → {requestEnd ?? '—'}
+                              </p>
+                              <p className="sci-dim-card__note">
+                                Target cadence: {targetCadence ?? 'not recorded'}
+                              </p>
+                            </div>
+                            <div className="sci-dim-card">
+                              <span className="sci-dim-card__name">Bounding box (WGS 84)</span>
+                              <p className="sci-dim-card__value sci-dim-card__value--small">
+                                {linkedRegion
+                                  ? linkedRegion.bbox.map((v) => v.toFixed(4)).join(', ')
+                                  : 'Not linked to a saved region'}
+                              </p>
+                              <p className="sci-dim-card__note">
+                                EPSG:4326 · [west, south, east, north]
+                              </p>
+                            </div>
+                            <div className="sci-dim-card">
+                              <span className="sci-dim-card__name">Centroid (WGS 84)</span>
+                              <p className="sci-dim-card__value">
+                                {linkedRegion
+                                  ? `${linkedRegion.centroid[1].toFixed(4)}°, ${linkedRegion.centroid[0].toFixed(4)}°`
+                                  : '—'}
+                              </p>
+                              <p className="sci-dim-card__note">lat, lon · EPSG:4326</p>
+                            </div>
+                          </div>
+                          {linkedRegion ? (
+                            <details className="sci-geojson-details">
+                              <summary>GeoJSON Polygon coordinates (EPSG:4326)</summary>
+                              <pre>{JSON.stringify(linkedRegion.geometry, null, 2)}</pre>
+                            </details>
+                          ) : null}
+                          <p className="sci-dim-card__note">
+                            Prepared GHS datasets:{' '}
+                            {detail.ghsDatasetIds.length > 0
+                              ? detail.ghsDatasetIds.join(', ')
+                              : 'none linked'}
+                          </p>
+                        </section>
+                      )
+                    })()}
 
                     {parsedResult ? (
                       <>

@@ -6,11 +6,10 @@ from typing import Any
 
 from terra_scientific.domain.enums import (
     BaselineType,
-    DataSourceId,
     QaPolicyLevel,
     TemporalCadence,
 )
-from terra_scientific.domain.models.request import AssessmentRequest, BaselineConfig, TrendConfig
+from terra_scientific.domain.models.request import AssessmentRequest, BaselineConfig
 
 BBoxTuple = tuple[float, float, float, float]
 
@@ -307,7 +306,6 @@ def build_readiness_request(
     reference_end: datetime | None,
     min_reference_years: int,
     qa_level: str,
-    source_ids: list[DataSourceId] | None = None,
 ) -> AssessmentRequest:
     """Build AssessmentRequest matching Core UI / auto-provisioning options."""
     try:
@@ -327,15 +325,23 @@ def build_readiness_request(
         request_id="provision-readiness-check",
         analysis_start=ensure_utc(analysis_start),
         analysis_end=ensure_utc(analysis_end),
-        source_ids=list(source_ids or []),
         target_cadence=cadence_enum,
         qa_level=qa_enum,
         baseline=BaselineConfig(
             baseline_type=baseline_enum,
-            reference_start=ensure_utc(reference_start) if reference_start else None,
-            reference_end=ensure_utc(reference_end) if reference_end else None,
-            min_reference_years=max(1, min_reference_years),
-            min_samples_per_period=min(3, max(1, min_reference_years)),
+            start=(
+                ensure_utc(reference_start)
+                if baseline_enum is BaselineType.FIXED_REFERENCE and reference_start
+                else None
+            ),
+            end=(
+                ensure_utc(reference_end)
+                if baseline_enum is BaselineType.FIXED_REFERENCE and reference_end
+                else None
+            ),
+            min_years_required=max(1, min_reference_years),
+            min_samples_per_bin=max(1, min(3, min_reference_years)),
+            allow_explicit_full_period=baseline_enum is BaselineType.FULL_PERIOD_EXPLICIT,
+            exclude_assessment_overlap=False,
         ),
-        trend=TrendConfig(use_seasonal_mk=True),
     )

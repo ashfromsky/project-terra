@@ -85,3 +85,16 @@ async def test_codec_round_trip_and_database_ddl_health(tmp_path: Path) -> None:
         )
     finally:
         await engine.dispose()
+
+
+def test_codec_replaces_non_finite_floats_with_null() -> None:
+    """PostgreSQL JSON rejects NaN/Infinity; they must persist as explicit nulls."""
+    import json
+
+    from geospatial_harmonization.infrastructure.database.codec import _finite_json
+
+    encoded = _finite_json(
+        {"a": float("nan"), "b": [float("inf"), 1.0], "c": {"d": float("-inf")}}
+    )
+    assert encoded == {"a": None, "b": [None, 1.0], "c": {"d": None}}
+    json.dumps(encoded, allow_nan=False)

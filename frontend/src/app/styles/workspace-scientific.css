@@ -425,3 +425,36 @@
     padding: 0;
   }
 }
+
+.sci-dim-card__value--small {
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.45;
+  word-break: break-word;
+}
+
+.sci-geojson-details {
+  border-top: 1px solid var(--color-border-subtle);
+  padding-top: 10px;
+  font-size: 11px;
+  color: var(--color-text-secondary);
+}
+
+.sci-geojson-details summary {
+  cursor: pointer;
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+.sci-geojson-details pre {
+  margin: 8px 0 0;
+  max-height: 220px;
+  overflow: auto;
+  padding: 10px 12px;
+  border: 1px solid var(--color-border-subtle);
+  border-radius: 6px;
+  background-color: var(--color-bg-canvas);
+  color: var(--color-text-primary);
+  font-size: 10.5px;
+  line-height: 1.5;
+}

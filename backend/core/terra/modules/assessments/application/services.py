@@ -272,10 +272,15 @@ class AssessmentApplicationService:
                 grid_stacks=grid_stacks or None,
                 assessment_id=str(entity.id),
             )
-            published_artifacts = await self._publish_derived_spatial_artifacts(
-                entity=entity,
-                datasets=datasets,
-                result=result,
+            publish_derived = config_copy.get("publish_derived_spatial_artifacts", True)
+            published_artifacts = (
+                await self._publish_derived_spatial_artifacts(
+                    entity=entity,
+                    datasets=datasets,
+                    result=result,
+                )
+                if publish_derived is not False
+                else {}
             )
             now = datetime.now(UTC)
             result_payload_dict = result.model_dump(mode="json")

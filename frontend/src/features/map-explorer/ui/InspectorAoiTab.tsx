@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react'
-import { Link } from 'react-router'
+import { Link, useNavigate } from 'react-router'
 import {
   buildGitHubLoginUrl,
   useCurrentUserQuery,
@@ -27,6 +27,7 @@ import {
   X,
 } from '../../../shared/ui/explorer-icons'
 import { Chart } from '../../../shared/ui/chart'
+import { useAoiAssessmentRun } from '../model/use-aoi-assessment-run'
 import { useAoiWorkspace } from '../model/use-aoi-workspace'
 import { useExploreStore } from '../model/use-explore-store'
 
@@ -219,6 +220,36 @@ export function InspectorAoiTab() {
   })
 
   const isDrawing = interactionMode === 'draw-polygon' || interactionMode === 'draw-rectangle'
+
+  const navigate = useNavigate()
+  const analysisStart = useExploreStore((s) => s.analysisStart)
+  const analysisEnd = useExploreStore((s) => s.analysisEnd)
+  const setAnalysisPeriod = useExploreStore((s) => s.setAnalysisPeriod)
+  const [includeVegetation, setIncludeVegetation] = useState(false)
+  const [includeSoilMoisture, setIncludeSoilMoisture] = useState(false)
+  const assessmentRun = useAoiAssessmentRun()
+  const isSubmitting =
+    assessmentRun.phase === 'provisioning' || assessmentRun.phase === 'submitting'
+
+  const handleRunAssessment = async () => {
+    if (!selectedAoi || !isAuthenticated) return
+    const result = await assessmentRun.run({
+      regionId: selectedAoi.properties.id,
+      aoiName: selectedAoi.properties.name,
+      analysisStart,
+      analysisEnd,
+      includeVegetation,
+      includeSoilMoisture,
+    })
+    if (!result) return
+    const params = new URLSearchParams({
+      assessmentId: result.assessment.id,
+      regionId: selectedAoi.properties.id,
+      start: analysisStart,
+      end: analysisEnd,
+    })
+    navigate(`${APP_ROUTES.assessments}?${params.toString()}`)
+  }
 
   return (
     <div className="explorer-inspector-stack" role="tabpanel">
@@ -423,6 +454,114 @@ export function InspectorAoiTab() {
               </div>
 
               <div className="explorer-inspector-card">
+                <span className="explorer-overline">Scientific Assessment</span>
+                <p className="explorer-muted-copy">
+                  Provision bounded real observations for this AOI, then queue the existing
+                  Scientific Core assessment in terra-worker.
+                </p>
+                <div className="explorer-analysis-grid">
+                  <label className="explorer-analysis-field" htmlFor="aoi-analysis-start">
+                    <span>Analysis start</span>
+                    <input
+                      id="aoi-analysis-start"
+                      type="date"
+                      value={analysisStart}
+                      onChange={(e) => setAnalysisPeriod(e.target.value, analysisEnd)}
+                    />
+                  </label>
+                  <label className="explorer-analysis-field" htmlFor="aoi-analysis-end">
+                    <span>Analysis end</span>
+                    <input
+                      id="aoi-analysis-end"
+                      type="date"
+                      value={analysisEnd}
+                      onChange={(e) => setAnalysisPeriod(analysisStart, e.target.value)}
+                    />
+                  </label>
+                </div>
+                <div className="explorer-analysis-toggles">
+                  <label>
+                    <input
+                      type="checkbox"
+                      checked={includeVegetation}
+                      onChange={(e) => setIncludeVegetation(e.target.checked)}
+                    />
+                    <span>Vegetation (MODIS)</span>
+                  </label>
+                  <label>
+                    <input
+                      type="checkbox"
+                      checked={includeSoilMoisture}
+                      onChange={(e) => setIncludeSoilMoisture(e.target.checked)}
+                    />
+                    <span>Soil moisture (SMAP)</span>
+                  </label>
+                </div>
+                <p className="explorer-resolution-note">
+                  Climate uses NASA POWER (MERRA-2 / CERES). Optional MODIS or SMAP domains
+                  ingest bounded granules and can take several minutes.
+                </p>
+                <button
+                  type="button"
+                  className="explorer-action-btn explorer-action-btn--primary"
+                  disabled={!isAuthenticated || isSubmitting}
+                  onClick={() => void handleRunAssessment()}
+                >
+                  {assessmentRun.phase === 'provisioning'
+                    ? 'Provisioning real observations…'
+                    : assessmentRun.phase === 'submitting'
+                      ? 'Queuing Scientific Core…'
+                      : 'Provision Data & Run Assessment'}
+                </button>
+                {!isAuthenticated ? (
+                  <p className="explorer-resolution-note">
+                    Sign in to persist this AOI and submit a scientific assessment.
+                  </p>
+                ) : null}
+                {assessmentRun.phase === 'provisioning' ? (
+                  <div className="explorer-status-banner" role="status" aria-live="polite">
+                    <strong>Contacting GHS providers</strong>
+                    <p>
+                      Discovering and retrieving bounded observations for this AOI and period.
+                    </p>
+                  </div>
+                ) : null}
+                {assessmentRun.phase === 'submitting' ? (
+                  <div className="explorer-status-banner" role="status" aria-live="polite">
+                    <strong>Observations ready</strong>
+                    <p>
+                      {assessmentRun.provision?.datasetIds?.length ?? 0} prepared dataset(s)
+                      linked. Queuing the scientific assessment.
+                    </p>
+                  </div>
+                ) : null}
+                {assessmentRun.error ? (
+                  <div className="explorer-status-banner is-error" role="alert">
+                    <strong>Assessment submission failed</strong>
+                    <p>{assessmentRun.error}</p>
+                    {assessmentRun.provision &&
+                    (assessmentRun.provision.steps?.length ?? 0) > 0 ? (
+                      <ul className="explorer-provision-steps">
+                        {(assessmentRun.provision.steps ?? []).map((step, index) => (
+                          <li key={`${step.domain}-${step.provider}-${index}`}>
+                            <strong>{step.domain}</strong> · {step.provider} / {step.product} ·{' '}
+                            {step.status} — {step.detail}
+                          </li>
+                        ))}
+                      </ul>
+                    ) : null}
+                    <button
+                      type="button"
+                      className="explorer-inline-reset"
+                      onClick={assessmentRun.reset}
+                    >
+                      Dismiss
+                    </button>
+                  </div>
+                ) : null}
+              </div>
+
+              <div className="explorer-inspector-card">
                 <div className="flex items-center justify-between mb-2">
                   <span className="explorer-overline">Physical Zonal Statistics</span>
                   <span className="text-xs px-2 py-0.5 rounded bg-emerald-950/40 text-emerald-300 font-mono">
@@ -528,16 +667,10 @@ export function InspectorAoiTab() {
 
                     <div className="explorer-aoi-footer">
                       <Link
-                        to={`${APP_ROUTES.assessments}?regionId=${encodeURIComponent(selectedAoi.properties.id)}`}
-                        className="explorer-action-btn explorer-action-btn--primary"
-                      >
-                        Run Scientific Assessment
-                      </Link>
-                      <Link
                         to={`${APP_ROUTES.dataSources}?regionId=${encodeURIComponent(selectedAoi.properties.id)}`}
                         className="explorer-action-btn"
                       >
-                        Data Ingestion
+                        Inspect Data Ingestion
                       </Link>
                     </div>
                   </>
