@@ -1,5 +1,20 @@
 """Domain exceptions for Geospatial Harmonization Service."""
 
+from typing import Literal
+
+ErrorCategory = Literal[
+    "authentication",
+    "authorization",
+    "validation",
+    "network",
+    "provider",
+    "provider_disabled",
+    "processing",
+    "storage",
+    "cancelled",
+    "unknown",
+]
+
 
 class DomainError(Exception):
     """Base exception for domain invariant and contract violations."""
@@ -19,6 +34,92 @@ class IncompatibleDatasetError(DomainError):
 
 class QualityPolicyViolationError(DomainError):
     """Raised when quality constraints reject a dataset or requested operation."""
+
+
+class ProviderIngestionError(IncompatibleDatasetError):
+    """Classified upstream provider or transport error carrying retryability semantics."""
+
+    error_category: ErrorCategory = "provider"
+    retryable: bool = False
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        error_category: ErrorCategory | None = None,
+        retryable: bool | None = None,
+        status_code: int | None = None,
+        provider: str | None = None,
+    ) -> None:
+        super().__init__(message)
+        if error_category is not None:
+            self.error_category = error_category
+        if retryable is not None:
+            self.retryable = retryable
+        self.status_code = status_code
+        self.provider = provider
+
+
+class ProviderDisabledError(ProviderIngestionError):
+    """Raised when a configured data provider is disabled by runtime settings."""
+
+    error_category: ErrorCategory = "provider_disabled"
+    retryable: bool = False
+
+
+class ProviderAuthenticationError(ProviderIngestionError):
+    """Raised on missing credentials, HTTP 401, or failed Earthdata URS login."""
+
+    error_category: ErrorCategory = "authentication"
+    retryable: bool = False
+
+
+class ProviderAuthorizationError(ProviderIngestionError):
+    """Raised on HTTP 403 or unapproved Earthdata application / EULA access."""
+
+    error_category: ErrorCategory = "authorization"
+    retryable: bool = False
+
+
+class ProviderValidationError(ProviderIngestionError):
+    """Raised on invalid queries, HTTP 400/404/422, or missing upstream granules."""
+
+    error_category: ErrorCategory = "validation"
+    retryable: bool = False
+
+
+class TransientTransferError(ProviderIngestionError):
+    """Raised on transient HTTP 429/5xx or network timeout/transport failures."""
+
+    error_category: ErrorCategory = "network"
+    retryable: bool = True
+
+
+class ProviderResponseError(ProviderIngestionError):
+    """Raised when an upstream response body violates expected content or structure."""
+
+    error_category: ErrorCategory = "provider"
+    retryable: bool = False
+
+
+def classify_exception(exc: Exception) -> tuple[ErrorCategory, bool]:
+    """Map an arbitrary exception to an explicit failure category and retryability flag."""
+    if isinstance(exc, ProviderIngestionError):
+        return exc.error_category, exc.retryable
+    if isinstance(exc, StorageError):
+        return "storage", False
+    if isinstance(
+        exc,
+        (
+            InvalidGridSpecError,
+            InvalidTemporalSpecError,
+            QualityPolicyViolationError,
+            IncompatibleDatasetError,
+            ValueError,
+        ),
+    ):
+        return "validation", False
+    return "unknown", True
 
 
 class StorageError(DomainError):

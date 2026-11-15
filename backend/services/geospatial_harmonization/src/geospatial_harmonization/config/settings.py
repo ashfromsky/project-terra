@@ -17,12 +17,36 @@ StorageBackend = Literal["local", "s3"]
 RasterCompressionCodec = Literal["DEFLATE", "ZSTD"]
 ZarrCompressionCodec = Literal["zstd", "gzip", "blosc"]
 
+_PROVIDER_ALIAS_MAP: dict[str, str] = {
+    "modis": "modis",
+    "gpm": "gpm_imerg",
+    "gpm_imerg": "gpm_imerg",
+    "smap": "smap",
+    "nasa_power": "nasa_power",
+    "generic": "generic",
+}
+
+
+def _resolve_env_files() -> tuple[Path, ...]:
+    """Discover repo-root, service-root, and cwd `.env` files in increasing priority."""
+    here = Path(__file__).resolve()
+    candidates: list[Path] = []
+    for parent in reversed(here.parents):
+        if (parent / "pyproject.toml").exists() or (parent / ".git").exists():
+            env_path = parent / ".env"
+            if env_path not in candidates:
+                candidates.append(env_path)
+    cwd_env = Path(".env")
+    if cwd_env not in candidates:
+        candidates.append(cwd_env)
+    return tuple(candidates)
+
 
 class Settings(BaseSettings):
     """Typed service configuration loaded from process environment or `.env`."""
 
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=_resolve_env_files(),
         env_file_encoding="utf-8",
         extra="ignore",
     )
@@ -83,13 +107,22 @@ class Settings(BaseSettings):
     ghs_admin_token: SecretStr | None = None
 
     earthdata_token: SecretStr | None = None
+    modis_enabled: bool = True
+    gpm_enabled: bool = True
+    smap_enabled: bool = True
+    nasa_power_enabled: bool = True
     nasa_power_base_url: str = "https://power.larc.nasa.gov/api"
     cmr_base_url: str = "https://cmr.earthdata.nasa.gov/search"
     appeears_base_url: str = "https://appeears.earthdatacloud.nasa.gov/api"
     generic_handler_allowed_hosts: Annotated[list[str], NoDecode] = Field(default_factory=list)
+    earthdata_presigned_hosts: Annotated[list[str], NoDecode] = Field(
+        default_factory=lambda: ["*.cloudfront.net", "*.amazonaws.com"]
+    )
 
     http_timeout_seconds: float = Field(default=30.0, gt=0.0, le=300.0)
     http_max_retries: int = Field(default=3, ge=0, le=10)
+    http_retry_backoff_seconds: float = Field(default=1.0, ge=0.0, le=60.0)
+    http_max_download_bytes: int = Field(default=2_147_483_648, ge=1)
     worker_poll_interval_seconds: float = Field(default=2.0, gt=0.0, le=60.0)
     worker_lease_seconds: int = Field(default=300, ge=30, le=86400)
     max_grid_pixels: int = Field(default=100_000_000, ge=1)
@@ -109,6 +142,7 @@ class Settings(BaseSettings):
         "cors_allow_methods",
         "cors_allow_headers",
         "generic_handler_allowed_hosts",
+        "earthdata_presigned_hosts",
         mode="before",
     )
     @classmethod
@@ -119,6 +153,22 @@ class Settings(BaseSettings):
             except json.JSONDecodeError:
                 return [item.strip() for item in value.split(",") if item.strip()]
         return value
+
+    def has_earthdata_token(self) -> bool:
+        """Return True when a non-empty Earthdata credential is configured without exposing it."""
+        return bool(self.earthdata_token and self.earthdata_token.get_secret_value().strip())
+
+    def is_provider_enabled(self, provider: str) -> bool:
+        """Return whether the given provider is enabled by configuration."""
+        canonical = _PROVIDER_ALIAS_MAP.get(provider.strip().lower(), provider.strip().lower())
+        flags: dict[str, bool] = {
+            "modis": self.modis_enabled,
+            "gpm_imerg": self.gpm_enabled,
+            "smap": self.smap_enabled,
+            "nasa_power": self.nasa_power_enabled,
+            "generic": bool(self.generic_handler_allowed_hosts),
+        }
+        return flags.get(canonical, False)
 
 
 @lru_cache
