@@ -51,14 +51,14 @@ _POWER_META: dict[str, tuple[str, str, str, str, VariableSemantics]] = {
         "MJ/hr",
         "1.0x1.0",
         "CERES SYN1deg",
-        "continuous_intensive",
+        "continuous_extensive",
     ),
     "CLRSKY_SFC_SW_DWN": (
         "MJ/m^2/day",
         "MJ/hr",
         "1.0x1.0",
         "CERES SYN1deg",
-        "continuous_intensive",
+        "continuous_extensive",
     ),
 }
 _MIN_REGIONAL_SPAN_DEG = 2.0
