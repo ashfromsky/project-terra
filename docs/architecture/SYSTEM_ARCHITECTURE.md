@@ -1,11 +1,21 @@
 # PROJECT TERRA — System Architecture
 
-> **Status:** Proposed architecture baseline  
+> **Status:** Proposed target architecture baseline (see ADR-0001, ADR-0002, and [docs/PROJECT_OVERVIEW.md](../PROJECT_OVERVIEW.md) for current implementation state)  
 > **Version:** 1.0  
-> **Last updated:** 2026-11-14  
+> **Last updated:** 2026-11-15  
 > **Scope:** Target architecture, component responsibilities, data flows, integration boundaries, and implementation constraints.
 
-This document is the architectural reference for PROJECT TERRA. It describes the intended system design; it does **not** claim that every component is already implemented or deployed. Implementation status must be verified in the repository.
+This document is the architectural reference for PROJECT TERRA. It describes the intended target system design; it does **not** claim that every component is already implemented or deployed. See [docs/PROJECT_OVERVIEW.md](../PROJECT_OVERVIEW.md) for exact module readiness.
+
+### Current Implementation Reality vs. Target Baseline
+
+- **Implemented runtimes (`4` processes in `make dev-full`):**
+  1. `frontend/`: React/Vite SPA connected to Core (`/api/v1/auth/*`, `/api/v1/layers*`, `/api/v1/regions*`, `/api/v1/assessments*`, `/api/v1/system/info`, `/health`); `/overview`, `/comparative-analysis`, and `/reports` remain placeholder/synthetic UI.
+  2. `backend/core/`: FastAPI modular monolith (`auth`, `layers`, `regions`, `assessments`) with SQLAlchemy async + dev SQLite fallback (no PostGIS or Alembic in Core yet).
+  3. `backend/worker/` (`terra-worker`): async queue runner polling Core DB (`claim_next_queued`) and invoking `terra-scientific` in-process alongside `HttpxGhsDatasetClient`.
+  4. `backend/services/geospatial_harmonization/` (GHS, ADR-0002): standalone ingestion/harmonization FastAPI service + its own `WorkerRunner` + Alembic migrations + Local/S3 storage.
+- **Core ↔ GHS boundary & current gap:** Core accesses GHS only via HTTP `GET /api/v1/datasets/{id}` (`HttpxGhsDatasetClient`), which currently expects pre-populated `extensions.time_series` arrays on GHS dataset records; GHS `temporal.py` aggregation/rate integration is not yet wired into `HarmonizationService.execute_plan`, AppEEARS/Harmony workflows are unimplemented, and GHS `/providers`/`/discover`/`/jobs`/`/datasets` routes are not exposed through Core `/api/v1`.
+- **Deferred target infrastructure:** Caddy reverse proxy, PgBouncer, PostGIS spatial queries, DuckDB analytics, TiTiler COG/Zarr tile streaming, and LLM AI Analyst are not yet operational. Offline CI runs in `.github/workflows/ci.yml`.
 
 ---
 
@@ -697,12 +707,12 @@ To avoid tight coupling between React components and geospatial rendering engine
    - `BASEMAP_PROVIDER_REGISTRY` isolates public provider URLs (`VITE_NASA_GIBS_BASE_URL`, default `https://gibs.earthdata.nasa.gov`), WMTS `GoogleMapsCompatible_Level8`/`Level9` (`epsg3857`) and `500m` (`epsg4326`) tile matrices, date formatting rules for temporal VIIRS reflectance (`VIIRS_SNPP_CorrectedReflectance_TrueColor`), attribution strings, and projection compatibility flags.
    - `ENVIRONMENTAL_LAYER_CATALOG` catalogs 16 Vegetation (`MOD13Q1.061`), Temperature (`MOD11A2.061`), Water (`GPM IMERG V07`, `SMAP SPL3SMP_E`), and Derived resilience/trend layers with explicit `availabilityStatus` (`connected`, `preview`, `planned`, `unavailable`), units, native spatial resolutions, QA policies, legend stops, and prepared `MapTileSource` descriptors (`cog`, `tilejson`, `zarr`, `mvt`, `geojson`, `wmts`).
 3. **Frontend Data Provider Contract & State (`shared/types/geospatial.ts`, `shared/api`, `features/map-explorer`)**:
-   - `MapDataProvider` defines replaceable async operations (`getLayers`, `getLayerMetadata`, `getTemporalCoverage`, `inspectPoint`, `getAreaObservation`) consumed via TanStack Query hooks.
-   - `MockMapDataProvider` currently supplies catalog metadata, simulated catalog coverage counts, and explicit `unavailable` point/area observation responses; all synthetic visual overlays are isolated behind `syntheticPreviewEnabled` and labeled `SYNTHETIC / DEMONSTRATION DATA`.
+   - `shared/api` exposes OpenAPI-generated TypeScript fetch clients (`auth.ts`, `layers.ts`, `regions.ts`, `assessments.ts`, `system.ts`, `health.ts`) bound to `frontend/src/shared/api/generated/schema.d.ts`, alongside `MapDataProvider` (`entities/layer`) used by `/explore` for catalog/coverage/unavailable observation states and TanStack Query hooks.
+   - `/explore` connects layers to `/api/v1/layers*`, saved AOIs to `/api/v1/regions*` (when authenticated), and keeps synthetic visual overlays explicitly isolated behind `syntheticPreviewEnabled` (`SYNTHETIC / DEMONSTRATION DATA`). `/assessments` and `/data-sources` consume `/api/v1/assessments*`, `/api/v1/layers`, `/api/v1/system/info`, and `/health`, while `/overview`, `/comparative-analysis`, and `/reports` remain synthetic/placeholder routes.
    - `useExploreStore` (Zustand) manages active projection, basemap, layer stretch/opacity, temporal playback state, WGS 84 (`EPSG:4326`) AOI drafting/export, and side-by-side comparison panes, synchronized with URL query parameters via `useExploreUrlSync`.
 4. **Implemented vs. Planned Capabilities Boundary**:
-   - **Implemented (Frontend Workspace)**: `/explore` full-screen GIS shell, Homepage entry button (`Open Map Explorer`), three projection engines (`Equal Earth`, `Globe`, `Mercator`), verified public NASA GIBS Blue Marble / Shaded Relief / VIIRS True Color basemaps, 16-layer metadata catalog & legends, Point Inspector metadata view, WGS 84 polygon/rectangle drawing + `EPSG:4326` GeoJSON export, temporal playback controls, and side-by-side camera/layer/period comparison.
-   - **Planned (Requires Backend API & Scientific Core)**: Authenticated NASA Earthdata/POWER/STAC discovery, TiTiler dynamic COG/Zarr raster tile streaming, real pixel/time-series point extraction at native cell footprints, PostGIS/Worker zonal statistics, server-side Mann–Kendall / Sen's Slope / TRI computations, and pixel-wise comparison swipe/difference maps.
+   - **Implemented (Frontend & Core Assessments)**: `/explore` full-screen GIS shell (Equal Earth, Globe, Mercator projections; verified public NASA GIBS browse imagery; `/api/v1/layers*` metadata catalog; `/api/v1/regions*` AOI CRUD), `/assessments` (Core `methods` catalog, creation, listing, detail, execution, separated dimensions & provenance), `/data-sources` (Core catalog vs isolated GHS status & assessment provenance), `terra-scientific` P0/P1 pipeline, and `terra-worker` queue runner.
+   - **Planned (Remaining Transport, Analytics & UI Integration)**: AppEEARS/Harmony task submission and `temporal.py` pipeline wiring in GHS, direct Zarr/GeoTIFF raster-to-series transport from GHS to Core without inline `extensions.time_series`, TiTiler dynamic COG/Zarr streaming, PostGIS/DuckDB zonal analytics, `/comparative-analysis` + `/reports` + `/overview` backend endpoints, and P2 benchmark calibration (`composite_tri`, `critical_slowing_down`, `causal_attribution`).
 
 ### Explicit diagram clarifications
 

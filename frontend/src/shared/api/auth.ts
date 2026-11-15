@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { apiFetchClient, ApiError, buildApiUrl, extractErrorDetail, unwrapApiResponse } from './client'
 import type { LogoutResponse, UserResponse } from './contracts'
+import { ASSESSMENTS_LIST_QUERY_KEY } from './assessments'
 import { REGIONS_QUERY_KEY } from './regions'
 
 export type { LogoutResponse, UserResponse }
@@ -65,6 +66,8 @@ export function useLogoutMutation() {
     onSuccess: () => {
       queryClient.setQueryData(AUTH_ME_QUERY_KEY, null)
       queryClient.removeQueries({ queryKey: REGIONS_QUERY_KEY })
+      queryClient.removeQueries({ queryKey: ASSESSMENTS_LIST_QUERY_KEY })
+      queryClient.removeQueries({ queryKey: ['assessments', 'detail'] })
     },
   })
 }

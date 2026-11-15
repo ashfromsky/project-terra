@@ -43,14 +43,14 @@ Keep current reality distinct from the target design: `SYSTEM_ARCHITECTURE.md` d
 
 Read `docs/PROJECT_OVERVIEW.md` and inspect code rather than relying on this summary. The following distinctions are important in the current repository:
 
-- `backend/core/` is the main FastAPI application. Its implemented business modules currently include `auth`, `layers`, and `regions`, alongside health and system routes. Do not assume planned analyses, assessments, comparisons, reports, or AI modules exist.
-- `backend/services/geospatial_harmonization/` (GHS) is an implemented, independently runnable service accepted under ADR-0002. It has its own API, layered application/domain/infrastructure, readers, handlers, transformations, migrations, storage adapters, and service-local `WorkerRunner`. It is currently isolated from Core and the frontend unless the current overview/code proves otherwise.
-- `backend/scientific/` and `backend/worker/` are placeholders, not an implemented shared Scientific Core or shared Worker runtime. Do not confuse the GHS worker with `backend/worker/`.
-- The frontend is connected to Core for the implemented auth, layer-catalog, and region/AOI flows using generated OpenAPI contracts. Other analytical pages and scientific workflows still include synthetic/demo or unavailable states; preserve clear disclosure.
-- Core currently uses SQLAlchemy async and a SQLite development fallback. Do not claim that Core currently uses PostGIS-backed spatial queries. GHS has its own SQLite/PostgreSQL persistence context.
-- The layer catalog contains derived/resilience concepts whose algorithms are not thereby implemented. Catalog presence or `availableSteps: 0` is not evidence that quantitative analysis is available.
+- `backend/core/` is the main FastAPI application. Its implemented business modules currently include `auth`, `layers`, `regions`, and `assessments`, alongside health and system routes. Do not assume planned `comparisons`, `reports`, or `ai` modules exist.
+- `backend/services/geospatial_harmonization/` (GHS) is an implemented, independently runnable service accepted under ADR-0002. It has its own API, layered application/domain/infrastructure, readers, handlers, transformations, migrations, storage adapters, and service-local `WorkerRunner`. Core consumes prepared datasets from GHS over HTTP (`GET /api/v1/datasets/{id}`) during assessments via `HttpxGhsDatasetClient`, while GHS discovery, job, and storage routes remain isolated from Core `/api/v1` and the frontend. GHS `temporal.py` helpers and AppEEARS/Harmony task workflows remain incomplete.
+- `backend/scientific/` (`terra-scientific`, pure P0+P1 algorithms; P2 `composite_tri`, `critical_slowing_down`, `causal_attribution` deferred) and `backend/worker/` (`terra-worker`, async Core assessment queue runner) are implemented. Do not confuse the GHS worker with `backend/worker/`.
+- The frontend is connected to Core for `auth`, `layers`, `regions` (AOI CRUD on `/explore`), `/assessments` (`GET /api/v1/assessments/methods`, create, list, detail, execute), and `/data-sources` (`/health`, `/api/v1/system/info`, `/api/v1/layers`, and authenticated assessment provenance). `/overview`, `/comparative-analysis`, and `/reports` still include synthetic/demo or unavailable states; preserve clear disclosure.
+- Core currently uses SQLAlchemy async and a SQLite development fallback (no Alembic in Core yet). Do not claim that Core currently uses PostGIS-backed spatial queries. GHS has its own SQLite/PostgreSQL persistence context with Alembic migrations.
+- The layer catalog contains derived/resilience concepts whose catalog entries (`availableSteps: 0`) reflect metadata/visualization definitions rather than pre-populated raster time series; quantitative computation runs via `/api/v1/assessments*`.
 - NASA GIBS is a contextual visualization source only; never derive measurements, time series, or pixel statistics from rendered tiles or screenshot colors.
-- Local Makefile verification exists. Do not assume CI workflows, Caddy, TiTiler, DuckDB analytics, PostGIS workflows, or shared Worker/Scientific Core are operational unless they are present and configured.
+- Local Makefile verification and offline GitHub Actions CI workflows (`.github/workflows/ci.yml` plus manual `.github/workflows/optional-live-and-postgres.yml`) exist. Do not assume Caddy, TiTiler, DuckDB analytics, PostGIS spatial queries, or automated external production deployment targets are operational unless they are explicitly configured.
 
 ## 5. Skills Discovery
 
@@ -242,17 +242,19 @@ Prefer deterministic tests, explicit fixtures, meaningful assertions, and isolat
 
 Use checks appropriate to the affected component. Common commands:
 
-- Root: `make test`, `make lint`, `make frontend-typecheck`, `make frontend-build`.
+- Root: `make test`, `make lint`, `make dev-check`, `make frontend-typecheck`, `make frontend-build`.
 - Core: `make backend-test`, `make backend-lint`.
+- Scientific Core: `make scientific-test`, `make scientific-lint`.
+- Worker: `make worker-test`, `make worker-lint`.
 - Frontend: `make frontend-test`, `make frontend-lint`, `make frontend-typecheck`, `make frontend-build`.
 - Contracts: `make contracts`.
-- GHS: follow commands in `backend/services/geospatial_harmonization/README.md` (`uv run pytest`, Ruff, and mypy as applicable).
+- GHS: `make ghs-test`, `make ghs-lint` (or follow commands in `backend/services/geospatial_harmonization/README.md`: `uv run pytest`, Ruff, and mypy).
 
 Verification boundaries:
 
-- Root `make test` currently covers Core and frontend tests; it does not automatically run GHS tests.
-- GHS PostgreSQL locking integration tests require `GHS_TEST_POSTGRES_URL`; report them skipped/not run when no test database is available.
-- Do not claim CI passed when no applicable workflow was found or run.
+- Root `make test` covers Core, Scientific Core, Worker, and Frontend tests; run `make ghs-test` for GHS and `make dev-check` for development orchestrator tests.
+- GHS PostgreSQL locking integration tests require `GHS_TEST_POSTGRES_URL`; report them skipped/not run when no test database is available (offline CI keeps PostgreSQL and live NASA checks in a separate manual workflow).
+- Do not claim CI passed when no applicable workflow was executed.
 - Never claim a test/build/linter/type check/migration/live integration passed unless it was actually executed and inspected.
 - Never weaken checks or security controls merely to obtain a green result; fix the cause or request approval for an exception.
 

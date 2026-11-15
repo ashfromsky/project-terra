@@ -3,6 +3,7 @@
 @import './explorer-inspector.css';
 @import './explorer-stage.css';
 @import './explorer-bottom-compare.css';
+@import './workspace-scientific.css';
 
 :root {
   color-scheme: light;

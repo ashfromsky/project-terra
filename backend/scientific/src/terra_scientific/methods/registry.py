@@ -227,24 +227,56 @@ _SPECS: dict[str, MethodSpec] = {
     ),
     "event_recovery": MethodSpec(
         method_id="event_recovery",
-        version="1.0.0",
+        version="1.1.0",
         name="Event-Centered Post-Anomaly Recovery Quantification",
         priority=PriorityTier.P1,
         implemented=True,
-        formula_summary="Recovery rate over elapsed time, completeness ratio, censored tracking",
-        assumptions=["Seasonally adjusted series isolates departure from phenological cycle"],
-        limitations=["Truncated post-event series marked incomplete_censored"],
+        formula_summary=(
+            "Pre-event finite baseline mean, trough magnitude, completeness ratio, and "
+            "recovery bounded before next_event_idx after confirmation_steps consecutive finite "
+            "observations >= target"
+        ),
+        assumptions=[
+            "Seasonally adjusted series isolates departure from phenological cycle",
+            (
+                "Consecutive confirmation_steps prevent transient single-step crossings from "
+                "declaring recovery"
+            ),
+        ],
+        limitations=[
+            "Truncated or subsequent-event-bounded post-event series marked incomplete_censored",
+            (
+                "Missing pre-event baseline values yield insufficient_data rather than "
+                "fabricating baseline 0"
+            ),
+        ],
         reference="Ingrisch & Bahn (2018); De Keersmaecker et al. (2015)",
     ),
     "resilience_dimensions": MethodSpec(
         method_id="resilience_dimensions",
-        version="1.0.0",
+        version="1.1.0",
         name="Separated Ecosystem Resistance, Recovery, Stability, and Sensitivity Metrics",
         priority=PriorityTier.P1,
         implemented=True,
-        formula_summary="Independent dimensionless/physical metrics per resilience component",
-        assumptions=["Observable via remotely sensed proxies within native product caveats"],
-        limitations=["Measures statistical proxy behavior rather than species/trophic resilience"],
+        formula_summary=(
+            "Resistance=mean_i(1/(1+|z_neg_peak,i|)), Recovery=mean completeness, "
+            "Stability=1/(1+std(standardized_deseasonalized_residuals)), Sensitivity=OLS slope "
+            "(response_units/driver_units)"
+        ),
+        assumptions=[
+            "Observable via remotely sensed proxies within native product caveats",
+            (
+                "Resistance requires >=1 eligible negative disturbance peak; absence of "
+                "disturbance is unavailable"
+            ),
+        ],
+        limitations=[
+            "Measures statistical proxy behavior rather than species/trophic resilience",
+            (
+                "Cross-variable sensitivity coefficient is non-causal and conditioned on "
+                "linear overlap"
+            ),
+        ],
         reference="Lloret et al. (2011); Hodgson et al. (2015)",
     ),
     "composite_tri": MethodSpec(

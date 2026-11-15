@@ -1,0 +1,152 @@
+name: CI & Artifact Readiness
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - "feat/**"
+      - "fix/**"
+      - "chore/**"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  backend-core:
+    name: Core API (Lint & Tests)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.13"
+          enable-cache: true
+          cache-dependency-glob: "backend/core/uv.lock"
+      - name: Install Core dependencies
+        run: cd backend/core && uv sync --locked
+      - name: Lint Core API
+        run: make backend-lint
+      - name: Test Core API
+        run: make backend-test
+
+  scientific-core:
+    name: Scientific Core (Lint, Mypy & Tests)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.13"
+          enable-cache: true
+          cache-dependency-glob: "backend/scientific/uv.lock"
+      - name: Install Scientific Core dependencies
+        run: cd backend/scientific && uv sync --locked --extra dev
+      - name: Lint and type-check Scientific Core
+        run: make scientific-lint
+      - name: Test Scientific Core
+        run: make scientific-test
+
+  worker:
+    name: Core Worker (Lint, Mypy & Tests)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.13"
+          enable-cache: true
+          cache-dependency-glob: "backend/worker/uv.lock"
+      - name: Install Core Worker dependencies
+        run: cd backend/worker && uv sync --locked --extra dev
+      - name: Lint and type-check Core Worker
+        run: make worker-lint
+      - name: Test Core Worker
+        run: make worker-test
+
+  ghs-offline:
+    name: GHS Offline (Lint, Mypy & Tests)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.13"
+          enable-cache: true
+          cache-dependency-glob: "backend/services/geospatial_harmonization/uv.lock"
+      - name: Install GHS dependencies
+        run: cd backend/services/geospatial_harmonization && uv sync --locked
+      - name: Lint and type-check GHS
+        run: make ghs-lint
+      - name: Test GHS (offline unit & integration suite)
+        run: make ghs-test
+
+  frontend-and-contracts:
+    name: Frontend, OpenAPI Contracts & Dev Orchestrator
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 12.19.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "pnpm"
+          cache-dependency-path: "frontend/pnpm-lock.yaml"
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.13"
+          enable-cache: true
+          cache-dependency-glob: "backend/core/uv.lock"
+      - name: Install Frontend and Core contract dependencies
+        run: |
+          make frontend-install
+          cd backend/core && uv sync --locked
+      - name: Run dev orchestrator tests
+        run: make dev-check
+      - name: Verify OpenAPI contract synchronization
+        run: |
+          make contracts
+          git diff --exit-code frontend/src/shared/api/generated/openapi.json frontend/src/shared/api/generated/schema.d.ts
+      - name: Lint Frontend
+        run: make frontend-lint
+      - name: Type-check Frontend
+        run: make frontend-typecheck
+      - name: Test Frontend
+        run: make frontend-test
+      - name: Build Frontend production bundle
+        run: make frontend-build
+      - name: Upload Frontend production bundle artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: terra-frontend-dist
+          path: frontend/dist
+          retention-days: 7
+
+  cd-artifact-readiness:
+    name: Delivery Artifact Stage (No External Target Configured)
+    needs:
+      - backend-core
+      - scientific-core
+      - worker
+      - ghs-offline
+      - frontend-and-contracts
+    if: ${{ github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify GHS container image builds
+        run: docker build -t terra-ghs:ci backend/services/geospatial_harmonization
+      - name: Download verified Frontend artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: terra-frontend-dist
+          path: artifacts/frontend-dist
+      - name: Verify delivery artifacts
+        run: test -f artifacts/frontend-dist/index.html
