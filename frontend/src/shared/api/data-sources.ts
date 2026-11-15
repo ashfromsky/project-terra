@@ -1,13 +1,24 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { apiFetchClient, ApiError, unwrapApiResponse } from './client'
 import type {
+  AutoProvisionRequest,
+  AutoProvisionResponse,
+  DatasetAssetDownloadUrlResponse,
   DiscoverObservationsRequest,
   DiscoverObservationsResponse,
   IngestionOperationResponse,
   PreparedDatasetSummaryResponse,
   ProviderStatusResponse,
+  ProvisioningStepResponse,
   StartIngestionRequest,
 } from './contracts'
+
+export type {
+  AutoProvisionRequest,
+  AutoProvisionResponse,
+  PreparedDatasetSummaryResponse,
+  ProvisioningStepResponse,
+}
 
 export const DATA_SOURCES_PROVIDERS_QUERY_KEY = ['data-sources', 'providers'] as const
 export const INGESTIONS_LIST_QUERY_KEY = ['data-sources', 'ingestions'] as const
@@ -55,6 +66,18 @@ export async function startIngestion(
   } catch (cause) {
     if (cause instanceof ApiError) throw cause
     throw new ApiError(0, `Network error calling POST /api/v1/data-sources/ingestions: ${String(cause)}`)
+  }
+}
+
+export async function autoProvisionDatasets(
+  body: AutoProvisionRequest,
+): Promise<AutoProvisionResponse> {
+  try {
+    const result = await apiFetchClient.POST('/api/v1/data-sources/provision', { body })
+    return unwrapApiResponse(result, 'POST /api/v1/data-sources/provision')
+  } catch (cause) {
+    if (cause instanceof ApiError) throw cause
+    throw new ApiError(0, `Network error calling POST /api/v1/data-sources/provision: ${String(cause)}`)
   }
 }
 
@@ -182,4 +205,40 @@ export function useStartIngestionMutation() {
       void queryClient.invalidateQueries({ queryKey: ['data-sources', 'datasets'] })
     },
   })
+}
+
+export function useAutoProvisionMutation() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: autoProvisionDatasets,
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: INGESTIONS_LIST_QUERY_KEY })
+      void queryClient.invalidateQueries({ queryKey: ['data-sources', 'datasets'] })
+      void queryClient.invalidateQueries({ queryKey: ['assessments', 'readiness'] })
+    },
+  })
+}
+
+export async function fetchDatasetDownloadUrl(
+  datasetId: string,
+  options?: { assetId?: string; expiresIn?: number },
+): Promise<DatasetAssetDownloadUrlResponse> {
+  try {
+    const query: { asset_id?: string; expires_in?: number } = {}
+    if (options?.assetId) query.asset_id = options.assetId
+    if (options?.expiresIn) query.expires_in = options.expiresIn
+    const result = await apiFetchClient.GET('/api/v1/data-sources/datasets/{dataset_id}/download-url', {
+      params: {
+        path: { dataset_id: datasetId },
+        query: Object.keys(query).length > 0 ? query : undefined,
+      },
+    })
+    return unwrapApiResponse(result, `GET /api/v1/data-sources/datasets/${datasetId}/download-url`)
+  } catch (cause) {
+    if (cause instanceof ApiError) throw cause
+    throw new ApiError(
+      0,
+      `Network error calling GET /api/v1/data-sources/datasets/${datasetId}/download-url: ${String(cause)}`,
+    )
+  }
 }
