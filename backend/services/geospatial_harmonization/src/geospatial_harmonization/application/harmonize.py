@@ -4,10 +4,12 @@ import asyncio
 import logging
 import shutil
 import tempfile
+from collections.abc import Mapping
 from contextlib import AbstractAsyncContextManager, nullcontext
 from dataclasses import replace
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import Any
 from urllib.parse import unquote, urlparse
 from uuid import UUID, uuid4
 
@@ -15,7 +17,11 @@ import numpy as np
 
 from geospatial_harmonization.config.settings import Settings
 from geospatial_harmonization.domain.exceptions import ObjectTooLargeError
-from geospatial_harmonization.domain.models.dataset import AssetReference, SpatialDataset
+from geospatial_harmonization.domain.models.dataset import (
+    AssetReference,
+    SpatialDataset,
+    VariableSpec,
+)
 from geospatial_harmonization.domain.models.grid import GridSpec
 from geospatial_harmonization.domain.models.harmonization import (
     HarmonizationPlan,
@@ -30,11 +36,16 @@ from geospatial_harmonization.domain.models.storage import (
     StorageReservation,
     StorageZone,
 )
+from geospatial_harmonization.domain.models.temporal import (
+    TemporalAggregationKind,
+    TemporalSpec,
+)
 from geospatial_harmonization.domain.ports import (
     DatasetRepository,
     StorageLedgerRepository,
     StoragePort,
 )
+from geospatial_harmonization.handlers.base import build_time_series_extension
 from geospatial_harmonization.handlers.registry import HandlerRegistry
 from geospatial_harmonization.readers import ReaderRegistry, build_default_reader_registry
 from geospatial_harmonization.storage.compression import DataCompressionManager
@@ -43,6 +54,10 @@ from geospatial_harmonization.storage.lifecycle import StorageLifecycleManager
 from geospatial_harmonization.storage.quota import ReservationHandle, StorageQuotaManager
 from geospatial_harmonization.storage.zones import StorageZoneManager
 from geospatial_harmonization.transformations.quality import QualityPolicy, QualityValidator
+from geospatial_harmonization.transformations.temporal import (
+    aggregate_temporal_stack,
+    integrate_rate_to_depth,
+)
 from geospatial_harmonization.transformations.transformer import TargetGridTransformer
 
 logger = logging.getLogger(__name__)
@@ -487,6 +502,278 @@ class HarmonizationService:
         report = validator.validate_dataset_assets(dataset, already_scaled=False)
         return QualityValidator.enforce(report)
 
+    @staticmethod
+    def _cadence_duration(cadence: str) -> timedelta:
+        key = cadence.strip().lower()
+        mapping = {
+            "30min": timedelta(minutes=30),
+            "half_hourly": timedelta(minutes=30),
+            "1h": timedelta(hours=1),
+            "hourly": timedelta(hours=1),
+            "8daily": timedelta(days=8),
+            "eight_day": timedelta(days=8),
+            "16daily": timedelta(days=16),
+            "sixteen_day": timedelta(days=16),
+            "monthly": timedelta(days=30),
+            "annual": timedelta(days=365),
+        }
+        return mapping.get(key, timedelta(days=1))
+
+    @staticmethod
+    def _temporal_bucket(dt: datetime, target: TemporalSpec) -> tuple[datetime, datetime]:
+        key = target.cadence.strip().lower()
+        u = dt.astimezone(UTC)
+        if key in {"1h", "hourly"}:
+            b0 = datetime(u.year, u.month, u.day, u.hour, tzinfo=UTC)
+            return b0, b0 + timedelta(hours=1)
+        if key in {"daily", "1d"}:
+            b0 = datetime(u.year, u.month, u.day, tzinfo=UTC)
+            return b0, b0 + timedelta(days=1)
+        if key in {"8daily", "eight_day"}:
+            jan1 = datetime(u.year, 1, 1, tzinfo=UTC)
+            bin_idx = (u.timetuple().tm_yday - 1) // 8
+            b0 = jan1 + timedelta(days=bin_idx * 8)
+            return b0, b0 + timedelta(days=8)
+        if key in {"16daily", "sixteen_day"}:
+            jan1 = datetime(u.year, 1, 1, tzinfo=UTC)
+            bin_idx = (u.timetuple().tm_yday - 1) // 16
+            b0 = jan1 + timedelta(days=bin_idx * 16)
+            return b0, b0 + timedelta(days=16)
+        if key == "monthly":
+            b0 = datetime(u.year, u.month, 1, tzinfo=UTC)
+            if u.month == 12:
+                b1 = datetime(u.year + 1, 1, 1, tzinfo=UTC)
+            else:
+                b1 = datetime(u.year, u.month + 1, 1, tzinfo=UTC)
+            return b0, b1
+        if key == "annual":
+            b0 = datetime(u.year, 1, 1, tzinfo=UTC)
+            b1 = datetime(u.year + 1, 1, 1, tzinfo=UTC)
+            return b0, b1
+        return target.start, target.end
+
+    @staticmethod
+    def _parse_iso_utc(raw: object) -> datetime | None:
+        if not isinstance(raw, str) or not raw.strip():
+            return None
+        try:
+            dt = datetime.fromisoformat(raw.strip().replace("Z", "+00:00"))
+        except ValueError:
+            return None
+        return dt.replace(tzinfo=UTC) if dt.tzinfo is None else dt.astimezone(UTC)
+
+    def _apply_temporal_harmonization(
+        self, dataset: SpatialDataset, plan: HarmonizationPlan
+    ) -> tuple[SpatialDataset, tuple[str, ...]]:
+        target = plan.target_temporal
+        if target is None:
+            return dataset, ()
+
+        if (
+            dataset.temporal_metadata.cadence.strip().lower() == target.cadence.strip().lower()
+            and dataset.temporal_metadata.semantics == target.semantics
+            and target.aggregation in ("none", dataset.temporal_metadata.aggregation)
+        ):
+            return (
+                dataset,
+                ("Dataset already satisfies requested temporal cadence; skipped re-aggregation.",),
+            )
+
+        if (
+            target.aggregation == "rate_to_depth_sum"
+            and dataset.temporal_metadata.aggregation == "rate_to_depth_sum"
+        ):
+            all_depth_units = all(
+                v.units.strip().lower() == "mm"
+                for v in dataset.variables.values()
+                if v.semantics == "continuous_extensive"
+            )
+            if dataset.variables and all_depth_units:
+                return (
+                    dataset,
+                    ("Dataset is already integrated to depth (mm); skipped double integration.",),
+                )
+
+        raw_ts = dataset.extensions.get("time_series")
+        if not isinstance(raw_ts, Mapping) or not raw_ts:
+            return (
+                dataset,
+                ("No embedded time_series present for temporal harmonization.",),
+            )
+
+        step_dur = self._cadence_duration(dataset.temporal_metadata.cadence)
+        warnings_out: list[str] = []
+        new_ts_map: dict[str, Any] = {}
+        new_variables: dict[str, VariableSpec] = dict(dataset.variables)
+        new_units: dict[str, str] = dict(dataset.units)
+        applied_aggs: set[TemporalAggregationKind] = set()
+        global_starts: list[datetime] = []
+        global_ends: list[datetime] = []
+
+        for var_name, ts_payload in raw_ts.items():
+            if not isinstance(ts_payload, Mapping):
+                continue
+            raw_timestamps = list(ts_payload.get("timestamps") or [])
+            raw_values = list(ts_payload.get("values") or [])
+            if not raw_timestamps or len(raw_timestamps) != len(raw_values):
+                continue
+
+            var_spec = new_variables.get(var_name)
+            var_unit = str(ts_payload.get("units") or (var_spec.units if var_spec else "1"))
+            valid_counts = list(ts_payload.get("valid_pixel_counts") or [])
+            total_counts = list(ts_payload.get("total_pixel_counts") or [])
+
+            eff_agg: TemporalAggregationKind = target.aggregation
+            if eff_agg == "none":
+                if var_spec is not None and var_spec.semantics == "continuous_extensive":
+                    var_unit_lower = var_unit.lower()
+                    eff_agg = (
+                        "rate_to_depth_sum"
+                        if "/hr" in var_unit_lower
+                        or "/hour" in var_unit_lower
+                        or "/day" in var_unit_lower
+                        else "sum"
+                    )
+                else:
+                    eff_agg = "mean"
+            applied_aggs.add(eff_agg)
+
+            buckets: dict[tuple[datetime, datetime], list[tuple[datetime, float, float]]] = {}
+            is_rate_per_day = eff_agg == "rate_to_depth_sum" and "/day" in var_unit.lower()
+            for idx, raw_t in enumerate(raw_timestamps):
+                dt = self._parse_iso_utc(raw_t)
+                if dt is None:
+                    continue
+                b_key = self._temporal_bucket(dt, target)
+                raw_v = raw_values[idx]
+                fval = float(raw_v) if raw_v is not None else float("nan")
+                if is_rate_per_day and np.isfinite(fval):
+                    fval = fval / 24.0
+                weight = 1.0
+                if idx < len(valid_counts) and idx < len(total_counts) and total_counts[idx] > 0:
+                    weight = max(0.0, float(valid_counts[idx]) / float(total_counts[idx]))
+                buckets.setdefault(b_key, []).append((dt, fval, weight))
+
+            if not buckets:
+                continue
+
+            out_ts: list[datetime] = []
+            out_vals: list[float | None] = []
+            for (b_start, b_end), items in sorted(buckets.items(), key=lambda pair: pair[0][0]):
+                step_arrays = [np.array([v], dtype=np.float32) for _, v, _ in items]
+                step_weights = [np.array([w], dtype=np.float32) for _, _, w in items]
+                src_sem = (
+                    "interval"
+                    if eff_agg == "rate_to_depth_sum"
+                    else dataset.temporal_metadata.semantics
+                )
+                step_specs = [
+                    TemporalSpec(
+                        dt,
+                        dt if src_sem == "instantaneous" else dt + step_dur,
+                        dataset.temporal_metadata.cadence,
+                        src_sem,
+                        composite_days=(
+                            dataset.temporal_metadata.composite_days
+                            if src_sem == "composite"
+                            else None
+                        ),
+                    )
+                    for dt, _, _ in items
+                ]
+                b_sem = "interval" if target.semantics == "instantaneous" else target.semantics
+                b_comp = target.composite_days if b_sem == "composite" else None
+                b_spec = TemporalSpec(
+                    b_start,
+                    b_end,
+                    target.cadence,
+                    b_sem,
+                    aggregation=eff_agg,
+                    composite_days=b_comp,
+                )
+                if eff_agg == "rate_to_depth_sum":
+                    res = integrate_rate_to_depth(
+                        step_arrays, step_specs, b_spec, min_coverage_fraction=0.0, nodata=np.nan
+                    )
+                else:
+                    res = aggregate_temporal_stack(
+                        step_arrays,
+                        step_specs,
+                        b_spec,
+                        eff_agg,
+                        weights=step_weights if eff_agg == "quality_weighted_mean" else None,
+                        min_coverage_fraction=0.0,
+                        nodata=np.nan,
+                    )
+                for w in res.warnings:
+                    if w not in warnings_out:
+                        warnings_out.append(w)
+                val_scalar = float(res.data[0])
+                out_ts.append(b_start)
+                out_vals.append(val_scalar if np.isfinite(val_scalar) else None)
+                global_starts.append(b_start)
+                global_ends.append(b_end)
+
+            out_unit = "mm" if eff_agg == "rate_to_depth_sum" else var_unit
+            if eff_agg == "rate_to_depth_sum":
+                new_units[str(var_name)] = "mm"
+                if var_spec is not None:
+                    new_variables[str(var_name)] = replace(
+                        var_spec, units="mm", semantics="continuous_extensive"
+                    )
+
+            new_ts_map[str(var_name)] = build_time_series_extension(
+                timestamps=out_ts,
+                values=out_vals,
+                units=out_unit,
+                is_scaled=True,
+            )
+
+        if not new_ts_map:
+            return dataset, tuple(warnings_out)
+
+        agg_summary: TemporalAggregationKind = (
+            target.aggregation if target.aggregation != "none" else next(iter(applied_aggs))
+        )
+        t0 = min(global_starts) if global_starts else dataset.temporal_metadata.start
+        t1 = max(global_ends) if global_ends else dataset.temporal_metadata.end
+        if target.semantics == "instantaneous":
+            t1 = t0
+        new_temporal = TemporalSpec(
+            t0,
+            t1,
+            target.cadence,
+            target.semantics,
+            aggregation=agg_summary,
+            composite_days=target.composite_days,
+            acquisition_timestamp=dataset.temporal_metadata.acquisition_timestamp,
+        )
+        new_prov = replace(
+            dataset.provenance,
+            processing_steps=(
+                *dataset.provenance.processing_steps,
+                f"temporal:{target.cadence}:{agg_summary}",
+            ),
+        )
+        new_ext = {
+            **dataset.extensions,
+            "time_series": new_ts_map,
+            "temporal_harmonization": {
+                "source_cadence": dataset.temporal_metadata.cadence,
+                "target_cadence": target.cadence,
+                "aggregation": agg_summary,
+            },
+        }
+        updated_ds = replace(
+            dataset,
+            variables=new_variables,
+            units=new_units,
+            temporal_metadata=new_temporal,
+            provenance=new_prov,
+            extensions=new_ext,
+        )
+        return updated_ds, tuple(warnings_out)
+
     async def execute_plan(
         self, plan: HarmonizationPlan, *, job_id: UUID | None = None
     ) -> ProcessingResult:
@@ -575,7 +862,8 @@ class HarmonizationService:
                             self._validate_raw_dataset, staged_ds, local_paths
                         )
                         final_ds = staged_ds
-                    warnings = (*extra_warnings, *warnings)
+                    final_ds, temporal_warnings = self._apply_temporal_harmonization(final_ds, plan)
+                    warnings = (*extra_warnings, *warnings, *temporal_warnings)
 
                 await self._datasets.save(final_ds)
 

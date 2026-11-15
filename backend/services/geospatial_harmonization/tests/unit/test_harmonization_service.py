@@ -124,3 +124,111 @@ async def test_harmonization_service_execute_plan(
         assert await datasets.get_by_id(res2.dataset.dataset_id) is not None
     finally:
         await engine.dispose()
+
+
+async def test_harmonization_service_temporal_integration_and_aggregation(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from datetime import UTC, datetime
+
+    from geospatial_harmonization.domain.models.temporal import TemporalSpec
+
+    monkeypatch.setattr(
+        socket,
+        "getaddrinfo",
+        lambda *_a, **_kw: [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 443))],
+    )
+
+    def dispatch(request: Request) -> Response:
+        param = request.url.params["parameters"]
+        if param == "PRECTOTCORR":
+            values = {"20260701": 24.0, "20260702": 12.0, "20260801": 6.0}
+            units = "mm/day"
+        else:
+            values = {"20260701": 20.0, "20260702": 26.0, "20260801": 22.0}
+            units = "C"
+        doc = {
+            "type": "Feature",
+            "geometry": {"type": "Point", "coordinates": [30.5, 50.4, 150.0]},
+            "parameters": {param: {"units": units}},
+            "properties": {"parameter": {param: values}},
+        }
+        return Response(
+            200,
+            content=json.dumps(doc).encode("utf-8"),
+            headers={"content-type": "application/json"},
+        )
+
+    handlers = build_default_handler_registry(
+        settings=Settings(_env_file=None, environment="test"),
+        raw_dir=tmp_path / "raw",
+        transport=MockTransport(dispatch),
+    )
+    storage = LocalObjectStore(tmp_path / "store")
+    engine = build_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'svc_temp.db'}")
+    try:
+        async with engine.begin() as conn:
+            await conn.run_sync(GhsBase.metadata.create_all)
+        datasets = SqlAlchemyDatasetRepository(build_session_factory(engine))
+        svc = HarmonizationService(handlers=handlers, storage=storage, datasets=datasets)
+
+        res_depth = await svc.execute_plan(
+            HarmonizationPlan(
+                plan_id=uuid4(),
+                provider="nasa_power",
+                product="nasa_power",
+                request_payload={
+                    "parameters": ["PRECTOTCORR"],
+                    "latitude": 50.4,
+                    "longitude": 30.5,
+                    "start_date": "2026-07-01",
+                    "end_date": "2026-08-01",
+                },
+                target_temporal=TemporalSpec(
+                    cadence="monthly",
+                    semantics="interval",
+                    start=datetime(2026, 7, 1, tzinfo=UTC),
+                    end=datetime(2026, 9, 1, tzinfo=UTC),
+                    aggregation="rate_to_depth_sum",
+                ),
+            )
+        )
+        depth_series = res_depth.dataset.extensions["time_series"]["PRECTOTCORR"]
+        assert depth_series["units"] == "mm"
+        assert depth_series["values"] == [pytest.approx(36.0), pytest.approx(6.0)]
+        assert len(depth_series["timestamps"]) == 2
+        assert res_depth.dataset.temporal_metadata.cadence == "monthly"
+        assert any(
+            "rate_to_depth_sum" in step for step in res_depth.dataset.provenance.processing_steps
+        )
+
+        res_mean = await svc.execute_plan(
+            HarmonizationPlan(
+                plan_id=uuid4(),
+                provider="nasa_power",
+                product="nasa_power",
+                request_payload={
+                    "parameters": ["T2M"],
+                    "latitude": 50.4,
+                    "longitude": 30.5,
+                    "start_date": "2026-07-01",
+                    "end_date": "2026-08-01",
+                },
+                target_temporal=TemporalSpec(
+                    cadence="monthly",
+                    semantics="interval",
+                    start=datetime(2026, 7, 1, tzinfo=UTC),
+                    end=datetime(2026, 9, 1, tzinfo=UTC),
+                    aggregation="mean",
+                ),
+            )
+        )
+        t2m_series = res_mean.dataset.extensions["time_series"]["T2M"]
+        assert t2m_series["values"] == [pytest.approx(23.0), pytest.approx(22.0)]
+        assert len(t2m_series["timestamps"]) == 2
+        assert res_mean.dataset.temporal_metadata.cadence == "monthly"
+        assert any(
+            "temporal:monthly:mean" in step for step in res_mean.dataset.provenance.processing_steps
+        )
+    finally:
+        await engine.dispose()

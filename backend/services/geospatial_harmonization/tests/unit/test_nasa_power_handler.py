@@ -261,3 +261,89 @@ async def test_nasa_power_regional_auto_batch_span_guard_and_422_error(
                 "longitude": -42.0,
             }
         )
+
+
+async def test_nasa_power_auto_mode_and_time_series_extraction(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(
+        socket,
+        "getaddrinfo",
+        lambda *_a, **_kw: [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("129.164.179.22", 443))],
+    )
+    seen_paths: list[str] = []
+
+    def handle_http(request: Request) -> Response:
+        seen_paths.append(request.url.path)
+        param = request.url.params["parameters"]
+        if "regional" in request.url.path:
+            doc = {
+                "type": "FeatureCollection",
+                "header": {"fill_value": -999.0, "api": {"version": "v2.6"}},
+                "parameters": {param: {"units": "C" if param == "T2M" else "mm/day"}},
+                "features": [
+                    {
+                        "type": "Feature",
+                        "geometry": {"type": "Point", "coordinates": [-42.5, -10.5, 400.0]},
+                        "properties": {
+                            "parameter": {
+                                param: {"20260701": 20.0, "20260702": 22.0},
+                            }
+                        },
+                    },
+                    {
+                        "type": "Feature",
+                        "geometry": {"type": "Point", "coordinates": [-41.5, -11.5, 420.0]},
+                        "properties": {
+                            "parameter": {
+                                param: {"20260701": 24.0, "20260702": -999.0},
+                            }
+                        },
+                    },
+                ],
+            }
+            return Response(200, content=json.dumps(doc).encode("utf-8"))
+        doc = {
+            "type": "Feature",
+            "geometry": {"type": "Point", "coordinates": [-42.0, -10.5, 410.0]},
+            "header": {"fill_value": -999.0, "api": {"version": "v2.6"}},
+            "parameters": {param: {"units": "C"}},
+            "properties": {"parameter": {param: {"20260701": 21.0, "20260702": 23.0}}},
+        }
+        return Response(200, content=json.dumps(doc).encode("utf-8"))
+
+    handler = NASAPowerHandler(
+        settings=Settings(_env_file=None, environment="test"),
+        raw_dir=tmp_path,
+        transport=MockTransport(handle_http),
+    )
+
+    regional_ds = await handler.handle_payload(
+        {
+            "mode": "auto",
+            "parameters": ("T2M", "PRECTOTCORR"),
+            "start_time": "2026-07-01T00:00:00Z",
+            "end_time": "2026-07-02T23:59:59Z",
+            "bbox": [-43.5, -12.5, -41.0, -10.0],
+        }
+    )
+    assert any("regional" in path for path in seen_paths)
+    ts_t2m = regional_ds.extensions["time_series"]["T2M"]
+    assert ts_t2m["values"] == [pytest.approx(22.0), pytest.approx(22.0)]
+    assert ts_t2m["is_scaled"] is True
+    assert len(ts_t2m["timestamps"]) == 2
+    assert regional_ds.extensions["ingestion_summary"]["mode"] == "regional"
+
+    seen_paths.clear()
+    point_ds = await handler.handle_payload(
+        {
+            "mode": "auto",
+            "parameters": ("T2M",),
+            "start_date": "2026-07-01",
+            "end_date": "2026-07-02",
+            "bbox": [-42.2, -10.7, -41.8, -10.3],
+        }
+    )
+    assert any("point" in path for path in seen_paths)
+    assert point_ds.extensions["time_series"]["T2M"]["values"] == [21.0, 23.0]
+    assert point_ds.extensions["ingestion_summary"]["mode"] == "point"
