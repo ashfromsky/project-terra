@@ -14,6 +14,7 @@ from terra_scientific.domain.models.request import AssessmentRequest
 from terra_scientific.domain.models.result import ScientificAssessmentResult
 from terra_scientific.methods.registry import DEFAULT_METHOD_REGISTRY
 from terra_scientific.pipeline.service import ScientificAssessmentService
+from terra_scientific.readiness import ReadinessAssessmentReport, evaluate_assessment_readiness
 
 __all__ = [
     "DEFAULT_METHOD_REGISTRY",
@@ -22,6 +23,7 @@ __all__ = [
     "BaselineType",
     "DataSourceId",
     "QaPolicyLevel",
+    "ReadinessAssessmentReport",
     "ScientificAssessmentResult",
     "ScientificAssessmentService",
     "ScientificDataset",
@@ -29,4 +31,5 @@ __all__ = [
     "TemporalCadence",
     "TrendDirection",
     "__version__",
+    "evaluate_assessment_readiness",
 ]

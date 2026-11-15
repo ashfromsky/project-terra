@@ -15,6 +15,7 @@ from terra_scientific.domain.enums import (
 )
 from terra_scientific.domain.models.provenance import ProvenanceTrace
 from terra_scientific.domain.models.quality import QualitySummary
+from terra_scientific.domain.models.readiness import ReadinessAssessmentReport
 from terra_scientific.domain.models.request import AssessmentRequest
 
 
@@ -455,6 +456,7 @@ class ScientificAssessmentResult(BaseModel):
     recoveries: list[RecoveryEventResult] = Field(default_factory=list)
     resilience: list[ResilienceMetricsResult] = Field(default_factory=list)
     uncertainty: UncertaintySummary | None = None
+    readiness: ReadinessAssessmentReport | None = None
     stages: list[StageExecutionReport] = Field(default_factory=list)
     provenance: ProvenanceTrace | None = None
     artifact_manifest: dict[str, str] = Field(default_factory=dict)

@@ -99,9 +99,16 @@ def aggregate_temporal_series(
         and "hr" in metadata.units.lower()
         and operator == AggregationOperator.SUM
     )
+    is_daily_extensive_rate = (
+        metadata.semantic_kind == VariableSemanticKind.CONTINUOUS_EXTENSIVE
+        and metadata.units.strip().lower().endswith("/day")
+        and operator == AggregationOperator.SUM
+    )
     if is_imerg_rate:
         work_vals = work_vals * 0.5
         out_units = "mm"
+    elif is_daily_extensive_rate:
+        out_units = metadata.units.split("/")[0].strip() or metadata.units
     elif (
         operator == AggregationOperator.SUM
         and metadata.semantic_kind == VariableSemanticKind.CONTINUOUS_INTENSIVE
