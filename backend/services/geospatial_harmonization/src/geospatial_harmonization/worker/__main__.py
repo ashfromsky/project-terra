@@ -12,9 +12,10 @@ from geospatial_harmonization.application.harmonize import HarmonizationService
 from geospatial_harmonization.config.settings import Settings, get_settings
 from geospatial_harmonization.handlers import build_default_handler_registry
 from geospatial_harmonization.infrastructure.database import (
-    GhsBase,
     build_async_engine,
     build_session_factory,
+    ensure_sqlite_schema,
+    is_sqlite_url,
 )
 from geospatial_harmonization.infrastructure.repositories import (
     SqlAlchemyDatasetRepository,
@@ -39,15 +40,18 @@ async def build_worker_runtime(
     """Wire database, storage, quota/lifecycle managers, handlers, and WorkerRunner."""
     cfg = settings or get_settings()
     engine = build_async_engine(cfg.database_url, echo=cfg.database_echo)
-    if cfg.environment != "production" and cfg.database_url.startswith("sqlite"):
-        async with engine.begin() as conn:
-            await conn.run_sync(GhsBase.metadata.create_all)
-    sessions = build_session_factory(engine)
-    readers = build_default_reader_registry()
-    handlers = build_default_handler_registry(settings=cfg, reader_registry=readers)
-    storage = build_storage_port(cfg)
-    ledger = SqlAlchemyStorageLedgerRepository(sessions)
-    await ledger.ensure_ledger_initialized(datetime.now(UTC))
+    try:
+        if cfg.environment != "production" and is_sqlite_url(cfg.database_url):
+            await ensure_sqlite_schema(engine, cfg.database_url)
+        sessions = build_session_factory(engine)
+        readers = build_default_reader_registry()
+        handlers = build_default_handler_registry(settings=cfg, reader_registry=readers)
+        storage = build_storage_port(cfg)
+        ledger = SqlAlchemyStorageLedgerRepository(sessions)
+        await ledger.ensure_ledger_initialized(datetime.now(UTC))
+    except Exception:
+        await engine.dispose()
+        raise
     zones = StorageZoneManager(cfg)
     quota = StorageQuotaManager(ledger, storage, cfg)
     dedup = ContentDeduplicationService(storage, ledger, zones, cfg)

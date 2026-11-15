@@ -8,6 +8,7 @@ from geospatial_harmonization.infrastructure.database.codec import (
     encode_plan,
     ensure_utc,
 )
+from geospatial_harmonization.infrastructure.database.migrations import ensure_sqlite_schema
 from geospatial_harmonization.infrastructure.database.models import (
     GhsAssetModel,
     GhsDatasetModel,
@@ -22,6 +23,8 @@ from geospatial_harmonization.infrastructure.database.session import (
     build_async_engine,
     build_session_factory,
     check_database_health,
+    is_sqlite_url,
+    sqlite_file_path,
 )
 
 __all__ = [
@@ -41,5 +44,8 @@ __all__ = [
     "decode_plan",
     "encode_dataset",
     "encode_plan",
+    "ensure_sqlite_schema",
     "ensure_utc",
+    "is_sqlite_url",
+    "sqlite_file_path",
 ]

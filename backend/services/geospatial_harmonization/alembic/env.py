@@ -11,7 +11,7 @@ from geospatial_harmonization.config.settings import get_settings
 from geospatial_harmonization.infrastructure.database.models import GhsBase
 
 config = context.config
-if config.config_file_name is not None:
+if config.config_file_name is not None and config.attributes.get("configure_logger", True):
     fileConfig(config.config_file_name, disable_existing_loggers=False)
 
 target_metadata = GhsBase.metadata
@@ -66,4 +66,8 @@ async def run_migrations_online() -> None:
 if context.is_offline_mode():
     run_migrations_offline()
 else:
-    asyncio.run(run_migrations_online())
+    provided_connection = config.attributes.get("connection")
+    if isinstance(provided_connection, Connection):
+        _run_sync_migrations(provided_connection)
+    else:
+        asyncio.run(run_migrations_online())
