@@ -587,9 +587,7 @@ def _select_raster_asset(
         )
     # Prefer a Cloud-Optimized GeoTIFF when the dataset also carries raw source
     # granules; TiTiler can only read the former directly.
-    geotiff_assets = [
-        a for a in raster_assets if a.data_format in {"geotiff", "cog"}
-    ]
+    geotiff_assets = [a for a in raster_assets if a.data_format in {"geotiff", "cog"}]
     if geotiff_assets:
         raster_assets = geotiff_assets
     timestamps = _extract_timestamps_list(dataset, variable)
