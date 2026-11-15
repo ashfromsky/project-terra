@@ -911,7 +911,6 @@ class DataSourcesApplicationService:
             reference_end=reference_end,
             min_reference_years=min_reference_years,
             qa_level=qa_level,
-            source_ids=[ds.source_id for ds in sci_datasets] if sci_datasets else None,
         )
         readiness_report = evaluate_assessment_readiness(sci_req, datasets=sci_datasets)
 

@@ -67,6 +67,9 @@ export interface ExploreState {
   toggleTemporalPlaying: () => void
   temporalCadence: ObservationGranularity
   setTemporalCadence: (cadence: ObservationGranularity) => void
+  analysisStart: string
+  analysisEnd: string
+  setAnalysisPeriod: (start: string, end: string) => void
   interactionMode: ExplorerInteractionMode
   setInteractionMode: (mode: ExplorerInteractionMode) => void
   hoverCoordinate: { lon: number; lat: number } | null

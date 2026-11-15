@@ -287,6 +287,30 @@ def test_assessment_ghs_client_mapping_artifacts_and_openapi(tmp_path: Path) -> 
         assert "TERRA-TRI" not in published_products
         assert body["artifactPaths"]["ghs_derived:TERRA-NDVI-ANOM"] == "derived-terra-ndvi-anom"
 
+        # Map-driven runs can opt out of derived raster publication without changing the
+        # scientific result payload.
+        published_products.clear()
+        minimal = client.post(
+            "/api/v1/assessments",
+            headers=headers,
+            json={
+                "title": "GHS Linked Assessment Without Derived Rasters",
+                "executeNow": True,
+                "requestConfig": {
+                    **base_req,
+                    "request_id": "ghs-req-2",
+                    "publish_derived_spatial_artifacts": False,
+                },
+                "ghsDatasetIds": ["ghs-mod13-1"],
+            },
+        )
+        assert minimal.status_code == 201
+        minimal_body = minimal.json()
+        assert minimal_body["status"] == "completed"
+        assert minimal_body["result"]["status"] == "completed"
+        assert published_products == []
+        assert "assessment_result_json" in minimal_body["artifactPaths"]
+
         # Unsafe output_artifact_dir outside configured root must fail 422
         escape = client.post(
             "/api/v1/assessments",

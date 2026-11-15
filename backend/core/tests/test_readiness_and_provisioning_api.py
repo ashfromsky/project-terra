@@ -476,3 +476,36 @@ def test_data_sources_auto_provision_expands_window_reuses_and_reports_fallbacks
         )
         assert distant_resp.status_code == 200
         assert len(ghs_stub.sync_calls) > sync_before
+
+
+def test_build_readiness_request_supports_all_ui_baseline_modes() -> None:
+    """Every baseline mode exposed by the UI must produce a valid Scientific Core request."""
+    from datetime import UTC, datetime
+
+    from terra.modules.data_sources.application.provisioner import build_readiness_request
+    from terra_scientific.domain.enums import BaselineType
+
+    analysis_start = datetime(2024, 1, 1, tzinfo=UTC)
+    analysis_end = datetime(2024, 12, 31, 23, 59, 59, tzinfo=UTC)
+    reference_start = datetime(2022, 1, 1, tzinfo=UTC)
+    reference_end = datetime(2023, 12, 31, tzinfo=UTC)
+
+    for mode in ("full_period_explicit", "out_of_sample", "fixed_reference", "cross_validated"):
+        request = build_readiness_request(
+            analysis_start=analysis_start,
+            analysis_end=analysis_end,
+            target_cadence="monthly",
+            baseline_type=mode,
+            reference_start=reference_start,
+            reference_end=reference_end,
+            min_reference_years=2,
+            qa_level="permissive",
+        )
+        assert request.baseline.baseline_type is BaselineType(mode)
+        assert request.baseline.min_years_required == 2
+        assert request.baseline.min_samples_per_bin == 2
+        if mode == "fixed_reference":
+            assert request.baseline.start == reference_start
+            assert request.baseline.end == reference_end
+        if mode == "full_period_explicit":
+            assert request.baseline.allow_explicit_full_period is True

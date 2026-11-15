@@ -3,6 +3,7 @@ import { inspectLayerPoint, resolveLayerEffectiveDate } from '../../../shared/ap
 import { formatCoordinatePair } from '../../../shared/lib/geojson-utils'
 import type { MapLayerDefinition } from '../../../shared/types/geospatial'
 import { Crosshair } from '../../../shared/ui/explorer-icons'
+import { useAoiWorkspace } from '../model/use-aoi-workspace'
 import { useExploreStore } from '../model/use-explore-store'
 
 interface InspectorPointTabProps {
@@ -14,6 +15,7 @@ export function InspectorPointTab({ activeLayer, catalogLoading }: InspectorPoin
   const selectedDate = useExploreStore((s) => s.selectedDate)
   const inspectedPoint = useExploreStore((s) => s.inspectedPoint)
   const setInspectedPoint = useExploreStore((s) => s.setInspectedPoint)
+  const { createPointAoi, isAuthenticated, syncPending, syncError } = useAoiWorkspace()
 
   const isConnected = Boolean(
     activeLayer &&
@@ -71,6 +73,31 @@ export function InspectorPointTab({ activeLayer, catalogLoading }: InspectorPoin
             >
               Clear
             </button>
+          </div>
+
+          <div className="explorer-action-stack">
+            <button
+              type="button"
+              className="explorer-action-btn"
+              disabled={!isAuthenticated || syncPending}
+              onClick={() => {
+                if (inspectedPoint) {
+                  void createPointAoi(inspectedPoint.lon, inspectedPoint.lat)
+                }
+              }}
+            >
+              {syncPending ? 'Saving AOI…' : 'Use 0.1° AOI at this point'}
+            </button>
+            <p className="explorer-resolution-note">
+              {isAuthenticated
+                ? 'Saves a WGS 84 polygon with a ±0.05° half-span centered on this coordinate for assessment.'
+                : 'Sign in to save a point AOI and run a scientific assessment.'}
+            </p>
+            {syncError ? (
+              <div className="explorer-inline-warning" role="alert">
+                {syncError}
+              </div>
+            ) : null}
           </div>
 
           {!activeLayer ? (

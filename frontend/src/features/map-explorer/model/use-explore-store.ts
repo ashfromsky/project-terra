@@ -107,6 +107,14 @@ export const useExploreStore = create<ExploreState>()((set, get) => ({
   temporalCadence: 'monthly',
   setTemporalCadence: (temporalCadence) => set({ temporalCadence }),
 
+  analysisStart: '2024-01-01',
+  analysisEnd: '2024-12-31',
+  setAnalysisPeriod: (analysisStart, analysisEnd) =>
+    set({
+      analysisStart: analysisStart <= analysisEnd ? analysisStart : analysisEnd,
+      analysisEnd: analysisStart <= analysisEnd ? analysisEnd : analysisStart,
+    }),
+
   interactionMode: 'inspect',
   setInteractionMode: (interactionMode) =>
     set((state) => ({

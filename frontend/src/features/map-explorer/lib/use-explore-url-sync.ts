@@ -16,12 +16,15 @@ export function useExploreUrlSync() {
   const primaryLayerId = useExploreStore((s) => s.primaryLayerId)
   const selectedDate = useExploreStore((s) => s.selectedDate)
   const comparisonMode = useExploreStore((s) => s.comparisonMode)
+  const analysisStart = useExploreStore((s) => s.analysisStart)
+  const analysisEnd = useExploreStore((s) => s.analysisEnd)
 
   const setProjection = useExploreStore((s) => s.setProjection)
   const setBasemap = useExploreStore((s) => s.setBasemap)
   const setPrimaryLayerId = useExploreStore((s) => s.setPrimaryLayerId)
   const setSelectedDate = useExploreStore((s) => s.setSelectedDate)
   const setComparisonMode = useExploreStore((s) => s.setComparisonMode)
+  const setAnalysisPeriod = useExploreStore((s) => s.setAnalysisPeriod)
 
   useEffect(() => {
     if (initializedRef.current) return
@@ -51,8 +54,20 @@ export function useExploreUrlSync() {
     if (urlCmp === '1') {
       setComparisonMode(true)
     }
+
+    const urlStart = searchParams.get('start')
+    const urlEnd = searchParams.get('end')
+    if (
+      urlStart &&
+      urlEnd &&
+      /^\d{4}-\d{2}-\d{2}$/.test(urlStart) &&
+      /^\d{4}-\d{2}-\d{2}$/.test(urlEnd)
+    ) {
+      setAnalysisPeriod(urlStart, urlEnd)
+    }
   }, [
     searchParams,
+    setAnalysisPeriod,
     setBasemap,
     setComparisonMode,
     setPrimaryLayerId,
@@ -76,6 +91,8 @@ export function useExploreUrlSync() {
     next.set('basemap', basemap)
     next.set('layer', primaryLayerId)
     next.set('date', selectedDate)
+    next.set('start', analysisStart)
+    next.set('end', analysisEnd)
     if (comparisonMode) {
       next.set('cmp', '1')
     } else {
@@ -85,6 +102,8 @@ export function useExploreUrlSync() {
       setSearchParams(next, { replace: true })
     }
   }, [
+    analysisEnd,
+    analysisStart,
     basemap,
     comparisonMode,
     primaryLayerId,

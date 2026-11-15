@@ -240,7 +240,9 @@ def _dataset_sort_key(ds: Mapping[str, Any]) -> tuple[int, str, str]:
         for a in (raw_assets if isinstance(raw_assets, list) else [])
         if isinstance(a, Mapping)
     }
-    if "geotiff" in formats:
+    if formats == {"geotiff"}:
+        fmt_rank = 4
+    elif "geotiff" in formats:
         fmt_rank = 3
     elif formats & {"hdf4", "hdf5", "netcdf"}:
         fmt_rank = 2
