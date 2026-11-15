@@ -27,9 +27,10 @@ from geospatial_harmonization.domain.exceptions import (
 )
 from geospatial_harmonization.handlers import build_default_handler_registry
 from geospatial_harmonization.infrastructure.database import (
-    GhsBase,
     build_async_engine,
     build_session_factory,
+    ensure_sqlite_schema,
+    is_sqlite_url,
 )
 from geospatial_harmonization.infrastructure.repositories import (
     SqlAlchemyDatasetRepository,
@@ -123,18 +124,21 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Initialize and cleanly tear down database, storage, and service dependencies."""
     settings: Settings = app.state.settings
     engine = build_async_engine(settings.database_url, echo=settings.database_echo)
-    if settings.environment != "production" and settings.database_url.startswith("sqlite"):
-        async with engine.begin() as conn:
-            await conn.run_sync(GhsBase.metadata.create_all)
+    try:
+        if settings.environment != "production" and is_sqlite_url(settings.database_url):
+            await ensure_sqlite_schema(engine, settings.database_url)
 
-    sessions = build_session_factory(engine)
-    readers = build_default_reader_registry()
-    handlers = build_default_handler_registry(settings=settings, reader_registry=readers)
-    storage = build_storage_port(settings)
-    dataset_repo = SqlAlchemyDatasetRepository(sessions)
-    job_repo = SqlAlchemyJobRepository(sessions)
-    ledger = SqlAlchemyStorageLedgerRepository(sessions)
-    await ledger.ensure_ledger_initialized(datetime.now(UTC))
+        sessions = build_session_factory(engine)
+        readers = build_default_reader_registry()
+        handlers = build_default_handler_registry(settings=settings, reader_registry=readers)
+        storage = build_storage_port(settings)
+        dataset_repo = SqlAlchemyDatasetRepository(sessions)
+        job_repo = SqlAlchemyJobRepository(sessions)
+        ledger = SqlAlchemyStorageLedgerRepository(sessions)
+        await ledger.ensure_ledger_initialized(datetime.now(UTC))
+    except Exception:
+        await engine.dispose()
+        raise
     zones = StorageZoneManager(settings)
     quota = StorageQuotaManager(ledger, storage, settings)
     dedup = ContentDeduplicationService(storage, ledger, zones, settings)
