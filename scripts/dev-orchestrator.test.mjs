@@ -358,6 +358,50 @@ test('loadEffectiveEnv merges .env without overriding explicit process environme
   }
 })
 
+test('runDoctor probes external database reachability and never leaks credentials', async () => {
+  const tmpRoot = mkdtempSync(path.join(os.tmpdir(), 'terra-doctor-db-test-'))
+  try {
+    const env = {
+      DATABASE_URL: 'postgresql+asyncpg://terra:core-secret@db.example.test:5432/core',
+      GHS_DATABASE_URL: 'postgresql+asyncpg://terra:ghs-secret@db.example.test:5433/ghs',
+      SCIENTIFIC_ARTIFACT_DIR: path.join(tmpRoot, 'artifacts'),
+      LOCAL_STORAGE_DIR: path.join(tmpRoot, 'storage'),
+    }
+    const probed = []
+    const unreachable = await runDoctor({
+      rootDir: tmpRoot,
+      hasCommand: () => true,
+      checkPort: async () => {},
+      probeDb: async (host, port) => {
+        probed.push(`${host}:${port}`)
+        return { reachable: false, error: 'ENETUNREACH' }
+      },
+      env,
+    })
+
+    assert.equal(unreachable.ok, false)
+    assert.deepEqual(probed, ['db.example.test:5432', 'db.example.test:5433'])
+    assert.ok(unreachable.checks.some((c) => c.name === 'db:core' && c.status === 'fail'))
+    assert.ok(unreachable.checks.some((c) => c.name === 'db:ghs' && c.status === 'fail'))
+    const serialized = JSON.stringify(unreachable)
+    assert.equal(serialized.includes('core-secret'), false)
+    assert.equal(serialized.includes('ghs-secret'), false)
+
+    const reachable = await runDoctor({
+      rootDir: tmpRoot,
+      hasCommand: () => true,
+      checkPort: async () => {},
+      probeDb: async () => ({ reachable: true }),
+      env,
+    })
+    assert.equal(reachable.ok, true)
+    assert.ok(reachable.checks.some((c) => c.name === 'db:core' && c.status === 'pass'))
+    assert.ok(reachable.checks.some((c) => c.name === 'db:ghs' && c.status === 'pass'))
+  } finally {
+    rmSync(tmpRoot, { recursive: true, force: true })
+  }
+})
+
 test('runDoctor validates DB isolation, S3 credentials, and never leaks secret values', async () => {
   const tmpRoot = mkdtempSync(path.join(os.tmpdir(), 'terra-doctor-test-'))
   try {

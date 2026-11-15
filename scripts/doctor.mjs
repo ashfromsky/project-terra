@@ -1,5 +1,6 @@
 import { spawnSync } from 'node:child_process'
 import { accessSync, constants, existsSync, mkdirSync } from 'node:fs'
+import net from 'node:net'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -44,6 +45,37 @@ function extractSqlitePath(url) {
   return rawPath.startsWith('/') ? rawPath : `/${rawPath}`
 }
 
+function parseExternalDatabaseEndpoint(url) {
+  try {
+    const parsed = new URL(url)
+    return {
+      host: parsed.hostname.replace(/^\[|\]$/g, ''),
+      port: parsed.port ? Number(parsed.port) : 5432,
+    }
+  } catch {
+    return null
+  }
+}
+
+function probeTcpEndpoint(host, port, timeoutMs = 5000) {
+  return new Promise((resolve) => {
+    const socket = net.connect({ host, port })
+    let settled = false
+    const finish = (result) => {
+      if (settled) {
+        return
+      }
+      settled = true
+      socket.destroy()
+      resolve(result)
+    }
+    socket.setTimeout(timeoutMs)
+    socket.once('connect', () => finish({ reachable: true }))
+    socket.once('timeout', () => finish({ reachable: false, error: `timed out after ${timeoutMs} ms` }))
+    socket.once('error', (err) => finish({ reachable: false, error: err.code ?? err.message }))
+  })
+}
+
 function checkWorkerImport(cwd, moduleName) {
   const result = spawnSync('uv', ['run', 'python', '-c', `import ${moduleName}`], {
     cwd,
@@ -56,7 +88,7 @@ function checkWorkerImport(cwd, moduleName) {
   }
 }
 
-export async function runDoctor({ rootDir, env: overrideEnv, hasCommand = defaultHasCommand, checkPort = checkPortAvailable } = {}) {
+export async function runDoctor({ rootDir, env: overrideEnv, hasCommand = defaultHasCommand, checkPort = checkPortAvailable, probeDb = probeTcpEndpoint } = {}) {
   const resolvedRoot = rootDir ?? path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
   const env = overrideEnv ?? loadEffectiveEnv(resolvedRoot, process.env)
   const presets = buildPresets(resolvedRoot, env)
@@ -108,7 +140,19 @@ export async function runDoctor({ rootDir, env: overrideEnv, hasCommand = defaul
       const writable = checkDirectoryWritable(path.dirname(sqlitePath))
       record(label, writable.ok ? 'pass' : 'fail', writable.ok ? `SQLite parent writable (${path.dirname(sqlitePath)})` : writable.error)
     } else if (dbUrl) {
-      record(label, 'pass', 'external database URL configured')
+      const endpoint = parseExternalDatabaseEndpoint(dbUrl)
+      if (!endpoint) {
+        record(label, 'fail', 'external database URL is not parseable')
+      } else {
+        const probe = await probeDb(endpoint.host, endpoint.port)
+        record(
+          label,
+          probe.reachable ? 'pass' : 'fail',
+          probe.reachable
+            ? `TCP reachable (${endpoint.host}:${endpoint.port})`
+            : `TCP unreachable (${endpoint.host}:${endpoint.port}): ${probe.error}`,
+        )
+      }
     }
   }
 
