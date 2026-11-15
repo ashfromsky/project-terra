@@ -1,8 +1,12 @@
-import { useRef } from 'react'
+import { useMemo, useRef } from 'react'
 import { useNavigate } from 'react-router'
 import 'maplibre-gl/dist/maplibre-gl.css'
+import { useCurrentUserQuery } from '../../../shared/api/auth'
+import { useLayerCatalogQuery } from '../../../shared/api/layers'
+import { useRegionsQuery } from '../../../shared/api/regions'
 import { APP_ROUTES } from '../../../shared/config/routes'
 import { useUiStore } from '../../../shared/store/ui-store'
+import { VARIABLE_TO_LAYER_ID } from '../config/map-style'
 import { useWorldMap } from '../lib/use-world-map'
 import { MapControlsToolbar } from './MapControlsToolbar'
 import { MapLegendCard } from './MapLegendCard'
@@ -18,13 +22,24 @@ export function WorldMap({ expandedCanvas = false }: WorldMapProps) {
   const selectedVariable = useUiStore((state) => state.selectedVariable)
   const selectedRegion = useUiStore((state) => state.selectedRegion)
   const setSelectedRegion = useUiStore((state) => state.setSelectedRegion)
-  const selectedHotspotId = useUiStore((state) => state.selectedHotspotId)
-  const setSelectedHotspotId = useUiStore((state) => state.setSelectedHotspotId)
   const selectedCountry = useUiStore((state) => state.selectedCountry)
   const setSelectedCountry = useUiStore((state) => state.setSelectedCountry)
   const hoveredCountry = useUiStore((state) => state.hoveredCountry)
   const setHoveredCountry = useUiStore((state) => state.setHoveredCountry)
   const layerVisibility = useUiStore((state) => state.layerVisibility)
+
+  const currentUserQuery = useCurrentUserQuery()
+  const isAuthenticated = Boolean(currentUserQuery.data)
+  const layersQuery = useLayerCatalogQuery()
+  const regionsQuery = useRegionsQuery(isAuthenticated)
+
+  const activeLayer = useMemo(() => {
+    const targetLayerId = VARIABLE_TO_LAYER_ID[selectedVariable]
+    const catalog = layersQuery.data ?? []
+    return catalog.find((item) => item.id === targetLayerId) ?? null
+  }, [layersQuery.data, selectedVariable])
+
+  const regions = regionsQuery.data ?? []
 
   const {
     zoomIn,
@@ -38,13 +53,13 @@ export function WorldMap({ expandedCanvas = false }: WorldMapProps) {
     selectedVariable,
     selectedRegion,
     setSelectedRegion,
-    selectedHotspotId,
-    setSelectedHotspotId,
     selectedCountry,
     setSelectedCountry,
     hoveredCountry,
     setHoveredCountry,
     layerVisibility,
+    activeLayer,
+    regions,
   })
 
   return (
@@ -58,8 +73,8 @@ export function WorldMap({ expandedCanvas = false }: WorldMapProps) {
         <div
           ref={mapContainerRef}
           className="world-map__viewport"
+          aria-label="Interactive world map · OpenFreeMap"
           role="region"
-          aria-label="Interactive world map · Natural Earth 1:110m"
         />
 
         {layerVisibility.countryLabels && (
@@ -68,14 +83,16 @@ export function WorldMap({ expandedCanvas = false }: WorldMapProps) {
               label.visible ? (
                 <span
                   key={label.id}
+                  data-node-id={label.nodeId}
                   className={`world-map__geo-label ${
-                    label.kind === 'ocean' ? 'world-map__geo-label--ocean' : ''
+                    label.kind === 'ocean'
+                      ? 'world-map__geo-label--ocean'
+                      : 'world-map__geo-label--continent'
                   }`}
                   style={{
                     left: `${label.x}px`,
                     top: `${label.y}px`,
                   }}
-                  data-node-id={label.nodeId}
                 >
                   {label.text}
                 </span>
@@ -116,7 +133,8 @@ export function WorldMap({ expandedCanvas = false }: WorldMapProps) {
 
       <MapLegendCard
         selectedVariable={selectedVariable}
-        selectedHotspotId={selectedHotspotId}
+        selectedRegion={selectedRegion}
+        activeLayer={activeLayer}
         selectedCountry={selectedCountry}
         hoveredCountry={hoveredCountry}
         onClearSelectedCountry={() => setSelectedCountry(null)}

@@ -238,18 +238,16 @@ def _build_provider_request_payload(
         return payload
 
     if provider == "nasa_power":
-        payload = {
+        selected_params = parameters or variables or ["T2M", "PRECTOTCORR", "RH2M"]
+        return {
             "product": product,
             "mode": "auto",
             "bbox": bbox_list,
             "start_time": start_iso,
             "end_time": end_iso,
             "community": community or "AG",
+            "parameters": list(selected_params),
         }
-        selected_params = parameters or variables
-        if selected_params:
-            payload["parameters"] = list(selected_params)
-        return payload
 
     payload = {
         "product": product,

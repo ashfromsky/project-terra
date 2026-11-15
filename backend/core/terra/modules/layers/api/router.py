@@ -1,14 +1,15 @@
 """Layers catalog REST API endpoints under ``/api/v1/layers``."""
 
-from functools import lru_cache
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 
+from terra.config import get_settings
 from terra.modules.layers.api.schemas import (
     LayerDefinitionResponse,
     LayerLegendResponse,
     LayerMetadataResponse,
+    LayerPointInspectionResponse,
     TemporalCoverageResponse,
 )
 from terra.modules.layers.application.services import LayerCatalogService
@@ -17,16 +18,24 @@ from terra.modules.layers.domain.entities import (
     LayerDefinition,
     MapLayerGroupId,
 )
-from terra.modules.layers.domain.exceptions import LayerNotFoundError
+from terra.modules.layers.domain.exceptions import (
+    LayerDatasetUnavailableError,
+    LayerNotFoundError,
+    LayerRasterProxyError,
+)
 from terra.modules.layers.infrastructure.static_repository import StaticLayerCatalogRepository
 
 router = APIRouter(prefix="/layers", tags=["layers"])
 
 
-@lru_cache(maxsize=1)
 def get_layer_service() -> LayerCatalogService:
-    """Provide LayerCatalogService wired with the static catalog repository."""
-    return LayerCatalogService(StaticLayerCatalogRepository())
+    """Provide LayerCatalogService wired with static catalog and configured GHS base URL."""
+    settings = get_settings()
+    return LayerCatalogService(
+        StaticLayerCatalogRepository(),
+        ghs_base_url=settings.ghs_base_url,
+        ghs_timeout_seconds=settings.ghs_timeout_seconds,
+    )
 
 
 LayerServiceDep = Annotated[LayerCatalogService, Depends(get_layer_service)]
@@ -81,9 +90,134 @@ async def get_layer_legend(layer_id: str, service: LayerServiceDep) -> LayerLege
 
 @router.get("/{layer_id}/coverage", response_model=TemporalCoverageResponse)
 async def get_layer_coverage(layer_id: str, service: LayerServiceDep) -> TemporalCoverageResponse:
-    """Return temporal archive bounds and nominal data availability for a layer."""
+    """Return temporal archive bounds and live ingested data availability for a layer."""
     try:
         coverage = await service.get_coverage(layer_id)
     except LayerNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     return TemporalCoverageResponse.from_domain(layer_id, coverage)
+
+
+@router.get(
+    "/{layer_id}/tiles/{z}/{x}/{y}.png",
+    responses={200: {"content": {"image/png": {}}}},
+)
+async def get_layer_tile(
+    layer_id: str,
+    z: int,
+    x: int,
+    y: int,
+    service: LayerServiceDep,
+    timestamp: str | None = None,
+    vmin: float | None = None,
+    vmax: float | None = None,
+    dataset_id: Annotated[str | None, Query(alias="datasetId")] = None,
+) -> Response:
+    """Serve an XYZ RGBA PNG raster tile proxied from the active GHS raster dataset."""
+    if z < 0 or z > 22:
+        raise HTTPException(status_code=422, detail="Zoom level z must be between 0 and 22")
+    max_tile = 2**z
+    if x < 0 or x >= max_tile or y < 0 or y >= max_tile:
+        raise HTTPException(status_code=422, detail="Tile coordinates out of range for zoom level")
+    try:
+        png_bytes = await service.render_layer_tile(
+            layer_id,
+            z,
+            x,
+            y,
+            timestamp=timestamp,
+            vmin=vmin,
+            vmax=vmax,
+            dataset_id=dataset_id,
+        )
+    except (LayerNotFoundError, LayerDatasetUnavailableError) as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except LayerRasterProxyError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+    return Response(
+        content=png_bytes,
+        media_type="image/png",
+        headers={"Cache-Control": "public, max-age=300"},
+    )
+
+
+@router.get(
+    "/{layer_id}/render.png",
+    responses={200: {"content": {"image/png": {}}}},
+)
+async def get_layer_render_png(
+    layer_id: str,
+    bbox: str,
+    service: LayerServiceDep,
+    crs: str = "EPSG:4326",
+    width: int = 512,
+    height: int = 512,
+    timestamp: str | None = None,
+    vmin: float | None = None,
+    vmax: float | None = None,
+    dataset_id: Annotated[str | None, Query(alias="datasetId")] = None,
+) -> Response:
+    """Serve a bounded RGBA PNG raster image proxied from the active GHS raster dataset."""
+    parts = [part.strip() for part in bbox.split(",")]
+    if len(parts) != 4:
+        raise HTTPException(status_code=422, detail="bbox must contain 4 comma-separated floats")
+    try:
+        min_x, min_y, max_x, max_y = (float(p) for p in parts)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=422, detail="bbox coordinates must be valid numbers"
+        ) from exc
+    if min_x >= max_x or min_y >= max_y:
+        raise HTTPException(
+            status_code=422, detail="bbox min bounds must be strictly less than max bounds"
+        )
+    if width < 1 or width > 2048 or height < 1 or height > 2048:
+        raise HTTPException(status_code=422, detail="width and height must be between 1 and 2048")
+    try:
+        png_bytes = await service.render_layer_image(
+            layer_id,
+            bbox,
+            crs=crs,
+            width=width,
+            height=height,
+            timestamp=timestamp,
+            vmin=vmin,
+            vmax=vmax,
+            dataset_id=dataset_id,
+        )
+    except (LayerNotFoundError, LayerDatasetUnavailableError) as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except LayerRasterProxyError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+    return Response(
+        content=png_bytes,
+        media_type="image/png",
+        headers={"Cache-Control": "public, max-age=300"},
+    )
+
+
+@router.get("/{layer_id}/point", response_model=LayerPointInspectionResponse)
+async def inspect_layer_point(
+    layer_id: str,
+    lon: float,
+    lat: float,
+    service: LayerServiceDep,
+    timestamp: str | None = None,
+    dataset_id: Annotated[str | None, Query(alias="datasetId")] = None,
+) -> LayerPointInspectionResponse:
+    """Return exact native-grid pixel inspection and QA metadata at WGS 84 (lon, lat)."""
+    if lon < -180.0 or lon > 180.0 or lat < -90.0 or lat > 90.0:
+        raise HTTPException(status_code=422, detail="lon/lat coordinates out of WGS 84 bounds")
+    try:
+        payload = await service.inspect_layer_point(
+            layer_id,
+            lon,
+            lat,
+            timestamp=timestamp,
+            dataset_id=dataset_id,
+        )
+    except LayerNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except LayerRasterProxyError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+    return LayerPointInspectionResponse.model_validate(payload)

@@ -520,8 +520,18 @@ class MODISHandler:
                 self._readers.read, asset, path, variables=req.variables
             )
 
+            decoded_vars = decoded.variables
+            if (
+                req.variables is None
+                and template_specs
+                and any(name in template_specs for name in decoded_vars)
+            ):
+                decoded_vars = {
+                    name: spec for name, spec in decoded_vars.items() if name in template_specs
+                }
+
             variables: dict[str, VariableSpec] = {}
-            for name, dec_spec in decoded.variables.items():
+            for name, dec_spec in decoded_vars.items():
                 known = template_specs.get(name)
                 if known is None:
                     variables[name] = dec_spec

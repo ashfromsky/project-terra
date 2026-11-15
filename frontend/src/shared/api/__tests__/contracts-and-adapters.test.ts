@@ -18,6 +18,12 @@ import {
 } from '../data-sources'
 import type { RegionResponse } from '../contracts'
 import { regionResponseToAoiFeature, toRegionGeometryInput } from '../regions'
+import {
+  buildLayerRenderPngUrl,
+  buildLayerTileUrlTemplate,
+  inspectLayerPoint,
+  resolveLayerEffectiveDate,
+} from '../layers'
 import { normalizeAoiGeometry } from '../../lib/geojson-utils'
 import type { AoiGeometry, MapLayerDefinition } from '../../types/geospatial'
 import { resolveLayerControlState } from '../../../features/map-explorer/model/explore-store.types'
@@ -49,7 +55,7 @@ function makeSampleLayer(overrides?: Partial<MapLayerDefinition>): MapLayerDefin
     limitations: 'Cloud contamination reduces clear-sky composite count.',
     isExperimental: false,
     isSyntheticPreview: false,
-    previewPropertyKey: 'demoNdvi',
+    previewPropertyKey: null,
     colorRamp: [
       { value: 0, color: '#f7fcf5', rgb: [247, 252, 245], label: '0.0' },
       { value: 1, color: '#00441b', rgb: [0, 68, 27], label: '1.0' },
@@ -300,6 +306,76 @@ describe('resolveLayerControlState', () => {
       maxValue: 0.9,
       minValue: 0.2,
     })
+  })
+
+  it('resolves effective layer dates, builds raster tile/render URLs, and queries point inspection', async () => {
+    const layer = makeSampleLayer({
+      availableDates: ['2024-06-01', '2024-06-17'],
+      datasetBbox: [-41.0, -10.0, -39.0, -8.0],
+      activeDatasetId: 'ds-ndvi-cog-1',
+      unavailableReason: null,
+    })
+    expect(resolveLayerEffectiveDate(layer, '')).toBe('2024-06-17')
+    expect(resolveLayerEffectiveDate(layer, '2024-06-01')).toBe('2024-06-01')
+    expect(resolveLayerEffectiveDate(layer, '2020-01-01')).toBe('2024-06-17')
+
+    const tileUrl = buildLayerTileUrlTemplate('ndvi-mod13q1', {
+      timestamp: '2024-06-17',
+      vmin: 0,
+      vmax: 0.9,
+      datasetId: 'ds-ndvi-cog-1',
+    })
+    expect(tileUrl).toContain('/api/v1/layers/ndvi-mod13q1/tiles/{z}/{x}/{y}.png?')
+    expect(tileUrl).toContain('timestamp=2024-06-17')
+    expect(tileUrl).toContain('datasetId=ds-ndvi-cog-1')
+
+    const renderUrl = buildLayerRenderPngUrl('ndvi-mod13q1', {
+      bbox: [-41, -10, -39, -8],
+      width: 256,
+      height: 128,
+      timestamp: '2024-06-17',
+    })
+    expect(renderUrl).toContain('/api/v1/layers/ndvi-mod13q1/render.png?')
+    expect(renderUrl).toContain('bbox=-41%2C-10%2C-39%2C-8')
+    expect(renderUrl).toContain('width=256')
+    expect(renderUrl).toContain('height=128')
+
+    const getSpy = vi.spyOn(apiFetchClient, 'GET').mockResolvedValueOnce({
+      data: {
+        layerId: 'ndvi-mod13q1',
+        datasetId: 'ds-ndvi-cog-1',
+        product: 'MOD13Q1',
+        variable: 'NDVI',
+        lon: -40.0,
+        lat: -9.0,
+        timestamp: '2024-06-17',
+        status: 'ok',
+        value: 0.68,
+        rawValue: 6800,
+        unit: 'index',
+        qaValue: 0,
+        qaPassed: true,
+        crs: 'EPSG:4326',
+        nominalResolutionM: 250,
+        pixelRow: 10,
+        pixelCol: 12,
+        bbox: { minLon: -41, minLat: -10, maxLon: -39, maxLat: -8 },
+        timeSeries: [{ timestamp: '2024-06-17', value: 0.68 }],
+        reason: null,
+      },
+      error: undefined,
+      response: new Response(null, { status: 200 }),
+    } as never)
+
+    const pointResult = await inspectLayerPoint('ndvi-mod13q1', {
+      lon: -40.0,
+      lat: -9.0,
+      timestamp: '2024-06-17',
+    })
+    expect(getSpy).toHaveBeenCalledOnce()
+    expect(pointResult.status).toBe('ok')
+    expect(pointResult.value).toBe(0.68)
+    getSpy.mockRestore()
   })
 })
 

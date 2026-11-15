@@ -882,7 +882,7 @@
           "layers"
         ],
         "summary": "Get Layer Coverage",
-        "description": "Return temporal archive bounds and nominal data availability for a layer.",
+        "description": "Return temporal archive bounds and live ingested data availability for a layer.",
         "operationId": "get_layer_coverage_api_v1_layers__layer_id__coverage_get",
         "parameters": [
           {
@@ -902,6 +902,377 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/TemporalCoverageResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/layers/{layer_id}/tiles/{z}/{x}/{y}.png": {
+      "get": {
+        "tags": [
+          "layers"
+        ],
+        "summary": "Get Layer Tile",
+        "description": "Serve an XYZ RGBA PNG raster tile proxied from the active GHS raster dataset.",
+        "operationId": "get_layer_tile_api_v1_layers__layer_id__tiles__z___x___y__png_get",
+        "parameters": [
+          {
+            "name": "layer_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Layer Id"
+            }
+          },
+          {
+            "name": "z",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Z"
+            }
+          },
+          {
+            "name": "x",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "X"
+            }
+          },
+          {
+            "name": "y",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Y"
+            }
+          },
+          {
+            "name": "timestamp",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Timestamp"
+            }
+          },
+          {
+            "name": "vmin",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Vmin"
+            }
+          },
+          {
+            "name": "vmax",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Vmax"
+            }
+          },
+          {
+            "name": "datasetId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Datasetid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              },
+              "image/png": {}
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/layers/{layer_id}/render.png": {
+      "get": {
+        "tags": [
+          "layers"
+        ],
+        "summary": "Get Layer Render Png",
+        "description": "Serve a bounded RGBA PNG raster image proxied from the active GHS raster dataset.",
+        "operationId": "get_layer_render_png_api_v1_layers__layer_id__render_png_get",
+        "parameters": [
+          {
+            "name": "layer_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Layer Id"
+            }
+          },
+          {
+            "name": "bbox",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Bbox"
+            }
+          },
+          {
+            "name": "crs",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "EPSG:4326",
+              "title": "Crs"
+            }
+          },
+          {
+            "name": "width",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 512,
+              "title": "Width"
+            }
+          },
+          {
+            "name": "height",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 512,
+              "title": "Height"
+            }
+          },
+          {
+            "name": "timestamp",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Timestamp"
+            }
+          },
+          {
+            "name": "vmin",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Vmin"
+            }
+          },
+          {
+            "name": "vmax",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Vmax"
+            }
+          },
+          {
+            "name": "datasetId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Datasetid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              },
+              "image/png": {}
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/layers/{layer_id}/point": {
+      "get": {
+        "tags": [
+          "layers"
+        ],
+        "summary": "Inspect Layer Point",
+        "description": "Return exact native-grid pixel inspection and QA metadata at WGS 84 (lon, lat).",
+        "operationId": "inspect_layer_point_api_v1_layers__layer_id__point_get",
+        "parameters": [
+          {
+            "name": "layer_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Layer Id"
+            }
+          },
+          {
+            "name": "lon",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "number",
+              "title": "Lon"
+            }
+          },
+          {
+            "name": "lat",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "number",
+              "title": "Lat"
+            }
+          },
+          {
+            "name": "timestamp",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Timestamp"
+            }
+          },
+          {
+            "name": "datasetId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Datasetid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LayerPointInspectionResponse"
                 }
               }
             }
@@ -2724,7 +3095,8 @@
                 "tilejson",
                 "cog",
                 "zarr",
-                "wmts"
+                "wmts",
+                "xyz"
               ]
             },
             "type": "array",
@@ -2762,6 +3134,62 @@
               }
             ],
             "title": "Previewpropertykey"
+          },
+          "availableDates": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Availabledates"
+          },
+          "datasetBbox": {
+            "anyOf": [
+              {
+                "prefixItems": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "number"
+                  }
+                ],
+                "type": "array",
+                "maxItems": 4,
+                "minItems": 4
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Datasetbbox"
+          },
+          "activeDatasetId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Activedatasetid"
+          },
+          "unavailableReason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unavailablereason"
           },
           "colorRamp": {
             "items": {
@@ -2969,7 +3397,8 @@
                 "tilejson",
                 "cog",
                 "zarr",
-                "wmts"
+                "wmts",
+                "xyz"
               ]
             },
             "type": "array",
@@ -3007,6 +3436,62 @@
               }
             ],
             "title": "Previewpropertykey"
+          },
+          "availableDates": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Availabledates"
+          },
+          "datasetBbox": {
+            "anyOf": [
+              {
+                "prefixItems": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "number"
+                  }
+                ],
+                "type": "array",
+                "maxItems": 4,
+                "minItems": 4
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Datasetbbox"
+          },
+          "activeDatasetId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Activedatasetid"
+          },
+          "unavailableReason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unavailablereason"
           }
         },
         "type": "object",
@@ -3035,6 +3520,225 @@
         ],
         "title": "LayerMetadataResponse",
         "description": "Layer scientific provenance, units, QA policy, and limitations."
+      },
+      "LayerPointInspectionResponse": {
+        "properties": {
+          "layerId": {
+            "type": "string",
+            "title": "Layerid"
+          },
+          "datasetId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Datasetid"
+          },
+          "product": {
+            "type": "string",
+            "title": "Product"
+          },
+          "variable": {
+            "type": "string",
+            "title": "Variable"
+          },
+          "lon": {
+            "type": "number",
+            "title": "Lon"
+          },
+          "lat": {
+            "type": "number",
+            "title": "Lat"
+          },
+          "timestamp": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Timestamp"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "ok",
+              "nodata",
+              "outside_bounds",
+              "unavailable"
+            ],
+            "title": "Status"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value"
+          },
+          "rawValue": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rawvalue"
+          },
+          "unit": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unit"
+          },
+          "qaValue": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Qavalue"
+          },
+          "qaPassed": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Qapassed"
+          },
+          "crs": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Crs"
+          },
+          "nominalResolutionM": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Nominalresolutionm"
+          },
+          "pixelRow": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pixelrow"
+          },
+          "pixelCol": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pixelcol"
+          },
+          "bbox": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RasterPointBBoxResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "timeSeries": {
+            "items": {
+              "$ref": "#/components/schemas/LayerPointTimeSeriesResponse"
+            },
+            "type": "array",
+            "title": "Timeseries"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          }
+        },
+        "type": "object",
+        "required": [
+          "layerId",
+          "product",
+          "variable",
+          "lon",
+          "lat",
+          "status"
+        ],
+        "title": "LayerPointInspectionResponse",
+        "description": "Exact native-grid pixel inspection and QA payload for a map layer coordinate."
+      },
+      "LayerPointTimeSeriesResponse": {
+        "properties": {
+          "timestamp": {
+            "type": "string",
+            "title": "Timestamp"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value"
+          }
+        },
+        "type": "object",
+        "required": [
+          "timestamp"
+        ],
+        "title": "LayerPointTimeSeriesResponse",
+        "description": "Single timestamped sample at the inspected dataset point when available."
       },
       "LegendConfigurationResponse": {
         "properties": {
@@ -3120,7 +3824,8 @@
               "tilejson",
               "cog",
               "zarr",
-              "wmts"
+              "wmts",
+              "xyz"
             ],
             "title": "Format"
           },
@@ -3655,6 +4360,35 @@
         ],
         "title": "ProviderVariableSchema",
         "description": "Variable metadata exposed by a registered GHS environmental provider."
+      },
+      "RasterPointBBoxResponse": {
+        "properties": {
+          "minLon": {
+            "type": "number",
+            "title": "Minlon"
+          },
+          "minLat": {
+            "type": "number",
+            "title": "Minlat"
+          },
+          "maxLon": {
+            "type": "number",
+            "title": "Maxlon"
+          },
+          "maxLat": {
+            "type": "number",
+            "title": "Maxlat"
+          }
+        },
+        "type": "object",
+        "required": [
+          "minLon",
+          "minLat",
+          "maxLon",
+          "maxLat"
+        ],
+        "title": "RasterPointBBoxResponse",
+        "description": "WGS 84 bounding box of the inspected raster dataset."
       },
       "ReadinessResponse": {
         "properties": {
@@ -4450,6 +5184,51 @@
           "isSimulatedCoverage": {
             "type": "boolean",
             "title": "Issimulatedcoverage"
+          },
+          "availableDates": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Availabledates"
+          },
+          "datasetBbox": {
+            "anyOf": [
+              {
+                "prefixItems": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "number"
+                  }
+                ],
+                "type": "array",
+                "maxItems": 4,
+                "minItems": 4
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Datasetbbox"
+          },
+          "activeDatasetId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Activedatasetid"
           }
         },
         "type": "object",

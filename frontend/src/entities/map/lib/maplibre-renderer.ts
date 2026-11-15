@@ -144,7 +144,7 @@ export class MapLibreRenderer implements MapRenderer {
     if (!this.map) return
     syncMapLibreLayersAndSources(this.map, state)
     syncMapLibreDeckOverlay(this.deckOverlay, state)
-    renderMapLibreLabels(this.map, this.labelsEl, state)
+    renderMapLibreLabels(this.labelsEl)
   }
 
   private initializeMap(state: MapRenderState): void {
@@ -160,9 +160,9 @@ export class MapLibreRenderer implements MapRenderer {
       bearing: state.viewport.bearing,
       pitch: state.viewport.pitch,
       minZoom: 0.4,
-      maxZoom: 12,
+      maxZoom: 18,
       renderWorldCopies: !isGlobe,
-      attributionControl: false,
+      attributionControl: { compact: true },
       dragRotate: isGlobe,
       pitchWithRotate: isGlobe,
     })
@@ -196,7 +196,7 @@ export class MapLibreRenderer implements MapRenderer {
       })
     })
 
-    map.on('move', () => renderMapLibreLabels(this.map, this.labelsEl, this.state))
+    map.on('move', () => renderMapLibreLabels(this.labelsEl))
 
     map.on('moveend', () => {
       if (!this.map) return
@@ -224,7 +224,7 @@ export class MapLibreRenderer implements MapRenderer {
     if (this.wrapperEl) {
       this.resizeObserver = new ResizeObserver(() => {
         this.map?.resize()
-        renderMapLibreLabels(this.map, this.labelsEl, this.state)
+        renderMapLibreLabels(this.labelsEl)
       })
       this.resizeObserver.observe(this.wrapperEl)
     }
@@ -241,8 +241,8 @@ export class MapLibreRenderer implements MapRenderer {
       this.handlers.onUpdateDraftHover?.([lon, lat])
     }
 
-    if (!map.getLayer('country-thematic-fill')) return
-    const feature = map.queryRenderedFeatures(event.point, { layers: ['country-thematic-fill'] })[0]
+    if (!map.getLayer('country-hit-fill')) return
+    const feature = map.queryRenderedFeatures(event.point, { layers: ['country-hit-fill'] })[0]
     if (feature && feature.id !== undefined) {
       if (this.hoveredFeatureId !== null && this.hoveredFeatureId !== feature.id) {
         map.setFeatureState({ source: 'ne-countries', id: this.hoveredFeatureId }, { hover: false })
@@ -276,8 +276,8 @@ export class MapLibreRenderer implements MapRenderer {
       return
     }
 
-    if (map.getLayer('country-thematic-fill')) {
-      const feature = map.queryRenderedFeatures(event.point, { layers: ['country-thematic-fill'] })[0]
+    if (map.getLayer('country-hit-fill')) {
+      const feature = map.queryRenderedFeatures(event.point, { layers: ['country-hit-fill'] })[0]
       if (feature) {
         const summary = countryPropertiesToSummary(feature.properties as Partial<CountryFeatureProperties>)
         const normalizedGeom = normalizeAoiGeometry(feature.geometry)

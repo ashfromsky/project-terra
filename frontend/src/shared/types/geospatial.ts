@@ -4,6 +4,7 @@ import type {
   ColorRampStopResponse,
   LayerDefinitionResponse,
   LayerMetadataResponse,
+  LayerPointInspectionResponse,
   LegendConfigurationResponse,
   MapTileSourceResponse,
   RegionGeometryOutput,
@@ -32,6 +33,8 @@ export type TemporalCoverage = TemporalCoverageResponse
 export type MapTileSource = MapTileSourceResponse
 export type MapLayerMetadata = LayerMetadataResponse
 export type MapLayerDefinition = LayerDefinitionResponse
+export type LayerPointInspection = LayerPointInspectionResponse
+export type { LayerPointInspectionResponse }
 
 export type AoiGeometry = RegionGeometryOutput
 export type AoiRole = RegionResponse['role']

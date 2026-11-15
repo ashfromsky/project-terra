@@ -2,7 +2,7 @@
 
 from typing import Literal
 
-from pydantic import ConfigDict
+from pydantic import ConfigDict, Field
 from pydantic.alias_generators import to_camel
 
 from terra.api.schemas import CamelModel
@@ -106,6 +106,10 @@ class LayerMetadataResponse(_LayerSchema):
     is_experimental: bool
     is_synthetic_preview: bool
     preview_property_key: PreviewPropertyKey | None = None
+    available_dates: list[str] = Field(default_factory=list)
+    dataset_bbox: tuple[float, float, float, float] | None = None
+    active_dataset_id: str | None = None
+    unavailable_reason: str | None = None
 
 
 class LayerDefinitionResponse(LayerMetadataResponse):
@@ -154,6 +158,9 @@ class TemporalCoverageResponse(_LayerSchema):
     coverage_percent: float
     notes: str
     is_simulated_coverage: bool
+    available_dates: list[str] = Field(default_factory=list)
+    dataset_bbox: tuple[float, float, float, float] | None = None
+    active_dataset_id: str | None = None
 
     @classmethod
     def from_domain(cls, layer_id: str, coverage: TemporalCoverage) -> "TemporalCoverageResponse":
@@ -167,4 +174,48 @@ class TemporalCoverageResponse(_LayerSchema):
             coverage_percent=coverage.coverage_percent,
             notes=coverage.notes,
             is_simulated_coverage=coverage.is_simulated_coverage,
+            available_dates=list(coverage.available_dates),
+            dataset_bbox=coverage.dataset_bbox,
+            active_dataset_id=coverage.active_dataset_id,
         )
+
+
+class RasterPointBBoxResponse(_LayerSchema):
+    """WGS 84 bounding box of the inspected raster dataset."""
+
+    min_lon: float
+    min_lat: float
+    max_lon: float
+    max_lat: float
+
+
+class LayerPointTimeSeriesResponse(_LayerSchema):
+    """Single timestamped sample at the inspected dataset point when available."""
+
+    timestamp: str
+    value: float | None = None
+
+
+class LayerPointInspectionResponse(_LayerSchema):
+    """Exact native-grid pixel inspection and QA payload for a map layer coordinate."""
+
+    layer_id: str
+    dataset_id: str | None = None
+    product: str
+    variable: str
+    lon: float
+    lat: float
+    timestamp: str | None = None
+    status: Literal["ok", "nodata", "outside_bounds", "unavailable"]
+    value: float | None = None
+    raw_value: float | None = None
+    unit: str | None = None
+    qa_value: int | None = None
+    qa_passed: bool | None = None
+    crs: str | None = None
+    nominal_resolution_m: float | None = None
+    pixel_row: int | None = None
+    pixel_col: int | None = None
+    bbox: RasterPointBBoxResponse | None = None
+    time_series: list[LayerPointTimeSeriesResponse] = Field(default_factory=list)
+    reason: str | None = None

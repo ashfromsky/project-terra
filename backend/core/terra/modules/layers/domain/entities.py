@@ -6,7 +6,7 @@ from typing import Literal
 MapLayerGroupId = Literal["vegetation", "temperature", "water", "derived"]
 DataAvailabilityStatus = Literal["connected", "preview", "planned", "unavailable"]
 LayerRenderingType = Literal["raster", "choropleth", "vector", "point"]
-TileSourceFormat = Literal["geojson", "mvt", "tilejson", "cog", "zarr", "wmts"]
+TileSourceFormat = Literal["geojson", "mvt", "tilejson", "cog", "zarr", "wmts", "xyz"]
 ObservationGranularity = Literal["30-minute", "daily", "8-day", "16-day", "monthly", "multi-year"]
 PreviewPropertyKey = Literal["demoLstTrend", "demoNdvi", "demoEvi", "demoPrecipAnomaly"]
 
@@ -98,6 +98,10 @@ class LayerDefinition:
     is_experimental: bool = False
     is_synthetic_preview: bool = False
     preview_property_key: PreviewPropertyKey | None = None
+    available_dates: tuple[str, ...] = ()
+    dataset_bbox: tuple[float, float, float, float] | None = None
+    active_dataset_id: str | None = None
+    unavailable_reason: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -112,3 +116,6 @@ class TemporalCoverage:
     coverage_percent: float
     notes: str
     is_simulated_coverage: bool
+    available_dates: tuple[str, ...] = ()
+    dataset_bbox: tuple[float, float, float, float] | None = None
+    active_dataset_id: str | None = None
