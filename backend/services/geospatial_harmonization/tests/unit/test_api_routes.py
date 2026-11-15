@@ -238,6 +238,7 @@ async def test_v1_providers_discover_idempotency_cancel_and_provenance(
         assert by_name["gpm_imerg"]["status"] == "disabled"
         assert by_name["nasa_power"]["status"] == "ready"
         assert by_name["nasa_power"]["auth_required"] is False
+        assert by_name["modis"]["registered_products"] == ["MOD11A2.061", "MOD13Q1.061"]
         assert len(by_name["modis"]["products"]) == 2
 
         caps = (await client.get("/api/v1/capabilities")).json()

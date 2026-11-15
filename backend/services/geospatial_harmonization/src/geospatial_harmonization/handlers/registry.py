@@ -10,12 +10,16 @@ class HandlerRegistry:
     def __init__(self) -> None:
         self._handlers: dict[tuple[str, str], DataHandler] = {}
         self._wildcards: dict[str, DataHandler] = {}
+        self._capabilities: dict[str, dict[str, str]] = {}
 
     def register(self, handler: DataHandler) -> None:
         """Register handler for its declared provider and supported products."""
         prov = handler.provider.strip().lower()
+        declared = self._capabilities.setdefault(prov, {})
         for prod in handler.supported_products:
-            key = prod.strip().lower()
+            canonical = prod.strip()
+            key = canonical.lower()
+            declared[key] = canonical
             if key == "*":
                 self._wildcards[prov] = handler
             else:
@@ -33,10 +37,8 @@ class HandlerRegistry:
         return handler
 
     def list_capabilities(self) -> dict[str, tuple[str, ...]]:
-        """List registered providers and their supported product identifiers."""
-        grouped: dict[str, list[str]] = {}
-        for prov, prod in sorted(self._handlers):
-            grouped.setdefault(prov, []).append(prod)
-        for prov in sorted(self._wildcards):
-            grouped.setdefault(prov, []).append("*")
-        return {k: tuple(v) for k, v in grouped.items()}
+        """List registered providers and their canonically cased product identifiers."""
+        return {
+            prov: tuple(sorted(products.values()))
+            for prov, products in sorted(self._capabilities.items())
+        }

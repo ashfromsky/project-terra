@@ -102,6 +102,14 @@ def test_default_handler_registry_capabilities_and_isolation() -> None:
     reg = build_default_handler_registry()
     caps = reg.list_capabilities()
     assert set(caps.keys()) == {"generic", "gpm_imerg", "modis", "nasa_power", "smap"}
+    assert caps["modis"] == ("MOD11A2.061", "MOD13Q1.061")
+    assert caps["gpm_imerg"] == (
+        "GPM_3IMERGHH.06",
+        "GPM_3IMERGHH.07",
+        "GPM_3IMERGHHE.07",
+        "GPM_3IMERGHHL.07",
+    )
+    assert reg.get("MODIS", "mod13q1.061").provider == "modis"
     with pytest.raises(IncompatibleDatasetError, match="No handler registered"):
         reg.get("modis", "UNSUPPORTED_PRODUCT")
 
