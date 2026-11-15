@@ -1,5 +1,4 @@
 import type { MapLayerDefinition } from '../../../shared/types/geospatial'
-import type { CountryFeatureProperties } from '../../../widgets/world-map/model/types'
 
 export function interpolateColorFromLayer(
   layer: MapLayerDefinition,
@@ -49,15 +48,4 @@ export function interpolateColorFromLayer(
   }
 
   return lastStop.color
-}
-
-export function extractPreviewFeatureValue(
-  properties: Partial<CountryFeatureProperties> | null | undefined,
-  layer: MapLayerDefinition,
-): number | null {
-  if (!properties || !layer.isSyntheticPreview || !layer.previewPropertyKey) {
-    return null
-  }
-  const val = properties[layer.previewPropertyKey]
-  return typeof val === 'number' && Number.isFinite(val) ? val : null
 }

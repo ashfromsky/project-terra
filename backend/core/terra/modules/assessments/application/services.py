@@ -147,7 +147,7 @@ class AssessmentApplicationService:
             )
             for raw_ds in inline_datasets:
                 _parse_inline_dataset(raw_ds)
-        except (ValidationError, ScientificCoreError, ValueError) as exc:
+        except (ValidationError, ScientificCoreError, TypeError, ValueError, KeyError) as exc:
             raise AssessmentValidationError(str(exc)) from exc
         return validated_req
 
@@ -229,7 +229,7 @@ class AssessmentApplicationService:
                 updated_at=now,
             )
             await self._repo.update(failed)
-            if isinstance(exc, ScientificInputError):
+            if isinstance(exc, (ScientificCoreError, ScientificInputError, TypeError, ValueError)):
                 raise AssessmentValidationError(str(exc)) from exc
             raise
 

@@ -22,7 +22,7 @@ function isWideWorkspaceViewport(): boolean {
 }
 
 export const useExploreStore = create<ExploreState>()((set, get) => ({
-  projection: 'equal-earth',
+  projection: 'mercator',
   setProjection: (projection) => set({ projection }),
 
   basemap: 'scientific-light',
@@ -91,9 +91,6 @@ export const useExploreStore = create<ExploreState>()((set, get) => ({
         },
       }
     }),
-
-  syntheticPreviewEnabled: true,
-  setSyntheticPreviewEnabled: (syntheticPreviewEnabled) => set({ syntheticPreviewEnabled }),
 
   selectedDate: '2025-12-01',
   setSelectedDate: (selectedDate) => set({ selectedDate }),

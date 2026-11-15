@@ -619,3 +619,36 @@ class CleanupReportOut(BaseModel):
     @classmethod
     def from_domain(cls, report: CleanupReport) -> "CleanupReportOut":
         return cls.model_validate(asdict(report))
+
+
+class RasterPointBBoxOut(BaseModel):
+    min_lon: float
+    min_lat: float
+    max_lon: float
+    max_lat: float
+
+
+class DatasetPointSeriesPointOut(BaseModel):
+    timestamp: str
+    value: float | None = None
+
+
+class DatasetPointQueryResponse(BaseModel):
+    dataset_id: str
+    product: str
+    variable: str
+    lon: float
+    lat: float
+    timestamp: str
+    status: str
+    value: float | None = None
+    raw_value: float | None = None
+    unit: str | None = None
+    qa_value: int | None = None
+    qa_passed: bool | None = None
+    crs: str
+    nominal_resolution_m: float | None = None
+    pixel_row: int | None = None
+    pixel_col: int | None = None
+    bbox: RasterPointBBoxOut
+    time_series: list[DatasetPointSeriesPointOut] = []

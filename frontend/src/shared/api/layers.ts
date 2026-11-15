@@ -1,7 +1,8 @@
 import { useQuery } from '@tanstack/react-query'
-import { apiFetchClient, ApiError, unwrapApiResponse } from './client'
+import { apiFetchClient, ApiError, buildApiUrl, unwrapApiResponse } from './client'
 import type {
   DataAvailabilityStatus,
+  LayerPointInspectionResponse,
   MapLayerDefinition,
   MapLayerGroupId,
   TemporalCoverage,
@@ -12,6 +13,89 @@ export const LAYERS_CATALOG_QUERY_KEY = ['layers', 'catalog'] as const
 export interface FetchLayersParams {
   groupId?: MapLayerGroupId | null
   availabilityStatus?: DataAvailabilityStatus | null
+}
+
+export interface InspectLayerPointParams {
+  lon: number
+  lat: number
+  timestamp?: string
+  datasetId?: string
+}
+
+export function resolveLayerEffectiveDate(
+  layer: Pick<MapLayerDefinition, 'availableDates'> | null | undefined,
+  selectedDate: string,
+): string | undefined {
+  const dates = layer?.availableDates
+  if (!dates || dates.length === 0) {
+    return selectedDate || undefined
+  }
+  if (dates.includes(selectedDate)) {
+    return selectedDate
+  }
+  return dates[dates.length - 1]
+}
+
+export function buildLayerTileUrlTemplate(
+  layerId: string,
+  params?: { timestamp?: string; vmin?: number; vmax?: number; datasetId?: string },
+): string {
+  const query = new URLSearchParams()
+  if (params?.timestamp) query.set('timestamp', params.timestamp)
+  if (params?.vmin !== undefined) query.set('vmin', String(params.vmin))
+  if (params?.vmax !== undefined) query.set('vmax', String(params.vmax))
+  if (params?.datasetId) query.set('datasetId', params.datasetId)
+  const qs = query.toString()
+  const path = `/api/v1/layers/${encodeURIComponent(layerId)}/tiles/{z}/{x}/{y}.png`
+  return buildApiUrl(qs ? `${path}?${qs}` : path)
+}
+
+export function buildLayerRenderPngUrl(
+  layerId: string,
+  params: {
+    bbox: readonly [number, number, number, number] | readonly number[]
+    width?: number
+    height?: number
+    timestamp?: string
+    vmin?: number
+    vmax?: number
+    datasetId?: string
+  },
+): string {
+  const query = new URLSearchParams({
+    bbox: params.bbox.slice(0, 4).join(','),
+    crs: 'EPSG:4326',
+    width: String(params.width ?? 512),
+    height: String(params.height ?? 512),
+  })
+  if (params.timestamp) query.set('timestamp', params.timestamp)
+  if (params.vmin !== undefined) query.set('vmin', String(params.vmin))
+  if (params.vmax !== undefined) query.set('vmax', String(params.vmax))
+  if (params.datasetId) query.set('datasetId', params.datasetId)
+  return buildApiUrl(`/api/v1/layers/${encodeURIComponent(layerId)}/render.png?${query.toString()}`)
+}
+
+export async function inspectLayerPoint(
+  layerId: string,
+  params: InspectLayerPointParams,
+): Promise<LayerPointInspectionResponse> {
+  try {
+    const result = await apiFetchClient.GET('/api/v1/layers/{layer_id}/point', {
+      params: {
+        path: { layer_id: layerId },
+        query: {
+          lon: params.lon,
+          lat: params.lat,
+          timestamp: params.timestamp ?? undefined,
+          datasetId: params.datasetId ?? undefined,
+        },
+      },
+    })
+    return unwrapApiResponse(result, `GET /api/v1/layers/${layerId}/point`)
+  } catch (cause) {
+    if (cause instanceof ApiError) throw cause
+    throw new ApiError(0, `Network error calling /api/v1/layers/${layerId}/point: ${String(cause)}`)
+  }
 }
 
 export async function fetchLayerCatalog(params?: FetchLayersParams): Promise<MapLayerDefinition[]> {

@@ -39,7 +39,6 @@ export function TemporalLegendBar() {
   const setBottomPanelOpen = useExploreStore((s) => s.setBottomPanelOpen)
   const primaryLayerId = useExploreStore((s) => s.primaryLayerId)
   const layerStates = useExploreStore((s) => s.layerStates)
-  const syntheticPreviewEnabled = useExploreStore((s) => s.syntheticPreviewEnabled)
   const basemap = useExploreStore((s) => s.basemap)
   const selectedDate = useExploreStore((s) => s.selectedDate)
   const setSelectedDate = useExploreStore((s) => s.setSelectedDate)
@@ -56,11 +55,21 @@ export function TemporalLegendBar() {
   const basemapConfig = BASEMAP_PROVIDER_REGISTRY[basemap]
   const coverageQuery = useTemporalCoverageQuery(activeLayer?.id ?? '', Boolean(activeLayer))
   const cadence: ObservationGranularity = activeLayer?.availableTimeRange.cadence ?? 'monthly'
+  const availableDates = useMemo(
+    () => activeLayer?.availableDates ?? [],
+    [activeLayer?.availableDates],
+  )
 
   useEffect(() => {
     if (!temporalPlaying || !activeLayer) return
     const timer = window.setInterval(() => {
       const current = useExploreStore.getState().selectedDate
+      if (availableDates.length > 0) {
+        const idx = availableDates.indexOf(current)
+        const nextIdx = idx >= 0 && idx + 1 < availableDates.length ? idx + 1 : 0
+        setSelectedDate(availableDates[nextIdx])
+        return
+      }
       const next = stepIsoDate(current, cadence, 1)
       if (next > dateRangeEnd) {
         setSelectedDate(dateRangeStart)
@@ -69,7 +78,7 @@ export function TemporalLegendBar() {
       }
     }, 950)
     return () => window.clearInterval(timer)
-  }, [activeLayer, cadence, dateRangeEnd, dateRangeStart, setSelectedDate, temporalPlaying])
+  }, [activeLayer, availableDates, cadence, dateRangeEnd, dateRangeStart, setSelectedDate, temporalPlaying])
 
   const rangeMinMs = useMemo(() => dateToMs(dateRangeStart), [dateRangeStart])
   const rangeMaxMs = useMemo(
@@ -120,6 +129,12 @@ export function TemporalLegendBar() {
               disabled={!activeLayer}
               onClick={() => {
                 setTemporalPlaying(false)
+                if (availableDates.length > 0) {
+                  const idx = availableDates.indexOf(selectedDate)
+                  const targetIdx = idx > 0 ? idx - 1 : 0
+                  setSelectedDate(availableDates[targetIdx])
+                  return
+                }
                 const prev = stepIsoDate(selectedDate, cadence, -1)
                 setSelectedDate(prev < dateRangeStart ? dateRangeStart : prev)
               }}
@@ -144,6 +159,15 @@ export function TemporalLegendBar() {
               disabled={!activeLayer}
               onClick={() => {
                 setTemporalPlaying(false)
+                if (availableDates.length > 0) {
+                  const idx = availableDates.indexOf(selectedDate)
+                  const targetIdx =
+                    idx >= 0 && idx + 1 < availableDates.length
+                      ? idx + 1
+                      : availableDates.length - 1
+                  setSelectedDate(availableDates[targetIdx])
+                  return
+                }
                 const next = stepIsoDate(selectedDate, cadence, 1)
                 setSelectedDate(next > dateRangeEnd ? dateRangeEnd : next)
               }}
@@ -199,14 +223,31 @@ export function TemporalLegendBar() {
           <span>
             Target date: <strong>{selectedDate}</strong> ({cadence})
           </span>
+          {availableDates.length > 0 && (
+            <label className="explorer-select-wrap">
+              <span className="explorer-sr-only">Ingested observation date</span>
+              <select
+                className="explorer-mini-select"
+                value={availableDates.includes(selectedDate) ? selectedDate : availableDates[availableDates.length - 1]}
+                onChange={(e) => setSelectedDate(e.target.value)}
+                aria-label="Select ingested observation date"
+              >
+                {availableDates.map((dateStr) => (
+                  <option key={dateStr} value={dateStr}>
+                    {dateStr}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
           {coverageQuery.data && (
             <span>
               Catalog window: {coverageQuery.data.startDate} to {coverageQuery.data.endDate} ·{' '}
-              {coverageQuery.data.totalExpectedSteps} steps planned (
-              {coverageQuery.data.isSimulatedCoverage
-                ? 'archive raster stream not connected'
-                : `${coverageQuery.data.coveragePercent}% coverage`}
-              )
+              {availableDates.length > 0
+                ? `${availableDates.length} ingested observation date(s)`
+                : coverageQuery.data.isSimulatedCoverage
+                  ? 'no ingested observations available'
+                  : `${coverageQuery.data.coveragePercent}% coverage`}
             </span>
           )}
         </div>
@@ -251,10 +292,17 @@ export function TemporalLegendBar() {
               <div className="explorer-legend-pane__title-wrap">
                 <span className="explorer-legend-pane__title">{activeLayer.legend.title}</span>
                 <span className="explorer-legend-pane__unit">({activeLayer.legend.unit})</span>
-                {activeLayer.isSyntheticPreview && syntheticPreviewEnabled ? (
-                  <span className="explorer-status-pill is-preview">Synthetic Preview</span>
+                {activeLayer.availabilityStatus === 'connected' ? (
+                  <span className="explorer-status-pill is-connected">
+                    Connected Raster · Nearest
+                  </span>
                 ) : (
-                  <span className="explorer-status-pill is-unavailable">No Connected Raster</span>
+                  <span
+                    className="explorer-status-pill is-unavailable"
+                    title={activeLayer.unavailableReason ?? undefined}
+                  >
+                    {activeLayer.unavailableReason ?? 'Unavailable · Not ingested'}
+                  </span>
                 )}
               </div>
 

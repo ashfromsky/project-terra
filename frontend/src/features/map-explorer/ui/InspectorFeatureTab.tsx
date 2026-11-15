@@ -47,17 +47,10 @@ export function InspectorFeatureTab() {
               <dd>{selectedCountry.subregion}</dd>
             </div>
             <div>
-              <dt>Status</dt>
-              <dd>Country observation time series pending backend connection</dd>
+              <dt>Boundary dataset</dt>
+              <dd>Natural Earth 1:110m administrative polygons (selection &amp; AOI promotion)</dd>
             </div>
           </dl>
-
-          <div className="explorer-notice-box explorer-notice-box--compact">
-            <span>
-              Any preview fill values shown on-screen are SYNTHETIC / DEMONSTRATION DATA and not
-              official country statistics.
-            </span>
-          </div>
 
           {syncError && (
             <div className="explorer-status-banner is-error" role="alert">

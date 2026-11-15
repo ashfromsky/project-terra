@@ -27,7 +27,6 @@ export interface MapRenderState {
   basemap: BasemapId
   selectedDate: string
   activeLayer: LayerRenderConfig | null
-  syntheticPreviewEnabled: boolean
   showGraticules: boolean
   showBorders: boolean
   showLabels: boolean
@@ -96,10 +95,6 @@ export function countryPropertiesToSummary(
     continent: typeof props.continent === 'string' ? props.continent : 'Global',
     subregion: typeof props.subregion === 'string' ? props.subregion : 'Global',
     terraRegion: props.terraRegion ?? 'Global land',
-    demoLstTrend: Number(props.demoLstTrend ?? 0.25),
-    demoNdvi: Number(props.demoNdvi ?? 0.45),
-    demoEvi: Number(props.demoEvi ?? 0.35),
-    demoPrecipAnomaly: Number(props.demoPrecipAnomaly ?? 0),
     centerLon: Number(props.labelLon ?? 0),
     centerLat: Number(props.labelLat ?? 0),
   }

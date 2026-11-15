@@ -133,6 +133,8 @@ def to_attr_dict(items: Iterable[tuple[str, object]]) -> dict[str, object]:
 def as_float(value: object) -> float | None:
     """Convert numeric scalars cleanly to float without accepting booleans."""
     native = to_python_scalar(value)
+    if isinstance(native, (list, tuple)) and len(native) == 1:
+        native = to_python_scalar(native[0])
     if isinstance(native, bool) or not isinstance(native, (int, float)):
         return None
     f = float(native)
@@ -146,6 +148,8 @@ def extract_cf_var_meta(
     semantics = infer_variable_semantics(name, attrs, is_numeric=is_numeric)
     raw_nodata = attrs.get("_FillValue", attrs.get("missing_value"))
     native_nd = to_python_scalar(raw_nodata)
+    if isinstance(native_nd, (list, tuple)) and len(native_nd) == 1:
+        native_nd = to_python_scalar(native_nd[0])
     nodata = (
         native_nd
         if isinstance(native_nd, (int, float)) and not isinstance(native_nd, bool)
