@@ -372,3 +372,24 @@ async def test_worker_retry_backoff_fail_fast_isolation_and_cancellation(tmp_pat
         assert cancelled.error_category == "cancelled"
     finally:
         await engine.dispose()
+
+
+async def test_worker_maintenance_runs_expired_derived_lifecycle_sweep() -> None:
+    """Worker maintenance must request expired-derived cleanup, not only raw protection."""
+    calls: list[dict[str, object]] = []
+
+    class _RecordingLifecycle:
+        async def run_maintenance_cycle(self, **kwargs: object) -> None:
+            calls.append(kwargs)
+
+    now = datetime(2026, 7, 1, 12, 0, tzinfo=UTC)
+    runner = WorkerRunner(
+        service=object(),  # type: ignore[arg-type]
+        jobs=object(),  # type: ignore[arg-type]
+        lifecycle=_RecordingLifecycle(),  # type: ignore[arg-type]
+        clock=lambda: now,
+    )
+
+    await runner.run_maintenance()
+
+    assert calls == [{"dry_run": False, "include_expired_derived": True, "now": now}]

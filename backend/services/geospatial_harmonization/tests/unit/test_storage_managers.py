@@ -638,3 +638,101 @@ async def test_lifecycle_safety_mark_and_sweep_grace_dry_run_and_reconciliation(
         assert "super-secret-earthdata-token" not in policy_json
     finally:
         await engine.dispose()
+
+
+async def test_derived_retention_sweeps_expired_unreferenced_and_protects_raw(
+    tmp_path: Path,
+) -> None:
+    (
+        _settings,
+        store,
+        ledger,
+        zones,
+        _quota,
+        dedup,
+        lifecycle,
+        _monitoring,
+        engine,
+    ) = await _make_stack(
+        tmp_path,
+        ghs_storage_raw_retention_days=1,
+        ghs_storage_derived_retention_days=1,
+        ghs_storage_orphan_grace_seconds=30,
+    )
+    try:
+        now = datetime(2026, 7, 1, 12, 0, tzinfo=UTC)
+
+        raw_file = tmp_path / "retention_raw.bin"
+        raw_file.write_bytes(b"R" * 100)
+        raw_key = zones.raw_key("gpm", "3IMERGHH", "raw-ds-retention", "imerg.nc")
+        await dedup.store_or_deduplicate_file(
+            source_path=raw_file,
+            zone="raw",
+            object_key=raw_key,
+            ref=AssetReferenceLink(
+                object_key=raw_key,
+                ref_kind="dataset",
+                ref_owner_id="raw-ds-retention",
+                asset_id="raw-asset-retention",
+                provider="gpm",
+                product="3IMERGHH",
+                created_at=now,
+            ),
+            media_type="application/x-netcdf",
+            data_format="netcdf",
+            now=now,
+        )
+        await lifecycle.release_owner_references("dataset", "raw-ds-retention", now=now)
+
+        derived_file = tmp_path / "retention_derived.tif"
+        derived_file.write_bytes(b"D" * 100)
+        derived_key = zones.derived_key("res-retention", "ndvi.tif")
+        await dedup.store_or_deduplicate_file(
+            source_path=derived_file,
+            zone="derived",
+            object_key=derived_key,
+            ref=AssetReferenceLink(
+                object_key=derived_key,
+                ref_kind="result",
+                ref_owner_id="sci-res-retention",
+                asset_id="derived-asset-retention",
+                provider="internal",
+                product="NDVI",
+                created_at=now,
+            ),
+            media_type="image/tiff",
+            data_format="geotiff",
+            now=now,
+        )
+        await lifecycle.release_owner_references("result", "sci-res-retention", now=now)
+
+        raw_record = await ledger.get_object(raw_key)
+        derived_record = await ledger.get_object(derived_key)
+        assert raw_record is not None and raw_record.expires_at == now + timedelta(days=1)
+        assert derived_record is not None and derived_record.expires_at == now + timedelta(days=1)
+
+        after_expiry = now + timedelta(days=1, seconds=5)
+        first = await lifecycle.run_maintenance_cycle(
+            dry_run=False,
+            grace_seconds=30,
+            include_expired_derived=True,
+            now=after_expiry,
+        )
+        assert derived_key in first.orphans_marked
+        assert raw_key in first.skipped_protected
+        assert await store.exists(derived_key)
+        assert await store.exists(raw_key)
+
+        after_grace = after_expiry + timedelta(seconds=35)
+        second = await lifecycle.run_maintenance_cycle(
+            dry_run=False,
+            grace_seconds=30,
+            include_expired_derived=True,
+            now=after_grace,
+        )
+        assert derived_key in second.orphans_swept
+        assert raw_key in second.skipped_protected
+        assert not await store.exists(derived_key)
+        assert await store.exists(raw_key)
+    finally:
+        await engine.dispose()

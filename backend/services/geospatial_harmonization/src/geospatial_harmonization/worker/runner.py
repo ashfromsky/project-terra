@@ -68,7 +68,9 @@ class WorkerRunner:
             if expired:
                 logger.info("Reconciled %d expired storage reservations", len(expired))
         if self._lifecycle is not None:
-            await self._lifecycle.run_maintenance_cycle(dry_run=False, now=now)
+            await self._lifecycle.run_maintenance_cycle(
+                dry_run=False, include_expired_derived=True, now=now
+            )
         self._last_maintenance_at = now
 
     async def _maybe_run_maintenance(self) -> None:
