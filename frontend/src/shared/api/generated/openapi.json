@@ -187,10 +187,16 @@
           {
             "name": "state",
             "in": "query",
-            "required": true,
+            "required": false,
             "schema": {
-              "type": "string",
-              "minLength": 1,
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
               "title": "State"
             }
           },
@@ -201,8 +207,7 @@
             "schema": {
               "anyOf": [
                 {
-                  "type": "string",
-                  "minLength": 1
+                  "type": "string"
                 },
                 {
                   "type": "null"
@@ -1052,6 +1057,99 @@
         }
       }
     },
+    "/api/v1/layers/{layer_id}/tilejson.json": {
+      "get": {
+        "tags": [
+          "layers"
+        ],
+        "summary": "Get Layer Tilejson",
+        "description": "Return TileJSON 2.2.0 metadata for this layer.",
+        "operationId": "get_layer_tilejson_api_v1_layers__layer_id__tilejson_json_get",
+        "parameters": [
+          {
+            "name": "layer_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Layer Id"
+            }
+          },
+          {
+            "name": "timestamp",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Timestamp"
+            }
+          },
+          {
+            "name": "vmin",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Vmin"
+            }
+          },
+          {
+            "name": "vmax",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Vmax"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Get Layer Tilejson Api V1 Layers  Layer Id  Tilejson Json Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/layers/{layer_id}/render.png": {
       "get": {
         "tags": [
@@ -1273,6 +1371,376 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/LayerPointInspectionResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/tiles/{metric_id}/{date}/{z}/{x}/{y}.png": {
+      "get": {
+        "tags": [
+          "tiles"
+        ],
+        "summary": "Get Metric Tile",
+        "description": "Serve an XYZ RGBA PNG tile for the specified metric, date, and tile coordinates.",
+        "operationId": "get_metric_tile_api_v1_tiles__metric_id___date___z___x___y__png_get",
+        "parameters": [
+          {
+            "name": "metric_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Metric Id"
+            }
+          },
+          {
+            "name": "date",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Date"
+            }
+          },
+          {
+            "name": "z",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Z"
+            }
+          },
+          {
+            "name": "x",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "X"
+            }
+          },
+          {
+            "name": "y",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Y"
+            }
+          },
+          {
+            "name": "vmin",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Vmin"
+            }
+          },
+          {
+            "name": "vmax",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Vmax"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              },
+              "image/png": {}
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/tiles/{metric_id}/{date}/tilejson.json": {
+      "get": {
+        "tags": [
+          "tiles"
+        ],
+        "summary": "Get Metric Tilejson",
+        "description": "Generate TileJSON 2.2.0 metadata for the metric and date.",
+        "operationId": "get_metric_tilejson_api_v1_tiles__metric_id___date__tilejson_json_get",
+        "parameters": [
+          {
+            "name": "metric_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Metric Id"
+            }
+          },
+          {
+            "name": "date",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Date"
+            }
+          },
+          {
+            "name": "vmin",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Vmin"
+            }
+          },
+          {
+            "name": "vmax",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Vmax"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Get Metric Tilejson Api V1 Tiles  Metric Id   Date  Tilejson Json Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/analytics/zonal-statistics": {
+      "post": {
+        "tags": [
+          "analytics"
+        ],
+        "summary": "Compute Zonal Statistics",
+        "description": "Compute physical raster zonal statistics within a GeoJSON geometry or region.",
+        "operationId": "compute_zonal_statistics_api_v1_analytics_zonal_statistics_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ZonalStatisticsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ZonalStatisticsResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/analytics/zonal-statistics/timeseries": {
+      "post": {
+        "tags": [
+          "analytics"
+        ],
+        "summary": "Compute Zonal Timeseries Post",
+        "description": "Compute temporal time series of zonal statistics within a geometry or region.",
+        "operationId": "compute_zonal_timeseries_post_api_v1_analytics_zonal_statistics_timeseries_post",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ZonalTimeseriesRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ZonalTimeseriesResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "analytics"
+        ],
+        "summary": "Compute Zonal Timeseries Get",
+        "description": "Query temporal time series of zonal statistics for a saved region.",
+        "operationId": "compute_zonal_timeseries_get_api_v1_analytics_zonal_statistics_timeseries_get",
+        "parameters": [
+          {
+            "name": "metricId",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Metricid"
+            }
+          },
+          {
+            "name": "regionId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Regionid"
+            }
+          },
+          {
+            "name": "startDate",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Startdate"
+            }
+          },
+          {
+            "name": "endDate",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Enddate"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ZonalTimeseriesResponse"
                 }
               }
             }
@@ -6880,6 +7348,410 @@
         ],
         "title": "VariableComparisonSummary",
         "description": "Variable-level trend, resilience, and series mean deltas between two runs."
+      },
+      "ZonalHistogramResponse": {
+        "properties": {
+          "bins": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array",
+            "title": "Bins"
+          },
+          "counts": {
+            "items": {
+              "type": "integer"
+            },
+            "type": "array",
+            "title": "Counts"
+          }
+        },
+        "type": "object",
+        "required": [
+          "bins",
+          "counts"
+        ],
+        "title": "ZonalHistogramResponse"
+      },
+      "ZonalStatisticsRequest": {
+        "properties": {
+          "metricId": {
+            "type": "string",
+            "title": "Metricid"
+          },
+          "date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Date"
+          },
+          "geometry": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Geometry"
+          },
+          "regionId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Regionid"
+          }
+        },
+        "type": "object",
+        "required": [
+          "metricId"
+        ],
+        "title": "ZonalStatisticsRequest"
+      },
+      "ZonalStatisticsResponse": {
+        "properties": {
+          "metricId": {
+            "type": "string",
+            "title": "Metricid"
+          },
+          "date": {
+            "type": "string",
+            "title": "Date"
+          },
+          "datasetId": {
+            "type": "string",
+            "title": "Datasetid"
+          },
+          "mean": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mean"
+          },
+          "median": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Median"
+          },
+          "min": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Min"
+          },
+          "max": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max"
+          },
+          "std": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Std"
+          },
+          "q10": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Q10"
+          },
+          "q25": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Q25"
+          },
+          "q75": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Q75"
+          },
+          "q90": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Q90"
+          },
+          "validPixelCount": {
+            "type": "integer",
+            "title": "Validpixelcount"
+          },
+          "totalPixelCount": {
+            "type": "integer",
+            "title": "Totalpixelcount"
+          },
+          "validDataCoverage": {
+            "type": "number",
+            "title": "Validdatacoverage"
+          },
+          "approxAreaKm2": {
+            "type": "number",
+            "title": "Approxareakm2"
+          },
+          "units": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Units"
+          },
+          "histogram": {
+            "$ref": "#/components/schemas/ZonalHistogramResponse"
+          }
+        },
+        "type": "object",
+        "required": [
+          "metricId",
+          "date",
+          "datasetId",
+          "validPixelCount",
+          "totalPixelCount",
+          "validDataCoverage",
+          "approxAreaKm2",
+          "histogram"
+        ],
+        "title": "ZonalStatisticsResponse"
+      },
+      "ZonalTimeseriesPointResponse": {
+        "properties": {
+          "date": {
+            "type": "string",
+            "title": "Date"
+          },
+          "mean": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mean"
+          },
+          "median": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Median"
+          },
+          "min": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Min"
+          },
+          "max": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max"
+          },
+          "q25": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Q25"
+          },
+          "q75": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Q75"
+          },
+          "validDataCoverage": {
+            "type": "number",
+            "title": "Validdatacoverage"
+          }
+        },
+        "type": "object",
+        "required": [
+          "date",
+          "validDataCoverage"
+        ],
+        "title": "ZonalTimeseriesPointResponse"
+      },
+      "ZonalTimeseriesRequest": {
+        "properties": {
+          "metricId": {
+            "type": "string",
+            "title": "Metricid"
+          },
+          "geometry": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Geometry"
+          },
+          "regionId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Regionid"
+          },
+          "startDate": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Startdate"
+          },
+          "endDate": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Enddate"
+          }
+        },
+        "type": "object",
+        "required": [
+          "metricId"
+        ],
+        "title": "ZonalTimeseriesRequest"
+      },
+      "ZonalTimeseriesResponse": {
+        "properties": {
+          "metricId": {
+            "type": "string",
+            "title": "Metricid"
+          },
+          "units": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Units"
+          },
+          "series": {
+            "items": {
+              "$ref": "#/components/schemas/ZonalTimeseriesPointResponse"
+            },
+            "type": "array",
+            "title": "Series"
+          }
+        },
+        "type": "object",
+        "required": [
+          "metricId",
+          "series"
+        ],
+        "title": "ZonalTimeseriesResponse"
       }
     }
   }

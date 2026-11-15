@@ -68,3 +68,10 @@ export type PreparedDatasetSummaryResponse =
 export type IngestionOperationResponse = components['schemas']['IngestionOperationResponse']
 export type DatasetAssetDownloadUrlResponse =
   components['schemas']['DatasetAssetDownloadUrlResponse']
+
+export type ZonalHistogramResponse = components['schemas']['ZonalHistogramResponse']
+export type ZonalStatisticsRequest = components['schemas']['ZonalStatisticsRequest']
+export type ZonalStatisticsResponse = components['schemas']['ZonalStatisticsResponse']
+export type ZonalTimeseriesPointResponse = components['schemas']['ZonalTimeseriesPointResponse']
+export type ZonalTimeseriesRequest = components['schemas']['ZonalTimeseriesRequest']
+export type ZonalTimeseriesResponse = components['schemas']['ZonalTimeseriesResponse']

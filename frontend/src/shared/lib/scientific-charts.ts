@@ -190,3 +190,48 @@ export function buildComparisonOverlayChartOption(params: {
     ],
   }
 }
+
+export function buildHistogramChartOption(params: {
+  bins: number[]
+  counts: number[]
+  variableName: string
+  units?: string
+  color?: string
+}): EChartsCoreOption {
+  const labels = params.bins.map((b) => b.toFixed(2))
+  const unitSuffix = params.units ? ` (${params.units})` : ''
+  return {
+    animation: false,
+    tooltip: {
+      trigger: 'axis',
+    },
+    grid: {
+      left: 48,
+      right: 16,
+      top: 24,
+      bottom: 28,
+    },
+    xAxis: {
+      type: 'category',
+      data: labels,
+      axisLabel: { color: '#536e77', fontSize: 9, interval: 2 },
+      axisLine: { lineStyle: { color: '#dce6e9' } },
+    },
+    yAxis: {
+      type: 'value',
+      name: 'Pixels',
+      nameTextStyle: { color: '#536e77', fontSize: 9 },
+      axisLabel: { color: '#536e77', fontSize: 9 },
+      splitLine: { lineStyle: { color: '#eef3f5' } },
+    },
+    series: [
+      {
+        name: `${params.variableName}${unitSuffix}`,
+        type: 'bar',
+        data: params.counts,
+        barWidth: '85%',
+        itemStyle: { color: params.color ?? '#159b91' },
+      },
+    ],
+  }
+}
