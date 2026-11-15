@@ -133,11 +133,7 @@ export function WorldMap({ expandedCanvas = false }: WorldMapProps) {
 
       <MapLegendCard
         selectedVariable={selectedVariable}
-        selectedRegion={selectedRegion}
         activeLayer={activeLayer}
-        selectedCountry={selectedCountry}
-        hoveredCountry={hoveredCountry}
-        onClearSelectedCountry={() => setSelectedCountry(null)}
       />
     </>
   )

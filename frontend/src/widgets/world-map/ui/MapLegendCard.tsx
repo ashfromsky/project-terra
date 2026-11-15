@@ -1,38 +1,17 @@
-import { figmaAssets } from '../../../shared/config/assets'
-import type {
-  CountrySelectionSummary,
-  RegionOption,
-  VariableOption,
-} from '../../../shared/store/ui-store'
+import type { VariableOption } from '../../../shared/store/ui-store'
 import type { MapLayerDefinition } from '../../../shared/types/geospatial'
 import { THEMATIC_LAYER_METADATA } from '../config/map-style'
-import { formatCalloutReadout } from '../lib/use-region-interaction'
 
 export interface MapLegendCardProps {
   selectedVariable: VariableOption
-  selectedRegion: RegionOption
   activeLayer: MapLayerDefinition | null
-  selectedCountry: CountrySelectionSummary | null
-  hoveredCountry: CountrySelectionSummary | null
-  onClearSelectedCountry: () => void
 }
 
 export function MapLegendCard({
   selectedVariable,
-  selectedRegion,
   activeLayer,
-  selectedCountry,
-  hoveredCountry,
-  onClearSelectedCountry,
 }: MapLegendCardProps) {
   const legendMeta = THEMATIC_LAYER_METADATA[selectedVariable]
-  const activeCountry = hoveredCountry ?? selectedCountry
-  const callout = formatCalloutReadout(
-    selectedVariable,
-    activeLayer,
-    selectedRegion,
-    activeCountry,
-  )
 
   const dates = activeLayer?.availableDates ?? []
   const temporalSummary =
@@ -49,34 +28,6 @@ export function MapLegendCard({
 
   return (
     <>
-      <div className="earth-observatory__callout" data-node-id="5:236">
-        <div className="earth-observatory__callout-head">
-          <p className="earth-observatory__callout-title" data-node-id="5:237">
-            {callout.title}
-          </p>
-          {selectedCountry && (
-            <button
-              type="button"
-              className="earth-observatory__callout-clear"
-              onClick={onClearSelectedCountry}
-              aria-label="Clear selected country"
-            >
-              ×
-            </button>
-          )}
-        </div>
-        <p className="earth-observatory__callout-value" data-node-id="5:238">
-          {callout.valueLabel}
-        </p>
-        <p className="earth-observatory__callout-sig" data-node-id="5:239">
-          {callout.subtitleLabel}
-        </p>
-      </div>
-
-      <div className="earth-observatory__leader" data-node-id="5:240">
-        <img src={figmaAssets.selectedRegionLeader} alt="" />
-      </div>
-
       <div className="earth-observatory__legend" data-node-id="5:258">
         <p className="earth-observatory__legend-title" data-node-id="5:259">
           {activeLayer?.legend.title ?? legendMeta.shortTitle}

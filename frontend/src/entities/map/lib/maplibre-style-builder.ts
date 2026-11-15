@@ -21,7 +21,8 @@ export function resolveScienceRasterConfig(
   if (
     !activeLayer ||
     !activeLayer.visible ||
-    activeLayer.layer.availabilityStatus !== 'connected' ||
+    (activeLayer.layer.availabilityStatus !== 'connected' &&
+      activeLayer.layer.availabilityStatus !== 'preview') ||
     !activeLayer.layer.tileSource.isConnected
   ) {
     return null

@@ -15,7 +15,12 @@ export function InspectorPointTab({ activeLayer, catalogLoading }: InspectorPoin
   const inspectedPoint = useExploreStore((s) => s.inspectedPoint)
   const setInspectedPoint = useExploreStore((s) => s.setInspectedPoint)
 
-  const isConnected = activeLayer?.availabilityStatus === 'connected'
+  const isConnected = Boolean(
+    activeLayer &&
+      (activeLayer.availabilityStatus === 'connected' ||
+        activeLayer.availabilityStatus === 'preview') &&
+      activeLayer.tileSource.isConnected,
+  )
   const effectiveDate = resolveLayerEffectiveDate(activeLayer, selectedDate)
 
   const pointQuery = useQuery({
@@ -74,11 +79,19 @@ export function InspectorPointTab({ activeLayer, catalogLoading }: InspectorPoin
               <p>Connect to TERRA Core API to inspect raster pixels.</p>
             </div>
           ) : !isConnected ? (
-            <div className="explorer-status-banner is-unavailable">
-              <strong>Layer unavailable</strong>
+            <div
+              className={`explorer-status-banner ${
+                activeLayer.availabilityStatus === 'planned' ? 'is-planned' : 'is-unavailable'
+              }`}
+            >
+              <strong>
+                {activeLayer.availabilityStatus === 'planned'
+                  ? 'Planned layer'
+                  : 'Layer unavailable'}
+              </strong>
               <p>
                 {activeLayer.unavailableReason ??
-                  `${activeLayer.productId}.${activeLayer.productVersion} has no ingested COG raster available for point sampling.`}
+                  `${activeLayer.productId}.${activeLayer.productVersion} has no ingested raster available for point sampling.`}
               </p>
             </div>
           ) : pointQuery.isPending ? (
