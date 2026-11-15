@@ -164,3 +164,211 @@ async def test_worker_end_to_end_generic_geotiff_and_nasa_power(
         await runner.run_until_stopped(stop)
     finally:
         await engine.dispose()
+
+
+async def test_worker_retry_backoff_fail_fast_isolation_and_cancellation(tmp_path: Path) -> None:
+    from datetime import timedelta
+
+    import httpx
+
+    from geospatial_harmonization.domain.models.harmonization import HarmonizationJob
+    from geospatial_harmonization.handlers import HandlerRegistry
+    from geospatial_harmonization.handlers.modis import MODISHandler
+    from geospatial_harmonization.handlers.nasa_power import NASAPowerHandler
+    from geospatial_harmonization.infrastructure.storage import build_storage_port
+    from geospatial_harmonization.infrastructure.storage_ledger import (
+        SqlAlchemyStorageLedgerRepository,
+    )
+    from geospatial_harmonization.readers import build_default_reader_registry
+    from geospatial_harmonization.storage.dedup import ContentDeduplicationService
+    from geospatial_harmonization.storage.lifecycle import StorageLifecycleManager
+    from geospatial_harmonization.storage.quota import StorageQuotaManager
+    from geospatial_harmonization.storage.zones import StorageZoneManager
+
+    cfg = Settings(
+        _env_file=None,
+        environment="test",
+        database_url=f"sqlite+aiosqlite:///{tmp_path / 'worker_retry.db'}",
+        local_storage_dir=tmp_path / "store",
+        nasa_power_enabled=True,
+        modis_enabled=True,
+        http_max_retries=1,
+        http_retry_backoff_seconds=0.0,
+    )
+    engine = build_async_engine(cfg.database_url)
+    try:
+        async with engine.begin() as conn:
+            await conn.run_sync(GhsBase.metadata.create_all)
+        sessions = build_session_factory(engine)
+        datasets = SqlAlchemyDatasetRepository(sessions)
+        jobs = SqlAlchemyJobRepository(sessions)
+        ledger = SqlAlchemyStorageLedgerRepository(sessions)
+        t0 = datetime(2026, 7, 1, 12, 0, tzinfo=UTC)
+        await ledger.ensure_ledger_initialized(t0)
+        storage = build_storage_port(cfg)
+        zones = StorageZoneManager(cfg)
+        quota = StorageQuotaManager(ledger, storage, cfg)
+        dedup = ContentDeduplicationService(storage, ledger, zones, cfg)
+        lifecycle = StorageLifecycleManager(storage, ledger, zones, cfg)
+
+        readers = build_default_reader_registry()
+        sample_power = {
+            "properties": {"parameter": {"PRECTOTCORR": {"20260701": 4.2, "20260702": 0.0}}},
+            "geometry": {"coordinates": [30.0, 50.0, 120.0]},
+            "parameters": {"PRECTOTCORR": {"units": "mm/day", "longname": "Precipitation"}},
+            "header": {"fill_value": -999.0},
+        }
+        calls = {"transient": 0}
+
+        def _power_responder(_request: httpx.Request) -> httpx.Response:
+            calls["transient"] += 1
+            if calls["transient"] <= 2:
+                return httpx.Response(503, text="Upstream busy")
+            return httpx.Response(200, json=sample_power)
+
+        def _auth_fail_responder(_request: httpx.Request) -> httpx.Response:
+            return httpx.Response(401, text="Unauthorized")
+
+        reg = HandlerRegistry()
+        reg.register(
+            NASAPowerHandler(
+                settings=cfg,
+                transport=httpx.MockTransport(_power_responder),
+            )
+        )
+        reg.register(
+            MODISHandler(
+                settings=cfg,
+                reader_registry=readers,
+                transport=httpx.MockTransport(_auth_fail_responder),
+            )
+        )
+
+        service = HarmonizationService(
+            handlers=reg,
+            storage=storage,
+            datasets=datasets,
+            readers=readers,
+            settings=cfg,
+            ledger=ledger,
+            zones=zones,
+            quota=quota,
+            dedup=dedup,
+            lifecycle=lifecycle,
+        )
+        now_box = [t0]
+        runner = WorkerRunner(
+            service=service,
+            jobs=jobs,
+            retry_backoff_seconds=10.0,
+            quota=quota,
+            lifecycle=lifecycle,
+            clock=lambda: now_box[0],
+        )
+
+        auth_job = HarmonizationJob(
+            job_id=uuid4(),
+            plan=HarmonizationPlan(
+                plan_id=uuid4(),
+                provider="modis",
+                product="MOD13Q1.061",
+                request_payload={
+                    "product": "MOD13Q1.061",
+                    "start_time": "2026-07-01T00:00:00Z",
+                    "bbox": [30.0, 50.0, 31.0, 51.0],
+                },
+            ),
+            status="pending",
+            created_at=t0,
+            updated_at=t0,
+            max_attempts=3,
+        )
+        power_plan_a = HarmonizationPlan(
+            plan_id=uuid4(),
+            provider="nasa_power",
+            product="power_daily",
+            request_payload={
+                "product": "power_daily",
+                "mode": "point",
+                "latitude": 50.0,
+                "longitude": 30.0,
+                "start_date": "2026-07-01",
+                "end_date": "2026-07-02",
+                "parameters": ["PRECTOTCORR"],
+            },
+        )
+        power_plan_b = HarmonizationPlan(
+            plan_id=uuid4(),
+            provider="nasa_power",
+            product="power_daily",
+            request_payload=power_plan_a.request_payload,
+        )
+        assert power_plan_a.compute_idempotency_key() == power_plan_b.compute_idempotency_key()
+
+        power_job = HarmonizationJob(
+            job_id=uuid4(),
+            plan=power_plan_a,
+            status="pending",
+            created_at=t0 + timedelta(seconds=1),
+            updated_at=t0 + timedelta(seconds=1),
+            max_attempts=3,
+            idempotency_key=power_plan_a.compute_idempotency_key(),
+        )
+        await jobs.create(auth_job)
+        await jobs.create(power_job)
+
+        assert await runner.run_once() is True
+        auth_state = await jobs.get_by_id(auth_job.job_id)
+        assert auth_state is not None
+        assert auth_state.status == "failed"
+        assert auth_state.attempt == 1
+        assert auth_state.error_category == "authentication"
+
+        assert await runner.run_once() is True
+        transient_state = await jobs.get_by_id(power_job.job_id)
+        assert transient_state is not None
+        assert transient_state.status == "pending"
+        assert transient_state.error_category == "network"
+        assert transient_state.next_retry_at == t0 + timedelta(seconds=10)
+
+        now_box[0] = t0 + timedelta(seconds=5)
+        assert await runner.run_once() is False
+
+        now_box[0] = t0 + timedelta(seconds=11)
+        assert await runner.run_once() is True
+        succeeded = await jobs.get_by_id(power_job.job_id)
+        assert succeeded is not None
+        assert succeeded.status == "succeeded"
+        assert succeeded.progress_pct == 100
+        assert succeeded.dataset_id is not None
+
+        dup_result = await service.execute_plan(power_plan_b)
+        assert any("matches previously ingested dataset" in w for w in dup_result.warnings)
+
+        cancel_job = HarmonizationJob(
+            job_id=uuid4(),
+            plan=power_plan_b,
+            status="pending",
+            created_at=t0 + timedelta(seconds=20),
+            updated_at=t0 + timedelta(seconds=20),
+        )
+        await jobs.create(cancel_job)
+
+        class _CancellingService:
+            async def execute_plan(self, *_args: object, **_kwargs: object) -> object:
+                raise asyncio.CancelledError
+
+        cancel_runner = WorkerRunner(
+            service=_CancellingService(),  # type: ignore[arg-type]
+            jobs=jobs,
+            lifecycle=lifecycle,
+            clock=lambda: t0 + timedelta(seconds=21),
+        )
+        with pytest.raises(asyncio.CancelledError):
+            await cancel_runner.run_once()
+        cancelled = await jobs.get_by_id(cancel_job.job_id)
+        assert cancelled is not None
+        assert cancelled.status == "cancelled"
+        assert cancelled.error_category == "cancelled"
+    finally:
+        await engine.dispose()

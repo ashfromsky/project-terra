@@ -135,7 +135,88 @@ async def test_job_repository_claim_concurrency_lease_reclaim_and_retries(tmp_pa
         await repo.mark_succeeded(job2.job_id, ds_id, t0 + timedelta(minutes=5))
         done = await repo.get_by_id(job2.job_id)
         assert done is not None and done.status == "succeeded" and done.dataset_id == ds_id
+        assert done.progress_pct == 100
         with pytest.raises(LookupError):
             await repo.mark_succeeded(uuid4(), ds_id, t0)
+    finally:
+        await engine.dispose()
+
+
+async def test_job_repository_idempotency_backoff_nonretryable_and_cancel(tmp_path: Path) -> None:
+    engine = build_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'jobs_ext.db'}")
+    try:
+        async with engine.begin() as conn:
+            await conn.run_sync(GhsBase.metadata.create_all)
+        ds_repo = SqlAlchemyDatasetRepository(build_session_factory(engine))
+        repo = SqlAlchemyJobRepository(build_session_factory(engine))
+        t0 = datetime(2026, 7, 1, 12, 0, tzinfo=UTC)
+
+        ds = _sample_dataset("modis", t0)
+        await ds_repo.save(ds)
+        found_ds = await ds_repo.find_by_source("modis", "PROD1", ds.source_id)
+        assert found_ds is not None and found_ds.dataset_id == ds.dataset_id
+        assert await ds_repo.find_by_source("modis", "PROD1", "missing") is None
+
+        plan = _sample_job(t0).plan
+        idem_key = plan.compute_idempotency_key()
+        job = HarmonizationJob(
+            job_id=uuid4(),
+            plan=plan,
+            status="pending",
+            created_at=t0,
+            updated_at=t0,
+            max_attempts=3,
+            idempotency_key=idem_key,
+        )
+        await repo.create(job)
+        by_key = await repo.get_by_idempotency_key(idem_key)
+        assert by_key is not None and by_key.job_id == job.job_id
+
+        claimed = await repo.claim_next_pending("w1", 60, t0 + timedelta(seconds=1))
+        assert claimed is not None and claimed.attempt == 1
+        await repo.update_progress(job.job_id, 40, t0 + timedelta(seconds=2))
+        in_prog = await repo.get_by_id(job.job_id)
+        assert in_prog is not None and in_prog.progress_pct == 40
+
+        retry_at = t0 + timedelta(seconds=30)
+        await repo.mark_failed(
+            job.job_id,
+            "TransientTransferError: HTTP 503",
+            t0 + timedelta(seconds=5),
+            retryable=True,
+            error_category="network",
+            next_retry_at=retry_at,
+        )
+        assert await repo.claim_next_pending("w2", 60, t0 + timedelta(seconds=15)) is None
+        reclaimed = await repo.claim_next_pending("w2", 60, retry_at)
+        assert reclaimed is not None and reclaimed.attempt == 2
+
+        await repo.mark_failed(
+            job.job_id,
+            "ProviderAuthenticationError: HTTP 401",
+            retry_at + timedelta(seconds=1),
+            retryable=False,
+            error_category="authentication",
+        )
+        perm = await repo.get_by_id(job.job_id)
+        assert perm is not None
+        assert perm.status == "failed" and perm.error_category == "authentication"
+        assert await repo.claim_next_pending("w3", 60, retry_at + timedelta(seconds=10)) is None
+
+        job_cancel = HarmonizationJob(
+            job_id=uuid4(),
+            plan=plan,
+            status="pending",
+            created_at=t0 + timedelta(minutes=1),
+            updated_at=t0 + timedelta(minutes=1),
+        )
+        await repo.create(job_cancel)
+        cancelled = await repo.cancel(
+            job_cancel.job_id, t0 + timedelta(minutes=2), reason="User stop"
+        )
+        assert cancelled is not None and cancelled.status == "cancelled"
+        await repo.mark_succeeded(job_cancel.job_id, ds.dataset_id, t0 + timedelta(minutes=3))
+        still_cancelled = await repo.get_by_id(job_cancel.job_id)
+        assert still_cancelled is not None and still_cancelled.status == "cancelled"
     finally:
         await engine.dispose()

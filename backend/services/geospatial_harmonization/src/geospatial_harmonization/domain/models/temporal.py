@@ -29,10 +29,13 @@ class TemporalSpec:
     semantics: TemporalSemantics
     aggregation: TemporalAggregationKind = "none"
     composite_days: int | None = None
+    acquisition_timestamp: datetime | None = None
 
     def __post_init__(self) -> None:
         require_tz_aware(self.start, "start")
         require_tz_aware(self.end, "end")
+        if self.acquisition_timestamp is not None:
+            require_tz_aware(self.acquisition_timestamp, "acquisition_timestamp")
         if not self.cadence.strip():
             raise InvalidTemporalSpecError("cadence must be a non-empty string")
         if self.semantics == "instantaneous":

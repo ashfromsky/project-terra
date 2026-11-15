@@ -265,10 +265,19 @@ class TargetGridTransformer:
                 processing_steps=(step,),
             )
         )
+        target_res = (
+            f"{target_grid.resolution_x}x{target_grid.resolution_y} {target_grid.resolution_unit}"
+        )
         ext = {
             **ds.extensions,
             "source_dataset_id": str(ds.dataset_id),
             "target_grid_methods": dict(methods),
+            "resampling_metadata": {
+                "source_resolution": ds.spatial_metadata.spatial_resolution,
+                "target_resolution": target_res,
+                "algorithms_by_variable": dict(methods),
+                "categorical_nearest_enforced": True,
+            },
         }
         out_ds = dm.SpatialDataset(
             out_id,
@@ -277,11 +286,23 @@ class TargetGridTransformer:
             ds.product,
             out_vars,
             out_units,
-            dm.SpatialMetadata("raster", target_grid.crs, target_grid.bounds, target_grid),
+            dm.SpatialMetadata(
+                "raster",
+                target_grid.crs,
+                target_grid.bounds,
+                target_grid,
+                spatial_resolution=target_res,
+            ),
             ds.temporal_metadata,
-            replace(ds.quality_metadata, valid_observation_fraction=vf),
+            replace(
+                ds.quality_metadata,
+                valid_observation_fraction=vf,
+                missing_data_fraction=min(1.0, max(0.0, 1.0 - vf)),
+            ),
             tuple(out_assets),
             prov,
             ext,
+            product_version=ds.product_version,
+            granule_id=ds.granule_id,
         )
         return hm.TargetGridTransformResult(out_ds, target_grid, methods, qc, tuple(warnings))

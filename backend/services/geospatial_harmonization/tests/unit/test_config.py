@@ -44,3 +44,30 @@ def test_earthdata_token_is_masked_and_unknown_vars_ignored(
 def test_invalid_bounds_raise_validation_error() -> None:
     with pytest.raises(ValidationError):
         Settings(_env_file=None, http_timeout_seconds=-1.0)
+
+
+def test_provider_enable_flags_and_token_helpers(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("MODIS_ENABLED", "false")
+    monkeypatch.setenv("GPM_ENABLED", "true")
+    monkeypatch.setenv("SMAP_ENABLED", "false")
+    monkeypatch.setenv("NASA_POWER_ENABLED", "true")
+    monkeypatch.delenv("EARTHDATA_TOKEN", raising=False)
+
+    settings = Settings(_env_file=None, environment="test")
+
+    assert settings.is_provider_enabled("modis") is False
+    assert settings.is_provider_enabled("gpm_imerg") is True
+    assert settings.is_provider_enabled("gpm") is True
+    assert settings.is_provider_enabled("smap") is False
+    assert settings.is_provider_enabled("nasa_power") is True
+    assert settings.is_provider_enabled("generic") is False
+    assert settings.has_earthdata_token() is False
+
+    settings_with_creds = Settings(
+        _env_file=None,
+        environment="test",
+        earthdata_token="my-token",
+        generic_handler_allowed_hosts=["data.nasa.gov"],
+    )
+    assert settings_with_creds.has_earthdata_token() is True
+    assert settings_with_creds.is_provider_enabled("generic") is True
