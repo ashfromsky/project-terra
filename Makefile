@@ -6,6 +6,8 @@
 .PHONY: help contracts dev dev-ghs dev-full dev-check \
         frontend-install frontend-dev frontend-build frontend-typecheck frontend-lint frontend-test \
         backend-install backend-dev backend-test backend-lint \
+        scientific-install scientific-test scientific-lint \
+        worker-install worker-dev worker-test worker-lint \
         ghs-install ghs-api-dev ghs-worker-dev ghs-migrate ghs-test ghs-lint \
         test lint
 
@@ -57,6 +59,27 @@ backend-test: ## Run Core backend tests (pytest)
 backend-lint: ## Lint Core backend code (ruff check + format check)
 	cd backend/core && uv run ruff check . && uv run ruff format --check .
 
+scientific-install: ## Sync Scientific Core dependencies with uv
+	cd backend/scientific && uv sync --extra dev
+
+scientific-test: ## Run Scientific Core tests (pytest)
+	cd backend/scientific && uv run pytest
+
+scientific-lint: ## Lint and type-check Scientific Core (ruff + mypy)
+	cd backend/scientific && uv run ruff check . && uv run ruff format --check . && uv run mypy src
+
+worker-install: ## Sync Shared Core Worker dependencies with uv
+	cd backend/worker && uv sync --extra dev
+
+worker-dev: ## Start Shared Core Worker polling loop
+	cd backend/worker && uv run python -m terra_worker
+
+worker-test: ## Run Shared Core Worker tests (pytest)
+	cd backend/worker && uv run pytest
+
+worker-lint: ## Lint and type-check Shared Core Worker (ruff + mypy)
+	cd backend/worker && uv run ruff check . && uv run ruff format --check . && uv run mypy src
+
 ghs-install: ## Sync GHS dependencies with uv
 	cd backend/services/geospatial_harmonization && uv sync
 
@@ -75,6 +98,6 @@ ghs-test: ## Run GHS tests (pytest; PostgreSQL test skips unless GHS_TEST_POSTGR
 ghs-lint: ## Lint and type-check GHS (ruff + mypy)
 	cd backend/services/geospatial_harmonization && uv run ruff check . && uv run ruff format --check . && uv run mypy src
 
-test: backend-test frontend-test ## Run default tests (Core + Frontend; run `make ghs-test` for GHS)
+test: backend-test scientific-test worker-test frontend-test ## Run default tests (Core + Scientific + Worker + Frontend; run `make ghs-test` for GHS)
 
-lint: frontend-lint backend-lint ## Run default linters (Frontend + Core; run `make ghs-lint` for GHS)
+lint: frontend-lint backend-lint scientific-lint worker-lint ## Run default linters (Frontend + Core + Scientific + Worker; run `make ghs-lint` for GHS)

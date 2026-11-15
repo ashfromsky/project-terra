@@ -1,0 +1,56 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "terra-worker"
+version = "0.1.0"
+description = "Background scientific assessment worker for PROJECT TERRA"
+requires-python = ">=3.13"
+dependencies = [
+    "terra-core",
+    "terra-scientific",
+]
+
+[project.optional-dependencies]
+dev = [
+    "mypy>=1.14.0",
+    "pytest>=8.3.0",
+    "pytest-asyncio>=0.24.0",
+    "ruff>=0.8.0",
+]
+
+[project.scripts]
+terra-worker = "terra_worker.__main__:main"
+
+[tool.uv.sources]
+terra-core = { path = "../core", editable = true }
+terra-scientific = { path = "../scientific", editable = true }
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/terra_worker"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+pythonpath = ["src"]
+
+[tool.ruff]
+target-version = "py313"
+line-length = 100
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
+
+[tool.mypy]
+python_version = "3.13"
+strict = true
+warn_unused_configs = false
+warn_unreachable = true
+mypy_path = "src"
+
+[[tool.mypy.overrides]]
+module = ["terra.*", "terra_scientific.*"]
+ignore_missing_imports = true

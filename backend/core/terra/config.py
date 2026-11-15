@@ -37,6 +37,10 @@ class Settings(BaseSettings):
     database_echo: bool = False
     database_auto_create_tables: bool = True
 
+    ghs_base_url: str = "http://localhost:8100"
+    ghs_timeout_seconds: float = 15.0
+    scientific_artifact_dir: str | None = None
+
     github_client_id: str = ""
     github_client_secret: SecretStr = SecretStr("")
     github_redirect_uri: str = "http://localhost:8000/api/v1/auth/github/callback"
