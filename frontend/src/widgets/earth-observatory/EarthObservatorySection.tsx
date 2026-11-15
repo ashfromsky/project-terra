@@ -330,7 +330,7 @@ export function EarthObservatorySection() {
 
         <div className="earth-observatory__period-pill" data-node-id="5:220">
           <p className="earth-observatory__period-text" data-node-id="5:221">
-            NASA GIBS · {LIVE_GIBS_LAYERS.length} live layers · direct from the browser
+            NASA GIBS · {LIVE_GIBS_LAYERS.length} live layers
           </p>
         </div>
 
