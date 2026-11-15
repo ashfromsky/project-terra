@@ -11,10 +11,13 @@ Serve with Granian:
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from pathlib import Path
 from urllib.parse import urlsplit
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 
 from terra import __version__
 from terra.api.health import router as health_router
@@ -89,8 +92,37 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     app.include_router(health_router)
     app.include_router(api_router, prefix=settings.api_v1_prefix)
+    _mount_frontend(app, settings)
 
     return app
+
+
+def _mount_frontend(app: FastAPI, settings: Settings) -> None:
+    """Serve a built SPA from Core when FRONTEND_DIST_DIR is configured."""
+    if not settings.frontend_dist_dir:
+        return
+    dist_dir = Path(settings.frontend_dist_dir).expanduser().resolve()
+    index_path = dist_dir / "index.html"
+    if not index_path.is_file():
+        logger.warning("FRONTEND_DIST_DIR is set but index.html is missing: %s", dist_dir)
+        return
+    assets_dir = dist_dir / "assets"
+    if assets_dir.is_dir():
+        app.mount("/assets", StaticFiles(directory=assets_dir), name="frontend-assets")
+
+    @app.get("/{full_path:path}", include_in_schema=False)
+    async def frontend_fallback(full_path: str) -> FileResponse:
+        # Never turn an unknown API/health path into the SPA shell.
+        if full_path.startswith(("api/", "health")):
+            raise HTTPException(status_code=404, detail="Not Found")
+        candidate = (dist_dir / full_path).resolve()
+        try:
+            candidate.relative_to(dist_dir)
+        except ValueError:
+            raise HTTPException(status_code=404, detail="Not Found") from None
+        if candidate.is_file():
+            return FileResponse(candidate)
+        return FileResponse(index_path)
 
 
 app = create_app()
