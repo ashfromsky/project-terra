@@ -199,3 +199,98 @@ def test_local_artifact_dataset_loader_reads_json_series_and_npz_grid(tmp_path: 
     assert stack is not None
     assert stack.data.shape == (2, 4, 4)
     assert "pixel_reliability" in stack.qa_arrays
+
+
+def test_map_ghs_payload_resolves_aliases_pqi_milli_and_preserves_pre_scaled() -> None:
+    from terra_scientific.domain.enums import QaPolicyLevel
+    from terra_scientific.quality.validator import screen_dataset_variable
+
+    modis_payload: dict[str, object] = {
+        "dataset_id": "33333333-3333-3333-3333-333333333333",
+        "source_id": "modis_terra_vegetation",
+        "provider": "nasa_earthdata",
+        "product": "MOD13Q1.061",
+        "product_version": "061",
+        "variables": {
+            "250m 16 days NDVI": {
+                "name": "250m 16 days NDVI",
+                "units": "dimensionless",
+                "dtype": "float32",
+                "semantics": "continuous_intensive",
+                "nodata": -3000.0,
+                "scale_factor": 0.0001,
+                "valid_range": [-0.2, 1.0],
+                "attributes": {"is_scaled": False},
+            }
+        },
+        "spatial_metadata": {"crs": MODIS_SINUSOIDAL_WKT, "nominal_resolution_m": 250.0},
+        "temporal_metadata": {
+            "start": "2026-01-01T00:00:00Z",
+            "end": "2026-02-02T00:00:00Z",
+            "cadence": "sixteen_day",
+            "semantics": "composite",
+            "composite_days": 16,
+        },
+        "extensions": {
+            "time_series": {
+                "NDVI": {
+                    "timestamps": ["2026-01-01T00:00:00Z", "2026-01-17T00:00:00Z"],
+                    "values": [0.55, 0.62],
+                    "is_scaled": True,
+                    "qa_layers": {"pixel_reliability": [0, 0]},
+                }
+            }
+        },
+    }
+    modis_ds = map_ghs_dataset_payload(modis_payload)
+    assert "NDVI" in modis_ds.series
+    vals, summary = screen_dataset_variable(modis_ds, "NDVI", QaPolicyLevel.STANDARD)
+    assert vals.tolist() == [pytest.approx(0.55), pytest.approx(0.62)]
+    assert summary.valid_observations == 2
+
+    imerg_payload: dict[str, object] = {
+        "dataset_id": "44444444-4444-4444-4444-444444444444",
+        "source_id": "gpm_imerg",
+        "provider": "nasa_earthdata",
+        "product": "GPM_3IMERGHH.07",
+        "product_version": "07",
+        "variables": {
+            "Grid/precipitation": {
+                "name": "Grid/precipitation",
+                "units": "mm/hr",
+                "dtype": "float32",
+                "semantics": "continuous_extensive",
+                "nodata": -9999.9,
+            }
+        },
+        "spatial_metadata": {"crs": "EPSG:4326", "nominal_resolution_m": 11132.0},
+        "temporal_metadata": {
+            "start": "2026-07-10T00:00:00Z",
+            "end": "2026-07-10T01:00:00Z",
+            "cadence": "half_hourly",
+            "semantics": "interval",
+        },
+        "extensions": {
+            "run_type": "Final",
+            "time_series": {
+                "precipitation": {
+                    "timestamps": ["2026-07-10T00:00:00Z", "2026-07-10T00:30:00Z"],
+                    "values": [8.0, 5.0],
+                    "is_scaled": True,
+                    "qa_layers": {"precipitationQualityIndex": [0.85, 0.2]},
+                }
+            },
+        },
+    }
+    imerg_ds = map_ghs_dataset_payload(imerg_payload)
+    assert imerg_ds.series["precipitation"].qa_layers["pqi_milli"] == [850, 200]
+    imerg_vals_std, _ = screen_dataset_variable(imerg_ds, "precipitation", QaPolicyLevel.STANDARD)
+    assert imerg_vals_std[0] == pytest.approx(8.0)
+    assert imerg_vals_std[1] == pytest.approx(5.0)
+
+    imerg_vals, imerg_summary = screen_dataset_variable(
+        imerg_ds, "precipitation", QaPolicyLevel.STRICT
+    )
+    assert imerg_vals[0] == pytest.approx(8.0)
+    assert np.isnan(imerg_vals[1])
+    assert imerg_summary.filtered_by_qa == 1

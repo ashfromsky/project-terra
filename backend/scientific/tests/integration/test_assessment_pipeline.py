@@ -451,3 +451,201 @@ def test_pipeline_resilience_dimensions_ols_stability_and_bounded_recovery() -> 
     assert ndvi_res.sensitivity.value == top_pair.ols_slope
     assert abs((ndvi_res.sensitivity.value or 0.0) - (top_pair.pearson_r or 0.0)) > 0.05
     assert ndvi_res.sensitivity.unit == "dimensionless/mm/month"
+
+
+def test_end_to_end_pipeline_from_mapped_ghs_mod13_imerg_smap_nasa_power_payloads() -> None:
+    from terra_scientific.adapters.ghs import map_ghs_dataset_payload
+
+    rng = np.random.default_rng(77)
+    timestamps: list[str] = []
+    ndvi_vals: list[float] = []
+    ndvi_qa: list[int] = []
+    precip_vals: list[float] = []
+    pqi_vals: list[float] = []
+    smap_vals: list[float] = []
+    smap_qf: list[int] = []
+    smap_sf: list[int] = []
+    overpass_tags: list[str] = []
+    t2m_vals: list[float] = []
+
+    for year in range(2020, 2025):
+        for month in range(1, 13):
+            timestamps.append(datetime(year, month, 1, tzinfo=UTC).isoformat())
+            season = 0.14 * float(np.sin(2.0 * np.pi * (month - 1) / 12.0))
+            ndvi = 0.55 + season + float(rng.normal(0.0, 0.01))
+            if year == 2023 and month in {6, 7}:
+                ndvi -= 0.16
+            ndvi_vals.append(round(ndvi, 4))
+            ndvi_qa.append(0)
+            precip_vals.append(
+                round(45.0 + 15.0 * float(np.cos(2.0 * np.pi * (month - 1) / 12.0)), 2)
+            )
+            pqi_vals.append(0.9)
+            smap_vals.append(
+                round(0.26 + 0.04 * float(np.sin(2.0 * np.pi * (month - 1) / 12.0)), 3)
+            )
+            smap_qf.append(0)
+            smap_sf.append(0)
+            overpass_tags.append("AM")
+            t2m_vals.append(round(14.0 + 8.0 * float(np.sin(2.0 * np.pi * (month - 4) / 12.0)), 2))
+
+    common_temporal = {
+        "start": timestamps[0],
+        "end": timestamps[-1],
+        "cadence": "monthly",
+        "semantics": "interval",
+    }
+    mod13_ds = map_ghs_dataset_payload(
+        {
+            "dataset_id": "ghs-mod13",
+            "source_id": "modis_terra_vegetation",
+            "provider": "modis",
+            "product": "MOD13Q1.061",
+            "product_version": "061",
+            "variables": {
+                "250m 16 days NDVI": {
+                    "name": "250m 16 days NDVI",
+                    "units": "dimensionless",
+                    "dtype": "float32",
+                    "semantics": "continuous_intensive",
+                    "nodata": -3000.0,
+                }
+            },
+            "spatial_metadata": {"crs": MODIS_SINUSOIDAL_WKT, "nominal_resolution_m": 250.0},
+            "temporal_metadata": {
+                **common_temporal,
+                "semantics": "composite",
+                "composite_days": 16,
+            },
+            "extensions": {
+                "time_series": {
+                    "NDVI": {
+                        "timestamps": timestamps,
+                        "values": ndvi_vals,
+                        "is_scaled": True,
+                        "qa_layers": {"pixel_reliability": ndvi_qa},
+                    }
+                }
+            },
+        }
+    )
+    imerg_ds = map_ghs_dataset_payload(
+        {
+            "dataset_id": "ghs-imerg",
+            "source_id": "gpm_imerg",
+            "provider": "gpm_imerg",
+            "product": "GPM_3IMERGHH.07",
+            "product_version": "07",
+            "variables": {
+                "Grid/precipitation": {
+                    "name": "Grid/precipitation",
+                    "units": "mm",
+                    "dtype": "float32",
+                    "semantics": "continuous_extensive",
+                    "nodata": -9999.9,
+                }
+            },
+            "spatial_metadata": {"crs": "EPSG:4326", "nominal_resolution_m": 11132.0},
+            "temporal_metadata": common_temporal,
+            "extensions": {
+                "run_type": "Final",
+                "time_series": {
+                    "precipitation": {
+                        "timestamps": timestamps,
+                        "values": precip_vals,
+                        "is_scaled": True,
+                        "qa_layers": {"precipitationQualityIndex": pqi_vals},
+                    }
+                },
+            },
+        }
+    )
+    smap_ds = map_ghs_dataset_payload(
+        {
+            "dataset_id": "ghs-smap",
+            "source_id": "smap_spl3smp_e",
+            "provider": "smap",
+            "product": "SPL3SMP_E.006",
+            "product_version": "006",
+            "variables": {
+                "Soil_Moisture_Retrieval_Data_AM/soil_moisture": {
+                    "name": "Soil_Moisture_Retrieval_Data_AM/soil_moisture",
+                    "units": "cm^3/cm^3",
+                    "dtype": "float32",
+                    "semantics": "continuous_intensive",
+                    "nodata": -9999.0,
+                }
+            },
+            "spatial_metadata": {
+                "crs": "EPSG:6933",
+                "nominal_resolution_m": 9000.0,
+                "native_footprint_km": 36.0,
+            },
+            "temporal_metadata": {**common_temporal, "semantics": "composite", "composite_days": 1},
+            "extensions": {
+                "overpass_mode": "am_only",
+                "time_series": {
+                    "soil_moisture": {
+                        "timestamps": timestamps,
+                        "values": smap_vals,
+                        "is_scaled": True,
+                        "overpass_tags": overpass_tags,
+                        "qa_layers": {
+                            "retrieval_qual_flag": smap_qf,
+                            "surface_flag": smap_sf,
+                        },
+                    }
+                },
+            },
+        }
+    )
+    power_ds = map_ghs_dataset_payload(
+        {
+            "dataset_id": "ghs-power",
+            "source_id": "nasa_power",
+            "provider": "nasa_power",
+            "product": "NASA_POWER_DAILY",
+            "variables": {
+                "T2M": {
+                    "name": "T2M",
+                    "units": "C",
+                    "dtype": "float64",
+                    "semantics": "continuous_intensive",
+                    "nodata": -999.0,
+                }
+            },
+            "spatial_metadata": {"crs": "EPSG:4326", "nominal_resolution_m": 55500.0},
+            "temporal_metadata": common_temporal,
+            "extensions": {
+                "time_series": {
+                    "T2M": {
+                        "timestamps": timestamps,
+                        "values": t2m_vals,
+                        "is_scaled": True,
+                    }
+                }
+            },
+        }
+    )
+
+    req = AssessmentRequest(
+        request_id="ghs-e2e-integration",
+        analysis_start=datetime(2020, 1, 1, tzinfo=UTC),
+        analysis_end=datetime(2024, 12, 31, tzinfo=UTC),
+        target_cadence=TemporalCadence.MONTHLY,
+        qa_policy=QaPolicyLevel.STANDARD,
+        baseline=BaselineConfig(
+            baseline_type=BaselineType.FIXED_REFERENCE,
+            start=datetime(2020, 1, 1, tzinfo=UTC),
+            end=datetime(2022, 12, 31, tzinfo=UTC),
+            min_years_required=3,
+            min_samples_per_bin=3,
+        ),
+        spatial=SpatialConfig(region_name="Integration Basin", area_km2=500.0),
+    )
+    result = ScientificAssessmentService().run_assessment(
+        req, datasets=[mod13_ds, imerg_ds, smap_ds, power_ds]
+    )
+    assert result.status in {AssessmentStatus.COMPLETED, AssessmentStatus.COMPLETED_PARTIAL}
+    vars_done = {s.variable_name for s in result.resilience}
+    assert {"NDVI", "precipitation", "soil_moisture", "T2M"} <= vars_done
