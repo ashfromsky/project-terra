@@ -58,7 +58,14 @@ OBSERVATION_LAYERS: tuple[LayerDefinition, ...] = (
             nodata_label="NoData / QA masked",
             stops=VEGETATION_RAMP,
         ),
-        tile_source=MapTileSource("src-mod13q1-ndvi", "cog", None, "EPSG:4326", True, False),
+        tile_source=MapTileSource(
+            "src-mod13q1-ndvi",
+            "wmts",
+            "https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/MODIS_Terra_L3_NDVI_16Day/default/{time}/GoogleMapsCompatible_Level9/{z}/{y}/{x}.png",
+            "EPSG:4326",
+            False,
+            False,
+        ),
         is_synthetic_preview=False,
         preview_property_key=None,
         unavailable_reason=(
@@ -104,7 +111,14 @@ OBSERVATION_LAYERS: tuple[LayerDefinition, ...] = (
             nodata_label="NoData / QA masked",
             stops=EVI_RAMP,
         ),
-        tile_source=MapTileSource("src-mod13q1-evi", "cog", None, "EPSG:4326", True, False),
+        tile_source=MapTileSource(
+            "src-mod13q1-evi",
+            "wmts",
+            "https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/MODIS_Terra_L3_EVI_16Day/default/{time}/GoogleMapsCompatible_Level9/{z}/{y}/{x}.png",
+            "EPSG:4326",
+            False,
+            False,
+        ),
         is_synthetic_preview=False,
         preview_property_key=None,
         unavailable_reason=(
@@ -150,7 +164,14 @@ OBSERVATION_LAYERS: tuple[LayerDefinition, ...] = (
             nodata_label="Cloud / NoData",
             stops=THERMAL_ABS_RAMP,
         ),
-        tile_source=MapTileSource("src-mod11a2-lst", "cog", None, "EPSG:4326", True, False),
+        tile_source=MapTileSource(
+            "src-mod11a2-lst",
+            "wmts",
+            "https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/MODIS_Terra_Land_Surface_Temp_Day/default/{time}/GoogleMapsCompatible_Level7/{z}/{y}/{x}.png",
+            "EPSG:4326",
+            False,
+            False,
+        ),
         unavailable_reason=(
             "No ingested MOD11A2.061 daytime LST dataset found in storage. "
             "Ingest observations via Data Sources."
@@ -245,7 +266,14 @@ OBSERVATION_LAYERS: tuple[LayerDefinition, ...] = (
             nodata_label="NoData / High-latitude snow mask",
             stops=PRECIP_ANOMALY_RAMP,
         ),
-        tile_source=MapTileSource("src-gpm-imerg", "cog", None, "EPSG:4326", True, False),
+        tile_source=MapTileSource(
+            "src-gpm-imerg",
+            "wmts",
+            "https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/IMERG_Precipitation_Rate/default/{time}/GoogleMapsCompatible_Level6/{z}/{y}/{x}.png",
+            "EPSG:4326",
+            False,
+            False,
+        ),
         is_synthetic_preview=False,
         preview_property_key=None,
         unavailable_reason=(
@@ -297,7 +325,14 @@ OBSERVATION_LAYERS: tuple[LayerDefinition, ...] = (
             nodata_label="Frozen / Dense canopy / RFI masked",
             stops=SOIL_MOISTURE_RAMP,
         ),
-        tile_source=MapTileSource("src-smap-spl3smp-e", "cog", None, "EPSG:4326", True, False),
+        tile_source=MapTileSource(
+            "src-smap-spl3smp-e",
+            "wmts",
+            "https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/SMAP_L3_Passive_Enhanced_Day_Soil_Moisture/default/{time}/GoogleMapsCompatible_Level6/{z}/{y}/{x}.png",
+            "EPSG:4326",
+            False,
+            False,
+        ),
         unavailable_reason=(
             "No ingested SMAP SPL3SMP_E.006 soil moisture dataset found in storage. "
             "Ingest observations via Data Sources."

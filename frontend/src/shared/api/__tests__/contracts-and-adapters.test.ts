@@ -1090,6 +1090,26 @@ describe('assessments API adapters and result parser', () => {
     expect(
       resolveScienceRasterConfig({ ...plannedConfig, layer: plannedLayer }, '2024-06-01'),
     ).toBeNull()
+
+    const gibsLayer = {
+      ...baseLayer,
+      id: 'ndvi-mod13q1',
+      availabilityStatus: 'unavailable' as const,
+      tileSource: {
+        ...baseLayer.tileSource,
+        isConnected: false,
+        urlTemplate:
+          'https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/MODIS_Terra_L3_NDVI_16Day/default/{time}/GoogleMapsCompatible_Level9/{z}/{y}/{x}.png',
+      },
+    }
+    const gibsConfig = resolveLayerControlState(gibsLayer, undefined, gibsLayer.id)
+    const resolvedGibs = resolveScienceRasterConfig(
+      { ...gibsConfig, layer: gibsLayer },
+      '2024-06-01',
+    )
+    expect(resolvedGibs).not.toBeNull()
+    expect(resolvedGibs?.tileUrl).toContain('2024-06-01')
+    expect(resolvedGibs?.tileUrl).toContain('https://gibs.earthdata.nasa.gov')
   })
 
   it('calls assessment artifacts and prepared dataset download-url endpoints via typed client', async () => {
