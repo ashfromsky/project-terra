@@ -1,5 +1,5 @@
 import { spawn, spawnSync } from 'node:child_process'
-import { existsSync as fsExistsSync } from 'node:fs'
+import { existsSync as fsExistsSync, mkdirSync, readFileSync } from 'node:fs'
 import net from 'node:net'
 import path from 'node:path'
 
@@ -10,6 +10,46 @@ const DEFAULT_GHS_PORT = 8080
 const DEFAULT_FRONTEND_PORT = 5173
 const DEFAULT_READY_TIMEOUT_MS = 30_000
 const DEFAULT_SHUTDOWN_TIMEOUT_MS = 3_000
+
+export function parseDotEnvContent(content) {
+  const parsed = {}
+  for (const rawLine of content.split(/\r?\n/)) {
+    const line = rawLine.trim()
+    if (!line || line.startsWith('#')) {
+      continue
+    }
+    const eqIndex = line.indexOf('=')
+    if (eqIndex <= 0) {
+      continue
+    }
+    const key = line.slice(0, eqIndex).trim()
+    if (!key) {
+      continue
+    }
+    let value = line.slice(eqIndex + 1).trim()
+    if (
+      (value.startsWith('"') && value.endsWith('"')) ||
+      (value.startsWith("'") && value.endsWith("'"))
+    ) {
+      value = value.slice(1, -1)
+    }
+    parsed[key] = value
+  }
+  return parsed
+}
+
+export function loadEffectiveEnv(rootDir, baseEnv = process.env) {
+  const envPath = path.join(rootDir, '.env')
+  let fileEnv = {}
+  if (fsExistsSync(envPath)) {
+    try {
+      fileEnv = parseDotEnvContent(readFileSync(envPath, 'utf8'))
+    } catch {
+      fileEnv = {}
+    }
+  }
+  return { ...fileEnv, ...baseEnv }
+}
 
 function parsePort(raw, fallback, varName) {
   if (raw === undefined || raw === '') {
@@ -30,7 +70,25 @@ export function buildPresets(rootDir, env = process.env) {
   const frontendPortExplicit = Boolean(env.FRONTEND_PORT)
   const frontendPort = parsePort(env.FRONTEND_PORT, DEFAULT_FRONTEND_PORT, 'FRONTEND_PORT')
 
+  const dataDir = path.join(rootDir, '.data')
+  const coreDatabaseUrl = env.DATABASE_URL || `sqlite+aiosqlite:///${path.join(dataDir, 'terra.db')}`
+  const ghsDatabaseUrl = env.GHS_DATABASE_URL || `sqlite+aiosqlite:///${path.join(dataDir, 'ghs.db')}`
+  const scientificArtifactDir = env.SCIENTIFIC_ARTIFACT_DIR || path.join(dataDir, 'artifacts')
+  const localStorageDir = env.LOCAL_STORAGE_DIR || path.join(dataDir, 'ghs_storage')
+  const ghsBaseUrl = env.GHS_BASE_URL || `http://${ghsHost}:${ghsPort}`
+
+  const sharedCoreEnv = {
+    DATABASE_URL: coreDatabaseUrl,
+    GHS_BASE_URL: ghsBaseUrl,
+    SCIENTIFIC_ARTIFACT_DIR: scientificArtifactDir,
+  }
+  const sharedGhsEnv = {
+    GHS_DATABASE_URL: ghsDatabaseUrl,
+    LOCAL_STORAGE_DIR: localStorageDir,
+  }
+
   const coreDir = path.join(rootDir, 'backend', 'core')
+  const workerDir = path.join(rootDir, 'backend', 'worker')
   const frontendDir = path.join(rootDir, 'frontend')
   const ghsDir = path.join(rootDir, 'backend', 'services', 'geospatial_harmonization')
 
@@ -56,7 +114,22 @@ export function buildPresets(rootDir, env = process.env) {
       url: `http://${coreHost}:${corePort}`,
       healthUrl: `http://${coreHost}:${corePort}/health/ready`,
       livenessUrl: `http://${coreHost}:${corePort}/health`,
-      env: {},
+      dependsOn: [],
+      env: sharedCoreEnv,
+    },
+    'CORE-WORKER': {
+      name: 'CORE-WORKER',
+      description: 'Core Assessment Worker (terra-worker)',
+      cwd: workerDir,
+      command: 'uv',
+      args: ['run', 'python', '-m', 'terra_worker'],
+      host: null,
+      port: null,
+      url: null,
+      healthUrl: null,
+      livenessUrl: null,
+      dependsOn: ['CORE'],
+      env: sharedCoreEnv,
     },
     FRONTEND: {
       name: 'FRONTEND',
@@ -69,6 +142,7 @@ export function buildPresets(rootDir, env = process.env) {
       url: `http://localhost:${frontendPort}`,
       healthUrl: `http://localhost:${frontendPort}/`,
       livenessUrl: `http://localhost:${frontendPort}/`,
+      dependsOn: [],
       env: {
         VITE_API_PROXY_TARGET: env.VITE_API_PROXY_TARGET || `http://${coreHost}:${corePort}`,
       },
@@ -94,7 +168,8 @@ export function buildPresets(rootDir, env = process.env) {
       url: `http://${ghsHost}:${ghsPort}`,
       healthUrl: `http://${ghsHost}:${ghsPort}/ready`,
       livenessUrl: `http://${ghsHost}:${ghsPort}/health`,
-      env: {},
+      dependsOn: [],
+      env: sharedGhsEnv,
     },
     'GHS-WORKER': {
       name: 'GHS-WORKER',
@@ -107,7 +182,8 @@ export function buildPresets(rootDir, env = process.env) {
       url: null,
       healthUrl: null,
       livenessUrl: null,
-      env: {},
+      dependsOn: ['GHS'],
+      env: sharedGhsEnv,
     },
   }
 
@@ -115,7 +191,7 @@ export function buildPresets(rootDir, env = process.env) {
     dev: {
       name: 'dev',
       runContracts: true,
-      services: [services.CORE, services.FRONTEND],
+      services: [services.CORE, services['CORE-WORKER'], services.FRONTEND],
     },
     'dev-ghs': {
       name: 'dev-ghs',
@@ -125,7 +201,13 @@ export function buildPresets(rootDir, env = process.env) {
     'dev-full': {
       name: 'dev-full',
       runContracts: true,
-      services: [services.CORE, services.FRONTEND, services.GHS, services['GHS-WORKER']],
+      services: [
+        services.CORE,
+        services.GHS,
+        services['CORE-WORKER'],
+        services['GHS-WORKER'],
+        services.FRONTEND,
+      ],
     },
   }
 }
@@ -315,10 +397,14 @@ function defaultRegisterSignals(handler) {
 
 export async function runOrchestrator(presetName, options = {}) {
   const rootDir = options.rootDir ?? process.cwd()
-  const env = options.env ?? process.env
+  const env = options.env ?? loadEffectiveEnv(rootDir, process.env)
   const log = options.log ?? ((line) => console.log(line))
   const error = options.error ?? ((line) => console.error(line))
   const shutdownTimeoutMs = options.shutdownTimeoutMs ?? DEFAULT_SHUTDOWN_TIMEOUT_MS
+
+  if (!options.existsSync) {
+    mkdirSync(path.join(rootDir, '.data'), { recursive: true })
+  }
 
   const presets = buildPresets(rootDir, env)
   const preset = presets[presetName]
@@ -345,6 +431,7 @@ export async function runOrchestrator(presetName, options = {}) {
   const registerSignals = options.registerSignals ?? defaultRegisterSignals
 
   const activeChildren = new Map()
+  const readinessPromises = new Map()
   const streamPromises = []
   const readyAbort = new AbortController()
   let shutdownPromise = null
@@ -411,6 +498,19 @@ export async function runOrchestrator(presetName, options = {}) {
         throw new Error(`Attempted to start ${service.name} more than once.`)
       }
 
+      if (service.dependsOn && service.dependsOn.length > 0) {
+        const depWaits = service.dependsOn
+          .map((dep) => readinessPromises.get(dep))
+          .filter(Boolean)
+        if (depWaits.length > 0) {
+          await Promise.all(depWaits)
+        }
+      }
+
+      if (isShuttingDown || readyAbort.signal.aborted) {
+        break
+      }
+
       const child = spawnChild(service)
       let resolveExit
       const exitPromise = new Promise((resolve) => {
@@ -458,7 +558,7 @@ export async function runOrchestrator(presetName, options = {}) {
         }
       })
 
-      void waitForReady(service, { signal: readyAbort.signal })
+      const readyPromise = waitForReady(service, { signal: readyAbort.signal })
         .then(() => {
           if (!readyAbort.signal.aborted && !entry.exited) {
             const readyMsg = service.healthUrl
@@ -473,6 +573,7 @@ export async function runOrchestrator(presetName, options = {}) {
             void shutdown(`${service.name} failed readiness check`, 1)
           }
         })
+      readinessPromises.set(service.name, readyPromise)
     }
 
     await runDonePromise

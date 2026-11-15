@@ -48,7 +48,7 @@ jobs:
       - name: Run GHS PostgreSQL locking test
         env:
           GHS_TEST_POSTGRES_URL: postgresql+asyncpg://terra:terra_ci_password@127.0.0.1:5432/terra_ghs_test
-        run: cd backend/services/geospatial_harmonization && uv run pytest tests/test_postgres_locking.py
+        run: cd backend/services/geospatial_harmonization && uv run pytest tests/integration/test_postgres_locking.py
 
   ghs-live-nasa-smoke:
     name: GHS Live NASA Smoke Test
@@ -75,4 +75,4 @@ jobs:
         env:
           RUN_LIVE_NASA_TESTS: "1"
           EARTHDATA_TOKEN: ${{ secrets.EARTHDATA_TOKEN }}
-        run: cd backend/services/geospatial_harmonization && uv run pytest tests/test_nasa_live_smoke.py
+        run: cd backend/services/geospatial_harmonization && uv run pytest tests/live/test_nasa_live_smoke.py
