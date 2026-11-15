@@ -1,17 +1,22 @@
 import { useRef, useState } from 'react'
-import { Link } from 'react-router'
+import { Link, useNavigate } from 'react-router'
 import {
   buildGitHubLoginUrl,
   useCurrentUserQuery,
   useDevSessionLoginMutation,
 } from '../../../shared/api/auth'
-import { useRegionStatisticsQuery } from '../../../shared/api/regions'
+import { useZonalStatisticsQuery, useZonalTimeseriesQuery } from '../../../shared/api/analytics'
+import { toRegionGeometryInput } from '../../../shared/api/regions'
 import { useSystemInfoQuery } from '../../../shared/api/system'
 import { APP_ROUTES } from '../../../shared/config/routes'
 import {
   exportAoiGeoJsonFile,
   formatCoordinatePair,
 } from '../../../shared/lib/geojson-utils'
+import {
+  buildHistogramChartOption,
+  buildTimeSeriesChartOption,
+} from '../../../shared/lib/scientific-charts'
 import type { AoiFeature, AoiRole } from '../../../shared/types/geospatial'
 import {
   Check,
@@ -21,6 +26,8 @@ import {
   Trash2,
   X,
 } from '../../../shared/ui/explorer-icons'
+import { Chart } from '../../../shared/ui/chart'
+import { useAoiAssessmentRun } from '../model/use-aoi-assessment-run'
 import { useAoiWorkspace } from '../model/use-aoi-workspace'
 import { useExploreStore } from '../model/use-explore-store'
 
@@ -161,6 +168,7 @@ function AoiCard({
 }
 
 export function InspectorAoiTab() {
+  const [copiedStatus, setCopiedStatus] = useState<'coords' | 'bounds' | null>(null)
   const interactionMode = useExploreStore((s) => s.interactionMode)
   const setInteractionMode = useExploreStore((s) => s.setInteractionMode)
   const activeAoiRole = useExploreStore((s) => s.activeAoiRole)
@@ -191,12 +199,57 @@ export function InspectorAoiTab() {
     clearAois,
   } = useAoiWorkspace()
 
-  const statisticsQuery = useRegionStatisticsQuery(
-    selectedAoi?.properties.id ?? null,
-    isAuthenticated && Boolean(selectedAoi),
-  )
+  const primaryLayerId = useExploreStore((s) => s.primaryLayerId)
+  const selectedDate = useExploreStore((s) => s.selectedDate)
+
+  const zonalStatsQuery = useZonalStatisticsQuery({
+    metricId: primaryLayerId,
+    date: selectedDate,
+    geometry: selectedAoi ? toRegionGeometryInput(selectedAoi.geometry) : undefined,
+    regionId: isAuthenticated ? selectedAoi?.properties.id : undefined,
+    enabled: Boolean(selectedAoi),
+    cacheKey: selectedAoi ? `${selectedAoi.properties.id}-${selectedDate}` : undefined,
+  })
+
+  const timeseriesQuery = useZonalTimeseriesQuery({
+    metricId: primaryLayerId,
+    geometry: selectedAoi ? toRegionGeometryInput(selectedAoi.geometry) : undefined,
+    regionId: isAuthenticated ? selectedAoi?.properties.id : undefined,
+    enabled: Boolean(selectedAoi),
+    cacheKey: selectedAoi?.properties.id,
+  })
 
   const isDrawing = interactionMode === 'draw-polygon' || interactionMode === 'draw-rectangle'
+
+  const navigate = useNavigate()
+  const analysisStart = useExploreStore((s) => s.analysisStart)
+  const analysisEnd = useExploreStore((s) => s.analysisEnd)
+  const setAnalysisPeriod = useExploreStore((s) => s.setAnalysisPeriod)
+  const [includeVegetation, setIncludeVegetation] = useState(false)
+  const [includeSoilMoisture, setIncludeSoilMoisture] = useState(false)
+  const assessmentRun = useAoiAssessmentRun()
+  const isSubmitting =
+    assessmentRun.phase === 'provisioning' || assessmentRun.phase === 'submitting'
+
+  const handleRunAssessment = async () => {
+    if (!selectedAoi || !isAuthenticated) return
+    const result = await assessmentRun.run({
+      regionId: selectedAoi.properties.id,
+      aoiName: selectedAoi.properties.name,
+      analysisStart,
+      analysisEnd,
+      includeVegetation,
+      includeSoilMoisture,
+    })
+    if (!result) return
+    const params = new URLSearchParams({
+      assessmentId: result.assessment.id,
+      regionId: selectedAoi.properties.id,
+      start: analysisStart,
+      end: analysisEnd,
+    })
+    navigate(`${APP_ROUTES.assessments}?${params.toString()}`)
+  }
 
   return (
     <div className="explorer-inspector-stack" role="tabpanel">
@@ -349,72 +402,281 @@ export function InspectorAoiTab() {
             ))}
           </div>
 
-          {selectedAoi && isAuthenticated && (
-            <div className="explorer-inspector-card">
-              <span className="explorer-overline">Region Geometry &amp; Statistics</span>
-              {statisticsQuery.isPending ? (
-                <p className="explorer-muted-copy">Loading region statistics…</p>
-              ) : statisticsQuery.isError ? (
-                <div className="explorer-status-banner is-error" role="alert">
-                  <strong>Statistics unavailable</strong>
-                  <p>{statisticsQuery.error.message}</p>
+          {selectedAoi && (
+            <>
+              <div className="explorer-inspector-card">
+                <span className="explorer-overline">Region Geometry &amp; Boundaries</span>
+                <dl className="explorer-kv-list explorer-kv-list--dense">
+                  <div>
+                    <dt>Source CRS</dt>
+                    <dd>{selectedAoi.properties.sourceCrs}</dd>
+                  </div>
+                  <div>
+                    <dt>Area (WGS 84)</dt>
+                    <dd>{selectedAoi.properties.approxAreaKm2.toLocaleString()} km²</dd>
+                  </div>
+                  <div>
+                    <dt>Centroid</dt>
+                    <dd>
+                      {formatCoordinatePair(
+                        selectedAoi.properties.centroid[0],
+                        selectedAoi.properties.centroid[1],
+                      )}
+                    </dd>
+                  </div>
+                </dl>
+                <div className="explorer-draw-guide__actions" style={{ marginTop: '8px' }}>
                   <button
                     type="button"
-                    className="explorer-inline-reset"
-                    onClick={() => void statisticsQuery.refetch()}
+                    className="explorer-action-btn"
+                    onClick={() => {
+                      const text = JSON.stringify(selectedAoi.geometry)
+                      void navigator.clipboard.writeText(text)
+                      setCopiedStatus('coords')
+                      setTimeout(() => setCopiedStatus(null), 2000)
+                    }}
                   >
-                    Retry
+                    <span>{copiedStatus === 'coords' ? 'Coordinates Copied!' : 'Copy Coordinates (WGS 84)'}</span>
+                  </button>
+                  <button
+                    type="button"
+                    className="explorer-action-btn"
+                    onClick={() => {
+                      const text = JSON.stringify(selectedAoi.properties.bbox)
+                      void navigator.clipboard.writeText(text)
+                      setCopiedStatus('bounds')
+                      setTimeout(() => setCopiedStatus(null), 2000)
+                    }}
+                  >
+                    <span>{copiedStatus === 'bounds' ? 'Bounds Copied!' : 'Copy Bounds'}</span>
                   </button>
                 </div>
-              ) : statisticsQuery.data ? (
-                <>
-                  <dl className="explorer-kv-list explorer-kv-list--dense">
-                    <div>
-                      <dt>Vertices / Polygons</dt>
-                      <dd>
-                        {statisticsQuery.data.vertexCount} / {statisticsQuery.data.polygonCount}
-                      </dd>
-                    </div>
-                    <div>
-                      <dt>Area (EPSG:4326)</dt>
-                      <dd>{statisticsQuery.data.approxAreaKm2.toLocaleString()} km²</dd>
-                    </div>
-                    <div>
-                      <dt>Available metrics</dt>
-                      <dd>{statisticsQuery.data.availableMetrics.join(', ')}</dd>
-                    </div>
-                  </dl>
-                  <div className="explorer-status-banner is-unavailable">
-                    <strong>Zonal environmental metrics ({statisticsQuery.data.observationStatus})</strong>
-                    <p>{statisticsQuery.data.message}</p>
-                  </div>
-                  <div className="explorer-aoi-footer">
-                    <Link
-                      to={`${APP_ROUTES.dataSources}?regionId=${encodeURIComponent(selectedAoi.properties.id)}`}
-                      className="explorer-action-btn explorer-action-btn--primary"
-                    >
-                      Ingest Satellite Data
-                    </Link>
-                    <Link
-                      to={`${APP_ROUTES.assessments}?regionId=${encodeURIComponent(selectedAoi.properties.id)}`}
-                      className="explorer-action-btn"
-                    >
-                      Run Scientific Assessment
-                    </Link>
-                  </div>
-                </>
-              ) : null}
-            </div>
-          )}
+              </div>
 
-          {selectedAoi && !isAuthenticated && (
-            <div className="explorer-status-banner is-unavailable">
-              <strong>Zonal aggregation not connected</strong>
-              <p>
-                Regional zonal statistics for &ldquo;{selectedAoi.properties.name}&rdquo; require
-                backend dataset ingestion. Geometric properties above are computed in EPSG:4326.
-              </p>
-            </div>
+              <div className="explorer-inspector-card">
+                <span className="explorer-overline">Scientific Assessment</span>
+                <p className="explorer-muted-copy">
+                  Provision bounded real observations for this AOI, then queue the existing
+                  Scientific Core assessment in terra-worker.
+                </p>
+                <div className="explorer-analysis-grid">
+                  <label className="explorer-analysis-field" htmlFor="aoi-analysis-start">
+                    <span>Analysis start</span>
+                    <input
+                      id="aoi-analysis-start"
+                      type="date"
+                      value={analysisStart}
+                      onChange={(e) => setAnalysisPeriod(e.target.value, analysisEnd)}
+                    />
+                  </label>
+                  <label className="explorer-analysis-field" htmlFor="aoi-analysis-end">
+                    <span>Analysis end</span>
+                    <input
+                      id="aoi-analysis-end"
+                      type="date"
+                      value={analysisEnd}
+                      onChange={(e) => setAnalysisPeriod(analysisStart, e.target.value)}
+                    />
+                  </label>
+                </div>
+                <div className="explorer-analysis-toggles">
+                  <label>
+                    <input
+                      type="checkbox"
+                      checked={includeVegetation}
+                      onChange={(e) => setIncludeVegetation(e.target.checked)}
+                    />
+                    <span>Vegetation (MODIS)</span>
+                  </label>
+                  <label>
+                    <input
+                      type="checkbox"
+                      checked={includeSoilMoisture}
+                      onChange={(e) => setIncludeSoilMoisture(e.target.checked)}
+                    />
+                    <span>Soil moisture (SMAP)</span>
+                  </label>
+                </div>
+                <p className="explorer-resolution-note">
+                  Climate uses NASA POWER (MERRA-2 / CERES). Optional MODIS or SMAP domains
+                  ingest bounded granules and can take several minutes.
+                </p>
+                <button
+                  type="button"
+                  className="explorer-action-btn explorer-action-btn--primary"
+                  disabled={!isAuthenticated || isSubmitting}
+                  onClick={() => void handleRunAssessment()}
+                >
+                  {assessmentRun.phase === 'provisioning'
+                    ? 'Provisioning real observations…'
+                    : assessmentRun.phase === 'submitting'
+                      ? 'Queuing Scientific Core…'
+                      : 'Provision Data & Run Assessment'}
+                </button>
+                {!isAuthenticated ? (
+                  <p className="explorer-resolution-note">
+                    Sign in to persist this AOI and submit a scientific assessment.
+                  </p>
+                ) : null}
+                {assessmentRun.phase === 'provisioning' ? (
+                  <div className="explorer-status-banner" role="status" aria-live="polite">
+                    <strong>Contacting GHS providers</strong>
+                    <p>
+                      Discovering and retrieving bounded observations for this AOI and period.
+                    </p>
+                  </div>
+                ) : null}
+                {assessmentRun.phase === 'submitting' ? (
+                  <div className="explorer-status-banner" role="status" aria-live="polite">
+                    <strong>Observations ready</strong>
+                    <p>
+                      {assessmentRun.provision?.datasetIds?.length ?? 0} prepared dataset(s)
+                      linked. Queuing the scientific assessment.
+                    </p>
+                  </div>
+                ) : null}
+                {assessmentRun.error ? (
+                  <div className="explorer-status-banner is-error" role="alert">
+                    <strong>Assessment submission failed</strong>
+                    <p>{assessmentRun.error}</p>
+                    {assessmentRun.provision &&
+                    (assessmentRun.provision.steps?.length ?? 0) > 0 ? (
+                      <ul className="explorer-provision-steps">
+                        {(assessmentRun.provision.steps ?? []).map((step, index) => (
+                          <li key={`${step.domain}-${step.provider}-${index}`}>
+                            <strong>{step.domain}</strong> · {step.provider} / {step.product} ·{' '}
+                            {step.status} — {step.detail}
+                          </li>
+                        ))}
+                      </ul>
+                    ) : null}
+                    <button
+                      type="button"
+                      className="explorer-inline-reset"
+                      onClick={assessmentRun.reset}
+                    >
+                      Dismiss
+                    </button>
+                  </div>
+                ) : null}
+              </div>
+
+              <div className="explorer-inspector-card">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="explorer-overline">Physical Zonal Statistics</span>
+                  <span className="text-xs px-2 py-0.5 rounded bg-emerald-950/40 text-emerald-300 font-mono">
+                    {selectedDate}
+                  </span>
+                </div>
+                {zonalStatsQuery.isPending ? (
+                  <p className="explorer-muted-copy">Computing physical raster statistics from COG assets…</p>
+                ) : zonalStatsQuery.isError ? (
+                  <div className="explorer-status-banner is-error" role="alert">
+                    <strong>Zonal aggregation unavailable</strong>
+                    <p>{zonalStatsQuery.error.message}</p>
+                    <button
+                      type="button"
+                      className="explorer-inline-reset"
+                      onClick={() => void zonalStatsQuery.refetch()}
+                    >
+                      Retry
+                    </button>
+                  </div>
+                ) : zonalStatsQuery.data ? (
+                  <>
+                    <dl className="explorer-kv-list explorer-kv-list--dense">
+                      <div>
+                        <dt>Mean</dt>
+                        <dd className="font-semibold text-emerald-400">
+                          {zonalStatsQuery.data.mean != null
+                            ? `${zonalStatsQuery.data.mean.toFixed(3)} ${zonalStatsQuery.data.units ?? ''}`
+                            : 'N/A'}
+                        </dd>
+                      </div>
+                      <div>
+                        <dt>Median</dt>
+                        <dd>
+                          {zonalStatsQuery.data.median != null
+                            ? `${zonalStatsQuery.data.median.toFixed(3)} ${zonalStatsQuery.data.units ?? ''}`
+                            : 'N/A'}
+                        </dd>
+                      </div>
+                      <div>
+                        <dt>Min / Max</dt>
+                        <dd>
+                          {zonalStatsQuery.data.min != null && zonalStatsQuery.data.max != null
+                            ? `[${zonalStatsQuery.data.min.toFixed(2)}, ${zonalStatsQuery.data.max.toFixed(2)}]`
+                            : 'N/A'}
+                        </dd>
+                      </div>
+                      <div>
+                        <dt>Std Deviation</dt>
+                        <dd>
+                          {zonalStatsQuery.data.std != null
+                            ? zonalStatsQuery.data.std.toFixed(3)
+                            : 'N/A'}
+                        </dd>
+                      </div>
+                      <div>
+                        <dt>P10 / P90</dt>
+                        <dd>
+                          {zonalStatsQuery.data.q10 != null && zonalStatsQuery.data.q90 != null
+                            ? `${zonalStatsQuery.data.q10.toFixed(2)} / ${zonalStatsQuery.data.q90.toFixed(2)}`
+                            : 'N/A'}
+                        </dd>
+                      </div>
+                      <div>
+                        <dt>Valid Coverage</dt>
+                        <dd>
+                          {(zonalStatsQuery.data.validDataCoverage * 100).toFixed(1)}% (
+                          {zonalStatsQuery.data.validPixelCount.toLocaleString()} px)
+                        </dd>
+                      </div>
+                    </dl>
+
+                    {zonalStatsQuery.data.histogram.counts.length > 0 && (
+                      <div className="mt-3 pt-2 border-t border-slate-700/50">
+                        <span className="explorer-overline mb-1 block">Pixel Value Distribution</span>
+                        <Chart
+                          className="w-full h-32"
+                          option={buildHistogramChartOption({
+                            bins: zonalStatsQuery.data.histogram.bins,
+                            counts: zonalStatsQuery.data.histogram.counts,
+                            variableName: primaryLayerId,
+                            units: zonalStatsQuery.data.units ?? undefined,
+                          })}
+                        />
+                      </div>
+                    )}
+
+                    {timeseriesQuery.data && timeseriesQuery.data.series.length > 1 && (
+                      <div className="mt-3 pt-2 border-t border-slate-700/50">
+                        <span className="explorer-overline mb-1 block">Temporal Observation Trend</span>
+                        <Chart
+                          className="w-full h-36"
+                          option={buildTimeSeriesChartOption({
+                            title: `${primaryLayerId} Multi-temporal`,
+                            variableName: primaryLayerId,
+                            units: timeseriesQuery.data.units ?? undefined,
+                            timestamps: timeseriesQuery.data.series.map((s) => s.date),
+                            values: timeseriesQuery.data.series.map((s) => s.mean ?? null),
+                          })}
+                        />
+                      </div>
+                    )}
+
+                    <div className="explorer-aoi-footer">
+                      <Link
+                        to={`${APP_ROUTES.dataSources}?regionId=${encodeURIComponent(selectedAoi.properties.id)}`}
+                        className="explorer-action-btn"
+                      >
+                        Inspect Data Ingestion
+                      </Link>
+                    </div>
+                  </>
+                ) : null}
+              </div>
+            </>
           )}
 
           <div className="explorer-aoi-footer">

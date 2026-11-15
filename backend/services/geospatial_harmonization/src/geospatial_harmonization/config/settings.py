@@ -69,12 +69,17 @@ class Settings(BaseSettings):
     storage_backend: StorageBackend = "local"
     local_storage_dir: Path = Path("./.ghs_storage")
     s3_bucket: str | None = None
+    s3_prefix: str = ""
     s3_endpoint_url: str | None = None
     s3_region: str = "us-east-1"
     s3_access_key_id: SecretStr | None = None
     s3_secret_access_key: SecretStr | None = None
     aws_access_key_id: SecretStr | None = None
     aws_secret_access_key: SecretStr | None = None
+    s3_presign_ttl_seconds: int = Field(default=300, ge=30, le=86_400)
+    s3_connect_timeout_seconds: float = Field(default=10.0, gt=0.0, le=120.0)
+    s3_read_timeout_seconds: float = Field(default=60.0, gt=0.0, le=600.0)
+    s3_max_attempts: int = Field(default=4, ge=1, le=10)
     _init_database_url_provided: bool = PrivateAttr(default=False)
 
     def __init__(self, **data: Any) -> None:

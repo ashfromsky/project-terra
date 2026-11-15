@@ -88,7 +88,52 @@ function checkWorkerImport(cwd, moduleName) {
   }
 }
 
-export async function runDoctor({ rootDir, env: overrideEnv, hasCommand = defaultHasCommand, checkPort = checkPortAvailable, probeDb = probeTcpEndpoint } = {}) {
+function validateS3EndpointUrl(endpointUrl, bucketName) {
+  if (!endpointUrl || !endpointUrl.trim()) {
+    return { valid: true, warning: 'S3_ENDPOINT_URL omitted (defaulting to standard AWS endpoint)' }
+  }
+  let parsed
+  try {
+    parsed = new URL(endpointUrl.trim())
+  } catch {
+    return { valid: false, error: 'S3_ENDPOINT_URL is not a valid URL' }
+  }
+  if (!['http:', 'https:'].includes(parsed.protocol)) {
+    return { valid: false, error: `unsupported scheme '${parsed.protocol}' in S3_ENDPOINT_URL` }
+  }
+  const cleanPath = parsed.pathname.replace(/^\/+|\/+$/g, '')
+  if (cleanPath && bucketName && cleanPath.toLowerCase() === bucketName.trim().toLowerCase()) {
+    return {
+      valid: false,
+      error: `S3_ENDPOINT_URL must not include '/${bucketName.trim()}' bucket path suffix (use account-level endpoint)`,
+    }
+  }
+  return { valid: true, endpoint: `${parsed.origin}${cleanPath ? `/${cleanPath}` : ''}` }
+}
+
+function defaultProbeS3Storage(coreDir, env) {
+  const pyCode = [
+    'import asyncio, sys',
+    'from terra.config import Settings',
+    'from terra.infrastructure.object_storage import build_core_object_storage',
+    's = Settings(_env_file=None)',
+    'store = build_core_object_storage(s)',
+    'ok = asyncio.run(store.check_health())',
+    'sys.exit(0 if ok else 1)',
+  ].join('; ')
+  const res = spawnSync('uv', ['run', 'python', '-c', pyCode], {
+    cwd: coreDir,
+    env: { ...process.env, ...env },
+    encoding: 'utf8',
+    timeout: 15_000,
+  })
+  return {
+    ok: res.status === 0,
+    error: res.status === 0 ? null : (res.stderr || res.stdout || `exit ${res.status}`).trim().slice(0, 160),
+  }
+}
+
+export async function runDoctor({ rootDir, env: overrideEnv, hasCommand = defaultHasCommand, checkPort = checkPortAvailable, probeDb = probeTcpEndpoint, probeStorage } = {}) {
   const resolvedRoot = rootDir ?? path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
   const env = overrideEnv ?? loadEffectiveEnv(resolvedRoot, process.env)
   const presets = buildPresets(resolvedRoot, env)
@@ -200,10 +245,6 @@ export async function runDoctor({ rootDir, env: overrideEnv, hasCommand = defaul
   const hasGithubOauth = Boolean(
     env.GITHUB_CLIENT_ID && env.GITHUB_CLIENT_ID.trim().length > 0 && env.GITHUB_CLIENT_SECRET && env.GITHUB_CLIENT_SECRET.trim().length > 0,
   )
-  const storageBackend = env.STORAGE_BACKEND || 'local'
-  const hasS3Bucket = Boolean(env.S3_BUCKET && env.S3_BUCKET.trim().length > 0)
-  const hasAwsKeys = Boolean(env.AWS_ACCESS_KEY_ID && env.AWS_SECRET_ACCESS_KEY)
-
   record(
     'creds:earthdata',
     hasEarthdata ? 'pass' : 'warn',
@@ -214,13 +255,48 @@ export async function runDoctor({ rootDir, env: overrideEnv, hasCommand = defaul
     hasGithubOauth ? 'pass' : 'warn',
     hasGithubOauth ? 'configured' : 'not configured (dev session available in development environment)',
   )
+  const storageBackend = (env.STORAGE_BACKEND || 'local').trim().toLowerCase()
+  const hasS3Bucket = Boolean(env.S3_BUCKET && env.S3_BUCKET.trim().length > 0)
+  const accessKey = env.S3_ACCESS_KEY_ID || env.AWS_ACCESS_KEY_ID || ''
+  const secretKey = env.S3_SECRET_ACCESS_KEY || env.AWS_SECRET_ACCESS_KEY || ''
+  const hasAwsKeys = Boolean(accessKey.trim() && secretKey.trim())
+  const endpointCheck = validateS3EndpointUrl(env.S3_ENDPOINT_URL || '', env.S3_BUCKET || '')
+
+  if (!endpointCheck.valid) {
+    record('creds:s3_endpoint', 'fail', endpointCheck.error)
+  } else if (storageBackend === 's3') {
+    record(
+      'creds:s3_endpoint',
+      env.S3_ENDPOINT_URL ? 'pass' : 'warn',
+      endpointCheck.endpoint ?? endpointCheck.warning,
+    )
+  }
+
   record(
     'creds:storage',
-    storageBackend === 'local' || (hasS3Bucket && hasAwsKeys) ? 'pass' : 'fail',
+    storageBackend === 'local' || (hasS3Bucket && hasAwsKeys && endpointCheck.valid) ? 'pass' : 'fail',
     storageBackend === 'local'
       ? 'local filesystem backend'
-      : `s3 backend (bucket=${hasS3Bucket ? 'set' : 'missing'}, keys=${hasAwsKeys ? 'configured' : 'missing'})`,
+      : `s3 backend (bucket=${hasS3Bucket ? 'set' : 'missing'}, keys=${hasAwsKeys ? 'configured' : 'missing'}, region=${env.S3_REGION || 'auto'})`,
   )
+
+  if (storageBackend === 's3' && hasS3Bucket && hasAwsKeys && endpointCheck.valid) {
+    const storageProbeFn =
+      probeStorage ??
+      (coreWorkerService && existsSync(path.join(resolvedRoot, 'backend/core'))
+        ? (probeEnv) => defaultProbeS3Storage(path.join(resolvedRoot, 'backend/core'), probeEnv)
+        : null)
+    if (storageProbeFn) {
+      const storageProbe = await storageProbeFn(env)
+      record(
+        'storage:s3_bucket',
+        storageProbe.ok ? 'pass' : 'fail',
+        storageProbe.ok
+          ? `R2/S3 bucket reachable (${env.S3_BUCKET})`
+          : `R2/S3 bucket check failed: ${storageProbe.error || 'HeadBucket error'}`,
+      )
+    }
+  }
 
   return { ok: !hasFailures, checks }
 }

@@ -2,20 +2,49 @@
 
 import asyncio
 import hashlib
+import logging
 import os
 import tempfile
 from collections.abc import Callable
+from contextlib import suppress
 from datetime import UTC, datetime, timedelta
 from pathlib import Path, PurePosixPath
 from typing import Any, Protocol, cast
+from urllib.parse import urlsplit, urlunsplit
 
 import boto3
+from botocore.config import Config as BotoConfig
 
 from geospatial_harmonization.config.settings import Settings
-from geospatial_harmonization.domain.exceptions import StorageIntegrityError
+from geospatial_harmonization.domain.exceptions import (
+    StorageIntegrityError,
+    scratch_capacity_error_from_oserror,
+)
 from geospatial_harmonization.domain.models.dataset import AssetReference, DataFormat
 from geospatial_harmonization.domain.models.storage import StoredObjectInfo
 from geospatial_harmonization.domain.ports import StoragePort
+
+logger = logging.getLogger(__name__)
+
+
+def normalize_s3_endpoint_url(endpoint_url: str | None, bucket: str | None = None) -> str | None:
+    """Normalize custom S3/R2 endpoint URL and strip accidental trailing bucket path."""
+    if endpoint_url is None:
+        return None
+    cleaned = endpoint_url.strip().rstrip("/")
+    if not cleaned:
+        return None
+    parsed = urlsplit(cleaned)
+    path = parsed.path.rstrip("/")
+    if bucket and path == f"/{bucket.strip()}":
+        logger.warning(
+            "Stripping trailing bucket segment '/%s' from s3_endpoint_url; "
+            "configure S3_ENDPOINT_URL without the bucket path.",
+            bucket.strip(),
+        )
+        path = ""
+    return urlunsplit((parsed.scheme, parsed.netloc, path, "", ""))
+
 
 _EXT_TO_FORMAT: dict[str, DataFormat] = {
     ".tif": "geotiff",
@@ -72,6 +101,12 @@ def _write_bytes_atomic(dest: Path, data: bytes) -> str:
         with os.fdopen(fd, "wb") as handle:
             handle.write(data)
         os.replace(tmp_name, dest)
+    except OSError as exc:
+        Path(tmp_name).unlink(missing_ok=True)
+        capacity = scratch_capacity_error_from_oserror(exc)
+        if capacity is not None:
+            raise capacity from exc
+        raise
     except BaseException:
         Path(tmp_name).unlink(missing_ok=True)
         raise
@@ -125,6 +160,12 @@ def _copy_file_atomic(
                 f"SHA-256 mismatch for '{src}': expected {expected_sha256}, got {digest}"
             )
         os.replace(tmp_name, dst_resolved)
+    except OSError as exc:
+        Path(tmp_name).unlink(missing_ok=True)
+        capacity = scratch_capacity_error_from_oserror(exc)
+        if capacity is not None:
+            raise capacity from exc
+        raise
     except BaseException:
         Path(tmp_name).unlink(missing_ok=True)
         raise
@@ -354,6 +395,31 @@ class LocalObjectStore:
             _cleanup_abandoned_in_dirs, dirs, older_than_seconds=older_than_seconds
         )
 
+    async def check_health(self) -> bool:
+        """Verify local storage root exists and is writable."""
+
+        def _probe() -> bool:
+            try:
+                self._root.mkdir(parents=True, exist_ok=True)
+                with tempfile.NamedTemporaryFile(dir=self._root, prefix=".health-", delete=True):
+                    return True
+            except OSError:
+                return False
+
+        return await asyncio.to_thread(_probe)
+
+    async def generate_presigned_download_url(
+        self,
+        key: str,
+        *,
+        expires_in: int = 300,
+        filename: str | None = None,
+        media_type: str | None = None,
+    ) -> str | None:
+        """Local filesystem store does not issue remote presigned URLs."""
+        _ = (key, expires_in, filename, media_type)
+        return None
+
 
 class S3ClientProtocol(Protocol):
     """Minimal structural subset of a boto3 S3 client used by S3ObjectStore."""
@@ -474,18 +540,32 @@ class S3ObjectStore:
         client: S3ClientProtocol | None = None,
         temp_dirs: tuple[Path, ...] = (),
         multipart_threshold_bytes: int = _MULTIPART_MIN_PART_SIZE,
+        connect_timeout_seconds: float = 10.0,
+        read_timeout_seconds: float = 60.0,
+        max_attempts: int = 4,
     ) -> None:
         if not bucket.strip():
             raise ValueError("S3 bucket name must be non-empty")
         self._bucket = bucket.strip()
         clean_prefix = prefix.strip("/")
         self._prefix = normalize_object_key(clean_prefix) if clean_prefix else ""
+        normalized_endpoint = normalize_s3_endpoint_url(endpoint_url, self._bucket)
+        self._endpoint_url = normalized_endpoint
+        self._region_name = (region_name or "auto").strip() or "auto"
         if client is not None:
             self._client = client
         else:
+            boto_cfg = BotoConfig(
+                signature_version="s3v4",
+                s3={"addressing_style": "path"},
+                retries={"max_attempts": max(1, max_attempts), "mode": "standard"},
+                connect_timeout=max(1.0, connect_timeout_seconds),
+                read_timeout=max(1.0, read_timeout_seconds),
+            )
             client_kwargs: dict[str, Any] = {
-                "endpoint_url": endpoint_url,
-                "region_name": region_name,
+                "endpoint_url": normalized_endpoint,
+                "region_name": self._region_name,
+                "config": boto_cfg,
             }
             if aws_access_key_id:
                 client_kwargs["aws_access_key_id"] = aws_access_key_id
@@ -593,7 +673,8 @@ class S3ObjectStore:
                 )
                 return
             except BaseException:
-                abort_mp(Bucket=self._bucket, Key=obj_key, UploadId=upload_id)
+                with suppress(Exception):
+                    abort_mp(Bucket=self._bucket, Key=obj_key, UploadId=upload_id)
                 raise
 
         upload_fileobj = getattr(self._client, "upload_fileobj", None)
@@ -800,6 +881,55 @@ class S3ObjectStore:
             _cleanup_abandoned_in_dirs, self._temp_dirs, older_than_seconds=older_than_seconds
         )
 
+    async def check_health(self) -> bool:
+        """Probe S3/R2 bucket accessibility via HeadBucket without mutating objects."""
+        head_bucket = getattr(self._client, "head_bucket", None)
+        if not callable(head_bucket):
+            return True
+
+        def _probe() -> bool:
+            try:
+                head_bucket(Bucket=self._bucket)
+                return True
+            except Exception as exc:
+                logger.warning("S3/R2 bucket health check failed for '%s': %s", self._bucket, exc)
+                return False
+
+        return await asyncio.to_thread(_probe)
+
+    async def generate_presigned_download_url(
+        self,
+        key: str,
+        *,
+        expires_in: int = 300,
+        filename: str | None = None,
+        media_type: str | None = None,
+    ) -> str | None:
+        """Generate a short-lived SigV4 presigned GET URL for private S3/R2 objects."""
+        presign = getattr(self._client, "generate_presigned_url", None)
+        if not callable(presign):
+            return None
+        norm, obj_key = self._object_key(key)
+        safe_name = PurePosixPath(filename or norm).name or "download.bin"
+        params: dict[str, Any] = {
+            "Bucket": self._bucket,
+            "Key": obj_key,
+            "ResponseContentDisposition": f'attachment; filename="{safe_name}"',
+        }
+        if media_type:
+            params["ResponseContentType"] = media_type
+
+        def _sign() -> str:
+            return str(
+                presign(
+                    "get_object",
+                    Params=params,
+                    ExpiresIn=max(30, min(int(expires_in), 86_400)),
+                )
+            )
+
+        return await asyncio.to_thread(_sign)
+
 
 def build_storage_port(settings: Settings) -> StoragePort:
     """Instantiate configured StoragePort adapter from service Settings."""
@@ -812,9 +942,13 @@ def build_storage_port(settings: Settings) -> StoragePort:
         raise ValueError("s3_bucket must be configured when storage_backend='s3'")
     return S3ObjectStore(
         settings.s3_bucket,
+        prefix=settings.s3_prefix,
         endpoint_url=settings.s3_endpoint_url,
         region_name=settings.s3_region,
         aws_access_key_id=settings.effective_s3_access_key_id(),
         aws_secret_access_key=settings.effective_s3_secret_access_key(),
         temp_dirs=temp_dirs,
+        connect_timeout_seconds=settings.s3_connect_timeout_seconds,
+        read_timeout_seconds=settings.s3_read_timeout_seconds,
+        max_attempts=settings.s3_max_attempts,
     )

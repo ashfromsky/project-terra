@@ -20,6 +20,7 @@ from geospatial_harmonization.domain.models.storage import CompressionPolicy
 from geospatial_harmonization.readers import ReaderRegistry, build_default_reader_registry
 from geospatial_harmonization.storage.compression import policy_from_settings
 from geospatial_harmonization.storage.dedup import compute_file_sha256
+from geospatial_harmonization.storage.scratch import scratch_base_dir
 from geospatial_harmonization.transformations._warp import (
     WarpedVariable,
     check_upsampling_warning,
@@ -170,7 +171,9 @@ class TargetGridTransformer:
         decoded_map, warnings = self._decode_variables(ds, selected, target_grid)
 
         out_id = uuid4()
-        base_dir = self._output_dir or Path(tempfile.mkdtemp(prefix="ghs_transform_"))
+        base_dir = self._output_dir or Path(
+            tempfile.mkdtemp(prefix="ghs_transform_", dir=scratch_base_dir())
+        )
         run_dir = base_dir / str(out_id)
 
         methods: dict[str, hm.ResamplingMethod] = {}

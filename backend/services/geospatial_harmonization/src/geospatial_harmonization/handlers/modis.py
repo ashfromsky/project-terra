@@ -1,7 +1,6 @@
 """MODIS handler (MOD13Q1.061, MOD11A2.061) with Sinusoidal CRS and bitmask QA screening."""
 
 import asyncio
-import tempfile
 from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
@@ -41,10 +40,12 @@ from geospatial_harmonization.handlers.base import (
     gather_bounded_granules,
     parse_handler_payload,
     safe_fetch_to_file,
+    select_representative_granules,
     validate_wgs84_bbox,
 )
 from geospatial_harmonization.handlers.catalog import DiscoveryResult
 from geospatial_harmonization.readers import ReaderRegistry, build_default_reader_registry
+from geospatial_harmonization.storage.scratch import run_with_owned_base_dir
 
 MODIS_SINUSOIDAL_WKT = CRS.from_proj4(
     "+proj=sinu +lon_0=0 +x_0=0 +y_0=0 +R=6371007.181 +units=m +no_defs"
@@ -362,7 +363,7 @@ class MODISPayload(BaseModel):
     bbox: tuple[float, float, float, float] | None = None
     start_time: datetime
     end_time: datetime | None = None
-    max_granules: int = Field(default=12, ge=1, le=64)
+    max_granules: int = Field(default=12, ge=1, le=256)
     max_concurrency: int = Field(default=3, ge=1, le=8)
     data_format: DataFormat = "hdf4"
     variables: tuple[str, ...] | None = None
@@ -438,6 +439,17 @@ class MODISHandler:
 
     async def handle_payload(self, payload: Mapping[str, object]) -> SpatialDataset:
         """Download MODIS granule batch via CMR/Earthdata, apply QA screening, and build dataset."""
+        return await run_with_owned_base_dir(
+            lambda base_dir: self._handle_payload(payload, base_dir),
+            settings=self._settings,
+            prefix="ghs_modis_",
+            raw_dir=self._raw_dir,
+        )
+
+    async def _handle_payload(
+        self, payload: Mapping[str, object], base_dir: Path
+    ) -> SpatialDataset:
+        """Download MODIS granules into ``base_dir``, apply QA screening, build dataset."""
         if not self._settings.is_provider_enabled(self.provider):
             raise ProviderDisabledError(
                 "MODIS provider is disabled by configuration (MODIS_ENABLED=false)",
@@ -456,6 +468,10 @@ class MODISHandler:
                 explicit_urls.append(raw_u)
 
         targets: list[tuple[int, str, CmrGranule | None]] = []
+        selection_meta: dict[str, Any] = {
+            "discovered_count": len(explicit_urls),
+            "selection_strategy": "explicit_urls",
+        }
         if explicit_urls:
             for idx, target_url in enumerate(explicit_urls[: req.max_granules]):
                 targets.append((idx, target_url, None))
@@ -473,19 +489,20 @@ class MODISHandler:
                 (".hdf", ".tif", ".tiff"),
                 bbox=req.bbox,
                 headers=None,
-                page_size=max(req.max_granules * 2, 5),
+                page_size=min(max(req.max_granules * 4, 200), 2000),
+                max_pages=5,
+                stratify_target=req.max_granules,
                 timeout=self._timeout,
                 max_retries=self._max_retries,
                 backoff_seconds=self._backoff_seconds,
                 transport=self._transport,
                 require_https=True,
             )
-            ordered_granules = sorted(
-                granules, key=lambda g: (g.time_start or t0, g.producer_granule_id)
-            )[: req.max_granules]
+            ordered_granules, selection_meta = select_representative_granules(
+                granules, req.max_granules, window_start=t0
+            )
             targets = [(idx, g.data_url, g) for idx, g in enumerate(ordered_granules)]
 
-        base_dir = self._raw_dir or Path(tempfile.mkdtemp(prefix="ghs_modis_"))
         is_batch = len(targets) > 1
 
         async def _ingest_one(item: tuple[int, str, CmrGranule | None]) -> _ModisGranuleOutcome:
@@ -832,6 +849,7 @@ class MODISHandler:
                     "partial_failures": partial_failures,
                     "granule_ids": [item.granule_id for item in outcomes],
                     "bbox_applied": list(req.bbox) if req.bbox is not None else None,
+                    **selection_meta,
                 },
             },
         )

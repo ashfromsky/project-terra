@@ -15,6 +15,7 @@ import { ExplorerTopToolbar } from '../../features/map-explorer/ui/ExplorerTopTo
 import { InspectorPanel } from '../../features/map-explorer/ui/InspectorPanel'
 import { LayerCatalogSidebar } from '../../features/map-explorer/ui/LayerCatalogSidebar'
 import { TemporalLegendBar } from '../../features/map-explorer/ui/TemporalLegendBar'
+import { buildGibsMapLayer, findLiveLayer } from '../../shared/config/live-environment'
 import { resolveLayerEffectiveDate, useLayerCatalogQuery } from '../../shared/api/layers'
 import { PROJECTION_REGISTRY } from '../../shared/config/geospatial'
 import { formatCoordinatePair } from '../../shared/lib/geojson-utils'
@@ -74,16 +75,35 @@ export function MapExplorerWorkspace() {
 
   const catalogQuery = useLayerCatalogQuery()
   const layers = catalogQuery.data ?? []
-  const activeLayer = layers.find((layer) => layer.id === primaryLayerId) ?? layers[0] ?? null
-  const activeLayerControl = activeLayer
-    ? resolveLayerControlState(activeLayer, layerStates[activeLayer.id], primaryLayerId)
-    : null
+  const gibsLayerId = useExploreStore((s) => s.gibsLayerId)
+  const gibsDate = useExploreStore((s) => s.gibsDate)
+  const liveLayer = findLiveLayer(gibsLayerId)
+  const liveMapLayer = useMemo(
+    () => (liveLayer ? buildGibsMapLayer(liveLayer, gibsDate) : null),
+    [gibsDate, liveLayer],
+  )
+  const catalogLayer = layers.find((layer) => layer.id === primaryLayerId) ?? layers[0] ?? null
+  const activeLayer = liveMapLayer ?? catalogLayer
+  const activeLayerControl = useMemo(
+    () =>
+      liveMapLayer
+        ? {
+            visible: true,
+            opacity: 0.8,
+            minValue: liveMapLayer.valueRange.defaultMin,
+            maxValue: liveMapLayer.valueRange.defaultMax,
+          }
+        : activeLayer
+          ? resolveLayerControlState(activeLayer, layerStates[activeLayer.id], primaryLayerId)
+          : null,
+    [activeLayer, layerStates, liveMapLayer, primaryLayerId],
+  )
 
   const { aois, selectedAoi, completeDraftAoi } = useAoiWorkspace()
   const selectedAoiId = selectedAoi?.properties.id ?? null
 
   useEffect(() => {
-    if (!activeLayer || activeLayer.availabilityStatus !== 'connected') {
+    if (liveMapLayer || !activeLayer || activeLayer.availabilityStatus !== 'connected') {
       return
     }
     const availableDates = activeLayer.availableDates ?? []
@@ -94,7 +114,7 @@ export function MapExplorerWorkspace() {
     if (snapped && snapped !== selectedDate) {
       setSelectedDate(snapped)
     }
-  }, [activeLayer, selectedDate, setSelectedDate])
+  }, [activeLayer, liveMapLayer, selectedDate, setSelectedDate])
 
   const renderState = useMemo<MapRenderState>(
     () => ({

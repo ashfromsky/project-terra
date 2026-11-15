@@ -1,4 +1,5 @@
 import { LAYER_GROUPS } from '../../../entities/layer/model/layer-catalog'
+import { LiveLayerCatalog } from '../../live-environment/ui/LiveLayerCatalog'
 import { useLayerCatalogQuery } from '../../../shared/api/layers'
 import type { DataAvailabilityStatus, MapLayerDefinition } from '../../../shared/types/geospatial'
 import {
@@ -18,10 +19,10 @@ function getStatusBadgeMeta(layer: MapLayerDefinition): {
     return { label: 'Experimental', toneClass: 'is-experimental' }
   }
   const map: Record<DataAvailabilityStatus, { label: string; toneClass: string }> = {
-    connected: { label: 'Connected', toneClass: 'is-connected' },
-    preview: { label: 'Unavailable', toneClass: 'is-unavailable' },
-    planned: { label: 'Unavailable', toneClass: 'is-unavailable' },
-    unavailable: { label: 'Unavailable', toneClass: 'is-unavailable' },
+    connected: { label: 'Live Preview', toneClass: 'is-connected' },
+    preview: { label: 'AOI Analysis', toneClass: 'is-preview' },
+    planned: { label: 'Planned', toneClass: 'is-planned' },
+    unavailable: { label: 'AOI Analysis', toneClass: 'is-unavailable' },
   }
   return map[layer.availabilityStatus]
 }
@@ -85,6 +86,8 @@ export function LayerCatalogSidebar({ onZoomToBbox }: LayerCatalogSidebarProps) 
       </div>
 
       <div className="explorer-sidebar__scroll">
+        <LiveLayerCatalog />
+
         <section className="explorer-sidebar-section" aria-label="Cartographic overlays">
           <h3 className="explorer-group-heading">Reference Cartography</h3>
           <div className="explorer-overlay-grid">

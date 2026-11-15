@@ -1,0 +1,206 @@
+name: Production Deploy
+
+on:
+  push:
+    branches:
+      - deploy
+  workflow_dispatch:
+
+concurrency:
+  group: production-deploy
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  # ----------------------------------------------------------------------------
+  # 1. Verify Deployment Secrets & Infrastructure Readiness
+  # ----------------------------------------------------------------------------
+  verify_secrets:
+    name: Verify Secrets & Configuration
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate required repository secrets
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          BACKEND_API_URL: ${{ secrets.BACKEND_API_URL }}
+        run: |
+          echo "=== Checking deployment secrets presence ==="
+          MISSING=0
+          check_secret() {
+            if [[ -z "${!1:-}" ]]; then
+              echo "::error::Missing secret: $1"
+              MISSING=1
+            else
+              echo "[OK] Secret $1 is configured."
+            fi
+          }
+
+          check_secret "VPS_HOST"
+          check_secret "VPS_USER"
+          check_secret "VPS_SSH_KEY"
+          check_secret "CLOUDFLARE_ACCOUNT_ID"
+          check_secret "BACKEND_API_URL"
+
+          if [[ -z "${CLOUDFLARE_API_TOKEN:-}" ]]; then
+            echo "::warning::CLOUDFLARE_API_TOKEN is not set; Cloudflare Pages deployment from GitHub Actions will be skipped until configured."
+          else
+            echo "[OK] Secret CLOUDFLARE_API_TOKEN is configured."
+          fi
+
+          if [[ "${MISSING}" -ne 0 ]]; then
+            echo "::error::Required deployment secrets are missing. Configure them in Repository Settings -> Secrets."
+            exit 1
+          fi
+
+  # ----------------------------------------------------------------------------
+  # 2. Deploy Frontend to Cloudflare Pages
+  # ----------------------------------------------------------------------------
+  deploy_frontend:
+    name: Build & Deploy Frontend to Cloudflare Pages
+    needs: [verify_secrets]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Setup pnpm 12.19.0
+        uses: pnpm/action-setup@v4
+        with:
+          version: "12.19.0"
+
+      - name: Setup uv and Python 3.13
+        uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.13"
+          enable-cache: true
+          cache-dependency-glob: "backend/core/uv.lock"
+
+      - name: Build Frontend via Cloudflare Pages Pipeline
+        env:
+          VITE_API_URL: ${{ secrets.BACKEND_API_URL || 'https://api-terra.yappin.studio' }}
+        run: |
+          bash deploy/containerization/cloudflare-pages-build.sh
+
+      - name: Detect Cloudflare Pages credentials
+        id: cloudflare
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          if [[ -n "${CLOUDFLARE_API_TOKEN}" ]]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::CLOUDFLARE_API_TOKEN is not set; skipping Cloudflare Pages deployment."
+          fi
+
+      - name: Deploy to Cloudflare Pages
+        if: steps.cloudflare.outputs.enabled == 'true'
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: pages deploy frontend/dist --project-name=project-terra --branch=main --commit-dirty=true
+
+  # ----------------------------------------------------------------------------
+  # 3. Deploy Backend to VPS Server
+  # ----------------------------------------------------------------------------
+  deploy_backend:
+    name: Deploy Backend Infrastructure to VPS
+    needs: [verify_secrets]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup SSH Agent & Known Hosts
+        env:
+          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+        run: |
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          ssh-keyscan -H "${VPS_HOST}" >> ~/.ssh/known_hosts
+          eval "$(ssh-agent -s)"
+          echo "${VPS_SSH_KEY}" | tr -d '\r' | ssh-add -
+          echo "SSH_AUTH_SOCK=${SSH_AUTH_SOCK}" >> $GITHUB_ENV
+          echo "SSH_AGENT_PID=${SSH_AGENT_PID}" >> $GITHUB_ENV
+
+      - name: Synchronize Repository to VPS
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+        run: |
+          echo "=== Syncing repository files to /opt/project-terra ==="
+          rsync -avz --delete \
+            --exclude '.git' \
+            --exclude '.env*' \
+            --exclude '__pycache__' \
+            --exclude '*.pyc' \
+            --exclude '.venv' \
+            --exclude 'node_modules' \
+            --exclude '.data' \
+            ./ "${VPS_USER}@${VPS_HOST}:/opt/project-terra/"
+
+      - name: Execute Remote Deployment & Migrations on VPS
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+        run: |
+          ssh "${VPS_USER}@${VPS_HOST}" 'bash -s' << 'EOF'
+          set -euo pipefail
+          cd /opt/project-terra/deploy/containerization
+
+          echo "=== 1. Verifying Environment File ==="
+          test -f .env.prod || { echo "CRITICAL: .env.prod is missing!"; exit 1; }
+
+          echo "=== 2. Building Backend Docker Images ==="
+          # ghs-api/ghs-worker reuse terra-ghs:latest, which is built by the
+          # ghs-migration service. Building ghs-api alone is a no-op.
+          docker compose --env-file .env.prod -f compose.prod.yaml build core ghs-migration
+
+          echo "=== 3. Executing Database Migrations ==="
+          docker compose --env-file .env.prod -f compose.prod.yaml run --rm ghs-migration alembic upgrade head
+
+          echo "=== 4. Starting Production Services ==="
+          docker compose --env-file .env.prod -f compose.prod.yaml up -d --remove-orphans postgres ghs-api ghs-worker core core-worker
+
+          echo "=== 5. Ensuring Reverse Proxy Connectivity ==="
+          docker network connect terra-prod_terra-internal yappin-production-caddy-1 2>/dev/null || true
+          docker cp /opt/yappin/infra/Caddyfile yappin-production-caddy-1:/tmp/Caddyfile || true
+          docker exec yappin-production-caddy-1 caddy reload --config /tmp/Caddyfile --adapter caddyfile || true
+
+          echo "=== 6. Validating Local Health ==="
+          sleep 4
+          curl -fsS http://127.0.0.1:8000/health/ready
+          echo "Backend deployment on VPS succeeded."
+          EOF
+
+  # ----------------------------------------------------------------------------
+  # 4. End-to-End Health & Secret Synchronization Verification
+  # ----------------------------------------------------------------------------
+  verify_sync:
+    name: Verify End-to-End Secrets & System Synchronization
+    needs: [deploy_frontend, deploy_backend]
+    if: always() && needs.deploy_backend.result == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run Secrets & Endpoints Synchronization Test
+        env:
+          FRONTEND_URL: "https://project-terra.pages.dev"
+          BACKEND_URL: ${{ secrets.BACKEND_API_URL || 'https://api-terra.yappin.studio' }}
+        run: |
+          chmod +x deploy/containerization/verify-sync.sh
+          ./deploy/containerization/verify-sync.sh

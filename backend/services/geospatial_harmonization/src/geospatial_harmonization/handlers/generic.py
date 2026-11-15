@@ -1,6 +1,5 @@
 """SSRF-guarded GenericHandler for explicitly allowlisted declarative endpoints."""
 
-import tempfile
 from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
@@ -24,6 +23,7 @@ from geospatial_harmonization.handlers.base import (
     safe_fetch_to_file,
 )
 from geospatial_harmonization.readers import ReaderRegistry, build_default_reader_registry
+from geospatial_harmonization.storage.scratch import run_with_owned_base_dir
 
 
 class GenericPayload(BaseModel):
@@ -61,6 +61,7 @@ class GenericHandler:
             else tuple(cfg.generic_handler_allowed_hosts)
         )
         self._allowed_hosts = hosts
+        self._settings = cfg
         self._timeout = cfg.http_timeout_seconds
         self._max_retries = cfg.http_max_retries
         self._max_object_bytes = cfg.ghs_storage_max_object_bytes
@@ -79,12 +80,22 @@ class GenericHandler:
 
     async def handle_payload(self, payload: Mapping[str, object]) -> SpatialDataset:
         """Fetch an allowlisted URL safely and decode into a canonical SpatialDataset."""
+        return await run_with_owned_base_dir(
+            lambda base_dir: self._handle_payload(payload, base_dir),
+            settings=self._settings,
+            prefix="ghs_generic_",
+            raw_dir=self._raw_dir,
+        )
+
+    async def _handle_payload(
+        self, payload: Mapping[str, object], base_dir: Path
+    ) -> SpatialDataset:
+        """Fetch an allowlisted URL into ``base_dir`` and decode it into a SpatialDataset."""
         req = parse_handler_payload(GenericPayload, payload)
         if not self._allowed_hosts:
             raise IncompatibleDatasetError(
                 "GenericHandler is disabled because generic_handler_allowed_hosts is empty"
             )
-        base_dir = self._raw_dir or Path(tempfile.mkdtemp(prefix="ghs_generic_"))
         path, asset, final_url = await safe_fetch_to_file(
             req.url,
             base_dir,

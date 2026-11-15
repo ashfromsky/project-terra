@@ -1,10 +1,18 @@
 """Raster tile rendering, bounding-box PNG export, and point pixel inspection for GHS."""
 
 import asyncio
+import contextlib
+import hashlib
+import logging
 import math
+import os
+import re
 import struct
 import tempfile
+import threading
+import time
 import zlib
+from collections import OrderedDict
 from collections.abc import Mapping
 from dataclasses import replace
 from datetime import datetime
@@ -18,7 +26,11 @@ from pyproj import Transformer
 from rasterio.errors import WindowError
 from rasterio.warp import transform_bounds
 
-from geospatial_harmonization.domain.exceptions import IncompatibleDatasetError
+from geospatial_harmonization.domain.exceptions import (
+    IncompatibleDatasetError,
+    ScratchCapacityError,
+    scratch_capacity_error_from_oserror,
+)
 from geospatial_harmonization.domain.models.dataset import (
     AssetReference,
     DataFormat,
@@ -36,8 +48,338 @@ from geospatial_harmonization.transformations._warp import (
 )
 
 _ORIGIN_SHIFT = 20037508.342789244
-_SUPPORTED_RASTER_FORMATS: frozenset[DataFormat] = frozenset({"geotiff", "hdf4", "hdf5", "netcdf"})
+_SUPPORTED_RASTER_FORMATS: frozenset[DataFormat] = frozenset(
+    {"geotiff", "hdf4", "hdf5", "netcdf", "zarr"}
+)
 _QA_TOKENS = ("qa", "qc", "qual", "flag", "reliability", "bitmask", "lat", "lon")
+
+logger = logging.getLogger(__name__)
+
+_CACHE_SWEEP_LOCK = threading.Lock()
+
+
+def _pid_alive(pid: int) -> bool:
+    """POSIX liveness probe for a cache-entry owner pid."""
+    if pid <= 0:
+        return False
+    if pid == os.getpid():
+        return True
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    except (OverflowError, OSError):
+        return False
+    return True
+
+
+# ---------------------------------------------------------------------------
+# Bounded materialized-asset cache
+#
+# Materialized raster assets are cached on disk under
+# ``<GHS_STORAGE_TEMP_DIR | system tmp>/ghs_raster_cache``. Files are named
+# ``{key}.{pid}.{hint}`` so a process restart can identify and drop entries
+# created by dead processes. In-memory accounting is deliberately per-process:
+# the ownership marker in each filename lets a fresh process reclaim the
+# on-disk leftovers of its predecessors without removing files actively used
+# by other live workers.
+#
+# Concurrency model:
+# - Per-key asyncio locks prevent duplicate concurrent materialization.
+# - Check-out/check-in reference counts protect files rendered by in-flight
+#   requests; eviction skips entries currently in use and deletes deferred
+#   evictions once the last user checks in.
+# ---------------------------------------------------------------------------
+
+_ASSET_CACHE_DIRNAME = "ghs_raster_cache"
+_ASSET_CACHE_MAX_BYTES = 256 * 1024 * 1024
+_ASSET_CACHE_LOCKS: dict[str, asyncio.Lock] = {}
+_ASSET_CACHE_ENTRIES: OrderedDict[str, tuple[Path, int]] = OrderedDict()
+_ASSET_CACHE_TOTAL_BYTES = 0
+_ASSET_CACHE_IN_USE: dict[str, int] = {}
+_ASSET_CACHE_EVICTION_PENDING: dict[str, Path] = {}
+_CACHE_SWEEP_DONE = False
+
+# Assets whose known size exceeds half the cache budget are never persisted
+# into the cache directory; they are materialized once, per request, into the
+# request-owned scratch directory instead.
+_MAX_CACHEABLE_ASSET_BYTES = _ASSET_CACHE_MAX_BYTES // 2
+
+
+def _resolve_cache_dir() -> Path:
+    from geospatial_harmonization.storage.scratch import scratch_base_dir
+
+    return scratch_base_dir() / _ASSET_CACHE_DIRNAME
+
+
+def _scratch_base() -> Path:
+    """Scratch base directory for render/point-query TemporaryDirectory targets."""
+    from geospatial_harmonization.storage.scratch import scratch_base_dir
+
+    return scratch_base_dir()
+
+
+_CACHE_NAME_PATTERN = re.compile(r"^(?P<key>[0-9a-f]{24})\.(?P<pid>\d+)\.")
+
+
+def _cache_pid_alive(name: str) -> bool | None:
+    """Return entry-pid liveness parsed from a cache filename, None if unnamed."""
+    match = _CACHE_NAME_PATTERN.match(name)
+    if match is None:
+        return None
+    return _pid_alive(int(match.group("pid")))
+
+
+def _sweep_stale_cache_entries() -> None:
+    """One-time per-process scan removing cache files owned by dead processes.
+
+    Unparseable files (e.g. leftovers from a previous format or interrupted
+    moves) are removed once their age exceeds the abandoned-temp grace period.
+    """
+    global _CACHE_SWEEP_DONE
+    cache_dir = _resolve_cache_dir()
+    if not cache_dir.is_dir():
+        return
+    from geospatial_harmonization.storage.scratch import (
+        get_settings as scratch_get_settings,
+    )
+
+    max_age = scratch_get_settings().ghs_storage_abandoned_temp_max_age_seconds
+    now = time.time()
+    removed = 0
+    try:
+        with os.scandir(cache_dir) as entries:
+            for entry in entries:
+                if not entry.is_file(follow_symlinks=False):
+                    continue
+                alive = _cache_pid_alive(entry.name)
+                if alive is False or (alive is None and now - entry.stat().st_mtime > max_age):
+                    with contextlib.suppress(OSError):
+                        Path(entry.path).unlink(missing_ok=True)
+                        removed += 1
+    except OSError:
+        logger.debug("Raster cache sweep scan failed for %s", cache_dir, exc_info=True)
+    if removed:
+        logger.info("Removed %d raster cache entries from dead processes", removed)
+
+
+def _ensure_cache_swept() -> None:
+    global _CACHE_SWEEP_DONE
+    if _CACHE_SWEEP_DONE:
+        return
+    with contextlib.suppress(Exception):
+        _sweep_stale_cache_entries()
+    _CACHE_SWEEP_DONE = True
+
+
+def _cache_entry_key(asset: AssetReference, storage: StoragePort) -> str:
+    raw = (
+        f"{id(storage)}|{asset.storage_key or ''}|"
+        f"{asset.checksum_sha256 or ''}|{asset.size_bytes or ''}"
+    )
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:24]
+
+
+def _evict_asset_cache_if_needed() -> None:
+    global _ASSET_CACHE_TOTAL_BYTES
+    while _ASSET_CACHE_TOTAL_BYTES > _ASSET_CACHE_MAX_BYTES:
+        victim: str | None = None
+        for key in _ASSET_CACHE_ENTRIES:  # oldest (LRU) first
+            if _ASSET_CACHE_IN_USE.get(key, 0) == 0:
+                victim = key
+                break
+        if victim is None:
+            # Every entry is in active use by a concurrent render; allow the
+            # bounded overshoot and retry eviction on the next check-in.
+            return
+        entry: tuple[Path, int] = _ASSET_CACHE_ENTRIES.pop(victim)
+        old_path, old_size = entry
+        _ASSET_CACHE_TOTAL_BYTES = max(0, _ASSET_CACHE_TOTAL_BYTES - old_size)
+        with contextlib.suppress(OSError):
+            old_path.unlink(missing_ok=True)
+
+
+def _checkout_cached(cache_key: str) -> Path | None:
+    """Return a checked-out (ref-counted) cache path, or None when absent."""
+    with _CACHE_SWEEP_LOCK:
+        cached = _ASSET_CACHE_ENTRIES.get(cache_key)
+        if cached is None:
+            return None
+        cached_path, _ = cached
+        if not cached_path.is_file():
+            _ASSET_CACHE_ENTRIES.pop(cache_key, None)
+            return None
+        _ASSET_CACHE_IN_USE[cache_key] = _ASSET_CACHE_IN_USE.get(cache_key, 0) + 1
+        _ASSET_CACHE_ENTRIES.move_to_end(cache_key)
+        return cached_path
+
+
+def _checkin_cached(cache_key: str) -> None:
+    with _CACHE_SWEEP_LOCK:
+        remaining = _ASSET_CACHE_IN_USE.get(cache_key, 1) - 1
+        if remaining > 0:
+            _ASSET_CACHE_IN_USE[cache_key] = remaining
+            return
+        _ASSET_CACHE_IN_USE.pop(cache_key, None)
+        pending = _ASSET_CACHE_EVICTION_PENDING.pop(cache_key, None)
+        entry = _ASSET_CACHE_ENTRIES.get(cache_key)
+        if entry is None and pending is not None:
+            with contextlib.suppress(OSError):
+                pending.unlink(missing_ok=True)
+
+
+class _CheckedOutCacheAsset:
+    """Owns a checked-out or request-owned materialized path until check-in."""
+
+    def __init__(self, path: Path, cache_key: str | None) -> None:
+        self.path = path
+        self.cache_key = cache_key
+
+    def release(self) -> None:
+        if self.cache_key is not None:
+            _checkin_cached(self.cache_key)
+
+
+def _known_asset_bytes(asset: AssetReference, head_size: int | None) -> int | None:
+    """Best-effort metadata size for the asset, preferring explicit bytes."""
+    if asset.size_bytes and asset.size_bytes > 0:
+        return int(asset.size_bytes)
+    return head_size
+
+
+async def _materialize_asset(
+    asset: AssetReference,
+    storage: StoragePort | None,
+    tmp_dir: Path,
+) -> _CheckedOutCacheAsset:
+    """Materialize a renderable asset, caching small assets under the cache dir.
+
+    Returns a checked-out handle: callers must invoke ``release()`` when the
+    path is no longer being read so eviction can reclaim it safely.
+    """
+    global _ASSET_CACHE_TOTAL_BYTES
+    _ensure_cache_swept()
+    from geospatial_harmonization.storage.scratch import check_scratch_capacity
+
+    source_name = asset.storage_key or urlparse(asset.uri).path or "asset.bin"
+    name_hint = Path(source_name).name or "asset.bin"
+    dest = tmp_dir / name_hint
+    if asset.storage_key and storage is not None:
+        cache_key = _cache_entry_key(asset, storage)
+        checked_out = _checkout_cached(cache_key)
+        if checked_out is not None:
+            return _CheckedOutCacheAsset(checked_out, cache_key)
+
+        lock = _ASSET_CACHE_LOCKS.setdefault(cache_key, asyncio.Lock())
+        async with lock:
+            checked_out = _checkout_cached(cache_key)
+            if checked_out is not None:
+                return _CheckedOutCacheAsset(checked_out, cache_key)
+
+            head_size: int | None = None
+            if asset.size_bytes is None or asset.size_bytes <= 0:
+                with contextlib.suppress(Exception):
+                    info = await storage.head_object(asset.storage_key)
+                    if info is not None:
+                        head_size = info.size_bytes
+            known_size = _known_asset_bytes(asset, head_size)
+
+            # Metadata-based sizing prevents streaming oversized assets into the
+            # persistent cache at all; they go straight to the request scratch dir.
+            cacheable = known_size is not None and known_size <= _MAX_CACHEABLE_ASSET_BYTES
+            if known_size is not None and cacheable:
+                try:
+                    check_scratch_capacity(None, known_size)
+                except ScratchCapacityError:
+                    cacheable = False
+
+            cache_file = _resolve_cache_dir() / f"{cache_key}.{os.getpid()}.{name_hint}"
+            try:
+                if cacheable:
+                    _resolve_cache_dir().mkdir(parents=True, exist_ok=True)
+                    materialized = await storage.materialize_to_path(asset.storage_key, cache_file)
+                    size = materialized.stat().st_size if materialized.is_file() else 0
+                    if size <= 0 or size > _MAX_CACHEABLE_ASSET_BYTES:
+                        # Single-download oversized asset: hand it to this
+                        # request directly without registering it in the cache.
+                        return _CheckedOutCacheAsset(materialized, None)
+                    _ASSET_CACHE_ENTRIES[cache_key] = (materialized, size)
+                    _ASSET_CACHE_TOTAL_BYTES += size
+                    _evict_asset_cache_if_needed()
+                    checked_out = _checkout_cached(cache_key)
+                    if checked_out is not None:
+                        return _CheckedOutCacheAsset(checked_out, cache_key)
+                    return _CheckedOutCacheAsset(materialized, None)
+                # Unknown or oversized assets stream into the request scratch
+                # dir; unknown-size downloads that turn out small are then
+                # moved into the cache, never re-downloaded.
+                storage_path = await storage.materialize_to_path(asset.storage_key, dest)
+                size = storage_path.stat().st_size if storage_path.is_file() else 0
+                if known_size is None and 0 < size <= _MAX_CACHEABLE_ASSET_BYTES:
+                    try:
+                        _resolve_cache_dir().mkdir(parents=True, exist_ok=True)
+                        os.replace(storage_path, cache_file)
+                    except OSError:
+                        logger.debug(
+                            "Could not move asset %s into cache; using request dir",
+                            asset.storage_key,
+                            exc_info=True,
+                        )
+                    else:
+                        _ASSET_CACHE_ENTRIES[cache_key] = (cache_file, size)
+                        _ASSET_CACHE_TOTAL_BYTES += size
+                        _evict_asset_cache_if_needed()
+                        checked_out = _checkout_cached(cache_key)
+                        if checked_out is not None:
+                            return _CheckedOutCacheAsset(checked_out, cache_key)
+                        return _CheckedOutCacheAsset(cache_file, None)
+                return _CheckedOutCacheAsset(storage_path, None)
+            except FileNotFoundError:
+                pass
+            except OSError as exc:
+                capacity = scratch_capacity_error_from_oserror(exc)
+                if capacity is not None:
+                    raise capacity from exc
+                logger.warning(
+                    "Materialization from storage failed for key '%s': %s",
+                    asset.storage_key,
+                    exc,
+                )
+            except ScratchCapacityError:
+                raise
+            except Exception as exc:
+                logger.warning(
+                    "Materialization from storage failed for key '%s': %s",
+                    asset.storage_key,
+                    exc,
+                )
+    local_candidate = _local_path_from_uri(asset.uri)
+    if local_candidate is not None:
+        return _CheckedOutCacheAsset(local_candidate, None)
+    if storage is not None and asset.storage_key:
+        try:
+            data = await storage.get_bytes(asset.storage_key)
+        except FileNotFoundError as exc:
+            raise RasterAssetUnavailableError(
+                f"Raster asset '{asset.asset_id}' was not found in storage."
+            ) from exc
+        except Exception as exc:
+            raise RasterAssetUnavailableError(
+                f"Failed to read raster asset '{asset.asset_id}' from storage: {exc}"
+            ) from exc
+        try:
+            dest.write_bytes(data)
+        except OSError as exc:
+            capacity = scratch_capacity_error_from_oserror(exc)
+            if capacity is not None:
+                raise capacity from exc
+            raise
+        return _CheckedOutCacheAsset(dest, None)
+    raise RasterAssetUnavailableError(
+        f"Raster asset '{asset.asset_id}' could not be materialized from storage."
+    )
 
 
 class UnsupportedRasterFormatError(IncompatibleDatasetError):
@@ -243,15 +585,32 @@ def _select_raster_asset(
             f"Dataset '{dataset.dataset_id}' assets ({formats}) "
             "are not directly renderable raster formats."
         )
+    # Prefer a Cloud-Optimized GeoTIFF when the dataset also carries raw source
+    # granules; TiTiler can only read the former directly.
+    geotiff_assets = [a for a in raster_assets if a.data_format in {"geotiff", "cog"}]
+    if geotiff_assets:
+        raster_assets = geotiff_assets
     timestamps = _extract_timestamps_list(dataset, variable)
     step_idx = _select_step_index(timestamps, timestamp)
     if len(raster_assets) == 1:
         return raster_assets[0], step_idx
     if timestamp:
-        compact_date = timestamp[:10].replace("-", "")
+        date_str = timestamp[:10]
+        compact_date = date_str.replace("-", "")
+        julian_tokens: tuple[str, ...] = ()
+        try:
+            dt_day = datetime.fromisoformat(date_str)
+            yyyyddd = dt_day.strftime("%Y%j")
+            julian_tokens = (f"A{yyyyddd}", yyyyddd)
+        except ValueError:
+            pass
         for asset in raster_assets:
             haystack = f"{asset.asset_id} {asset.storage_key or ''} {asset.uri}"
-            if compact_date in haystack or timestamp[:10] in haystack:
+            if (
+                compact_date in haystack
+                or date_str in haystack
+                or any(tok in haystack for tok in julian_tokens)
+            ):
                 return asset, 0
     asset_idx = min(step_idx, len(raster_assets) - 1)
     return raster_assets[asset_idx], 0
@@ -261,36 +620,11 @@ def _local_path_from_uri(uri: str) -> Path | None:
     parsed = urlparse(uri)
     if parsed.scheme == "file":
         candidate = Path(unquote(parsed.path))
-        return candidate if candidate.is_file() else None
+        return candidate if (candidate.is_file() or candidate.is_dir()) else None
     if not parsed.scheme:
         candidate = Path(uri)
-        return candidate if candidate.is_file() else None
+        return candidate if (candidate.is_file() or candidate.is_dir()) else None
     return None
-
-
-async def _materialize_asset(
-    asset: AssetReference,
-    storage: StoragePort | None,
-    tmp_dir: Path,
-) -> Path:
-    source_name = asset.storage_key or urlparse(asset.uri).path or "asset.bin"
-    name_hint = Path(source_name).name or "asset.bin"
-    dest = tmp_dir / name_hint
-    if asset.storage_key and storage is not None:
-        try:
-            return await storage.materialize_to_path(asset.storage_key, dest)
-        except Exception:
-            pass
-    local_candidate = _local_path_from_uri(asset.uri)
-    if local_candidate is not None:
-        return local_candidate
-    if storage is not None and asset.storage_key:
-        data = await storage.get_bytes(asset.storage_key)
-        dest.write_bytes(data)
-        return dest
-    raise RasterAssetUnavailableError(
-        f"Raster asset '{asset.asset_id}' could not be materialized from storage."
-    )
 
 
 def _match_variable_name(candidates: list[str], requested: str) -> str | None:
@@ -335,22 +669,26 @@ def _merge_dataset_variable_spec(
         if decoded_spec.units in ("1", "dimensionless", "unknown") and ds_spec.units
         else decoded_spec.units
     )
+    decoded_is_float = np.dtype(decoded_spec.dtype).kind == "f"
+    # Never apply integer packing scale/offset from dataset metadata onto an already-float raster.
+    resolved_scale = (
+        decoded_spec.scale_factor
+        if decoded_is_float or ds_spec.scale_factor is None
+        else ds_spec.scale_factor
+    )
+    resolved_offset = (
+        decoded_spec.add_offset
+        if decoded_is_float or ds_spec.add_offset is None
+        else ds_spec.add_offset
+    )
     return replace(
         decoded_spec,
         units=resolved_units,
         nodata=decoded_spec.nodata if decoded_spec.nodata is not None else ds_spec.nodata,
-        scale_factor=(
-            decoded_spec.scale_factor
-            if decoded_spec.scale_factor is not None
-            else ds_spec.scale_factor
-        ),
-        add_offset=(
-            decoded_spec.add_offset if decoded_spec.add_offset is not None else ds_spec.add_offset
-        ),
+        scale_factor=resolved_scale,
+        add_offset=resolved_offset,
         valid_range=(
-            decoded_spec.valid_range
-            if decoded_spec.valid_range is not None
-            else ds_spec.valid_range
+            ds_spec.valid_range if ds_spec.valid_range is not None else decoded_spec.valid_range
         ),
     )
 
@@ -372,7 +710,9 @@ def _select_raster_variable(
         matched = _match_variable_name(quant_names, variable) or _match_variable_name(
             all_names, variable
         )
-        if matched is None:
+        if matched is None and len(quant_names) == 1 and variable in dataset.variables:
+            matched = quant_names[0]
+        elif matched is None:
             raise RasterVariableNotFoundError(
                 f"Variable '{variable}' not found in raster asset (available: {all_names})."
             )
@@ -436,6 +776,15 @@ def _find_qa_variable(
     return None
 
 
+def _is_kelvin_unit(unit: str) -> bool:
+    return unit.strip().lower() in {"k", "kelvin", "kelvins"}
+
+
+def _is_celsius_unit(unit: str) -> bool:
+    low = unit.strip().lower()
+    return low in {"°c", "c", "celsius", "degc", "deg_c"}
+
+
 def _should_convert_kelvin_to_celsius(
     spec: VariableSpec,
     dataset: SpatialDataset,
@@ -443,19 +792,55 @@ def _should_convert_kelvin_to_celsius(
     unit_conversion: str | None,
     sample_values: NDArray[np.float64] | None = None,
 ) -> bool:
-    if unit_conversion == "kelvin_to_celsius":
+    wants_conversion = unit_conversion == "kelvin_to_celsius" or colormap == "lst_celsius"
+    if not wants_conversion:
+        return False
+    spec_unit = spec.units.strip()
+    ds_unit = dataset.units.get(spec.name, spec.units).strip()
+    if _is_celsius_unit(spec_unit) or _is_celsius_unit(ds_unit):
+        return False
+    if _is_kelvin_unit(spec_unit) or _is_kelvin_unit(ds_unit):
         if sample_values is not None and sample_values.size > 0:
-            return float(np.nanmean(sample_values)) > 150.0
-        return "c" not in spec.units.lower()
-    if colormap == "lst_celsius":
-        units_low = spec.units.strip().lower()
-        ds_units = dataset.units.get(spec.name, spec.units).strip().lower()
-        is_kelvin = units_low in {"k", "kelvin"} or ds_units in {"k", "kelvin"}
-        if is_kelvin:
-            if sample_values is not None and sample_values.size > 0:
-                return float(np.nanmean(sample_values)) > 150.0
-            return True
+            finite = sample_values[np.isfinite(sample_values)]
+            if finite.size > 0 and float(np.nanmean(finite)) < 120.0:
+                return False
+        return True
+    if (
+        unit_conversion == "kelvin_to_celsius"
+        and sample_values is not None
+        and sample_values.size > 0
+    ):
+        finite = sample_values[np.isfinite(sample_values)]
+        return finite.size > 0 and float(np.nanmean(finite)) > 150.0
     return False
+
+
+def _evaluate_qa_mask(
+    product: str,
+    qa_arr: NDArray[np.generic],
+    qa_var_name: str,
+) -> NDArray[np.bool_]:
+    upper = product.upper()
+    arr_f = np.asarray(qa_arr, dtype=np.float64)
+    finite = np.isfinite(arr_f)
+    if "MOD13" in upper:
+        qa_int = np.where(finite, arr_f, -1).astype(np.int64)
+        if "vi quality" in qa_var_name.lower():
+            return np.asarray(finite & ((qa_int & 0b11) <= 1), dtype=np.bool_)
+        return np.asarray(finite & ((qa_int == 0) | (qa_int == 1)), dtype=np.bool_)
+    if "MOD11" in upper:
+        qa_int = np.where(finite, arr_f, -1).astype(np.int64)
+        mandatory = qa_int & 0b11
+        err_bits = (qa_int >> 6) & 0b11
+        return np.asarray(
+            finite & (qa_int >= 0) & (mandatory <= 1) & (err_bits <= 1), dtype=np.bool_
+        )
+    if "IMERG" in upper:
+        return np.asarray(finite & (arr_f >= 0.5), dtype=np.bool_)
+    if "SPL3SMP" in upper:
+        qa_int = np.where(finite, arr_f, -1).astype(np.int64)
+        return np.asarray(finite & (qa_int >= 0) & ((qa_int & 0b1) == 0), dtype=np.bool_)
+    return np.ones(qa_arr.shape, dtype=bool)
 
 
 def _colorize_values(
@@ -513,10 +898,95 @@ def _slice_2d_and_spec(
     return arr, replace(spec, dimensions=dims)
 
 
+_READER_LOCK = threading.Lock()
+_CACHE_LOCK = threading.Lock()
+_RASTER_CACHE: OrderedDict[tuple[str, str], DecodedDataset] = OrderedDict()
+_RASTER_CACHE_MAX_ENTRIES = 4
+
+
+def _get_cached_decoded(dataset: SpatialDataset, asset: AssetReference) -> DecodedDataset | None:
+    key = (str(dataset.dataset_id), asset.asset_id)
+    with _CACHE_LOCK:
+        cached = _RASTER_CACHE.get(key)
+        if cached is not None:
+            _RASTER_CACHE.move_to_end(key)
+        return cached
+
+
+def _put_cached_decoded(
+    dataset: SpatialDataset, asset: AssetReference, decoded: DecodedDataset
+) -> None:
+    key = (str(dataset.dataset_id), asset.asset_id)
+    with _CACHE_LOCK:
+        _RASTER_CACHE[key] = decoded
+        _RASTER_CACHE.move_to_end(key)
+        while len(_RASTER_CACHE) > _RASTER_CACHE_MAX_ENTRIES:
+            _RASTER_CACHE.popitem(last=False)
+
+
+def _read_decoded_sync(
+    *,
+    asset: AssetReference,
+    asset_path: Path | None,
+    readers: ReaderRegistry,
+    dataset: SpatialDataset,
+) -> DecodedDataset:
+    cached = _get_cached_decoded(dataset, asset)
+    if cached is not None:
+        return cached
+    if asset_path is None:
+        raise RasterAssetUnavailableError(f"Raster asset '{asset.asset_id}' path is missing.")
+    # Serialize C-backed HDF4/HDF5/NetCDF reader calls across worker threads.
+    with _READER_LOCK:
+        cached = _get_cached_decoded(dataset, asset)
+        if cached is not None:
+            return cached
+        if asset.data_format in ("hdf5", "netcdf") and dataset.variables:
+            decoded = readers.read(asset, asset_path, variables=tuple(dataset.variables.keys()))
+        else:
+            decoded = readers.read(asset, asset_path)
+        _put_cached_decoded(dataset, asset, decoded)
+        return decoded
+
+
+def _infer_fallback_grid(dataset: SpatialDataset, slice_arr: NDArray[Any]) -> GridSpec | None:
+    if slice_arr.ndim < 2:
+        return None
+    height, width = int(slice_arr.shape[-2]), int(slice_arr.shape[-1])
+    if "SPL3SMP" in dataset.product.upper() and (height, width) == (1624, 3856):
+        bounds = SpatialBounds(
+            -17367530.445161499, -7314540.830638599, 17367530.445161499, 7314540.830638599
+        )
+        return GridSpec(
+            crs="EPSG:6933",
+            resolution_x=34735060.890322998 / 3856.0,
+            resolution_y=14629081.661277198 / 1624.0,
+            resolution_unit="meter",
+            bounds=bounds,
+            width=3856,
+            height=1624,
+            pixel_convention="corner",
+        ).resolved()
+    b = dataset.spatial_metadata.bounds
+    crs = dataset.spatial_metadata.crs
+    if b is not None and crs and width > 0 and height > 0:
+        return GridSpec(
+            crs=crs,
+            resolution_x=(b.max_x - b.min_x) / float(width),
+            resolution_y=(b.max_y - b.min_y) / float(height),
+            resolution_unit="degree" if "4326" in crs else "meter",
+            bounds=b,
+            width=width,
+            height=height,
+            pixel_convention="corner",
+        ).resolved()
+    return None
+
+
 def _render_sync(
     *,
     asset: AssetReference,
-    asset_path: Path,
+    asset_path: Path | None,
     readers: ReaderRegistry,
     dataset: SpatialDataset,
     dst_bounds: SpatialBounds,
@@ -530,26 +1000,23 @@ def _render_sync(
     vmax: float | None,
     unit_conversion: str | None,
 ) -> bytes:
-    if dst_crs == "EPSG:4326":
-        aoi_wgs84 = dst_bounds
-    else:
-        bx = transform_bounds(dst_crs, "EPSG:4326", *dst_bounds.as_tuple(), densify_pts=21)
-        aoi_wgs84 = SpatialBounds(bx[0], bx[1], bx[2], bx[3])
-
-    decoded = readers.read_windowed(
-        asset,
-        asset_path,
-        aoi_bounds=aoi_wgs84,
-        aoi_crs="EPSG:4326",
-        allow_disjoint_fallback=True,
+    decoded = _read_decoded_sync(
+        asset=asset,
+        asset_path=asset_path,
+        readers=readers,
+        dataset=dataset,
     )
     var_name, spec = _select_raster_variable(decoded, dataset, variable)
-    src_grid = spec.grid or decoded.grid or dataset.spatial_metadata.grid
-    if src_grid is None:
-        raise IncompatibleDatasetError(f"Raster variable '{var_name}' lacks spatial grid metadata.")
-
     raw_arr = np.asarray(decoded.arrays[var_name])
     slice_arr, render_spec = _slice_2d_and_spec(raw_arr, spec, step_idx)
+    src_grid = (
+        spec.grid
+        or decoded.grid
+        or dataset.spatial_metadata.grid
+        or _infer_fallback_grid(dataset, slice_arr)
+    )
+    if src_grid is None:
+        raise IncompatibleDatasetError(f"Raster variable '{var_name}' lacks spatial grid metadata.")
 
     dst_grid = GridSpec(
         crs=dst_crs,
@@ -580,11 +1047,32 @@ def _render_sync(
         lo, hi = render_spec.valid_range
         valid &= (data >= lo) & (data <= hi)
 
+    qa_var = _find_qa_variable(
+        decoded, dataset.product, var_name, (slice_arr.shape[0], slice_arr.shape[1])
+    )
+    if qa_var is not None:
+        qa_raw = np.asarray(decoded.arrays[qa_var])
+        qa_slice, qa_spec = _slice_2d_and_spec(qa_raw, decoded.variables[qa_var], step_idx)
+        qa_grid = qa_spec.grid or src_grid
+        try:
+            qa_warped, _ = warp_variable(
+                qa_slice,
+                replace(qa_spec, semantics="qa_flag"),
+                qa_grid,
+                dst_grid,
+                "nearest",
+                decoded.coordinates,
+            )
+            valid &= _evaluate_qa_mask(dataset.product, qa_warped.data, qa_var)
+        except (IncompatibleDatasetError, WindowError, ValueError):
+            pass
+
     valid_samples = data[valid]
     if _should_convert_kelvin_to_celsius(
         render_spec, dataset, colormap, unit_conversion, valid_samples
     ):
         data = np.where(valid, data - 273.15, np.nan)
+        valid &= np.isfinite(data) & (data >= -100.0) & (data <= 80.0)
 
     ramp_name = colormap or "viridis"
     rgba = _colorize_values(data, valid, colormap=ramp_name, vmin=vmin, vmax=vmax)
@@ -618,12 +1106,11 @@ async def render_dataset_tile(
             return _transparent_png(256, 256)
 
     dst_bounds = SpatialBounds(*tile_3857)
-    with tempfile.TemporaryDirectory(prefix="ghs-tile-") as tmp_root:
-        local_path = await _materialize_asset(asset, storage, Path(tmp_root))
+    if _get_cached_decoded(dataset, asset) is not None:
         return await asyncio.to_thread(
             _render_sync,
             asset=asset,
-            asset_path=local_path,
+            asset_path=None,
             readers=readers,
             dataset=dataset,
             dst_bounds=dst_bounds,
@@ -637,6 +1124,29 @@ async def render_dataset_tile(
             vmax=vmax,
             unit_conversion=unit_conversion,
         )
+
+    with tempfile.TemporaryDirectory(prefix="ghs-tile-", dir=_scratch_base()) as tmp_root:
+        handle = await _materialize_asset(asset, storage, Path(tmp_root))
+        try:
+            return await asyncio.to_thread(
+                _render_sync,
+                asset=asset,
+                asset_path=handle.path,
+                readers=readers,
+                dataset=dataset,
+                dst_bounds=dst_bounds,
+                dst_crs="EPSG:3857",
+                width=256,
+                height=256,
+                step_idx=step_idx,
+                variable=variable,
+                colormap=colormap,
+                vmin=vmin,
+                vmax=vmax,
+                unit_conversion=unit_conversion,
+            )
+        finally:
+            handle.release()
 
 
 async def render_dataset_bbox(
@@ -658,44 +1168,54 @@ async def render_dataset_bbox(
     """Render a georeferenced RGBA PNG image for a bounding box over a raster dataset."""
     asset, step_idx = _select_raster_asset(dataset, timestamp=timestamp, variable=variable)
     dst_bounds = SpatialBounds(*bbox)
-    with tempfile.TemporaryDirectory(prefix="ghs-bbox-") as tmp_root:
-        local_path = await _materialize_asset(asset, storage, Path(tmp_root))
-        return await asyncio.to_thread(
-            _render_sync,
-            asset=asset,
-            asset_path=local_path,
-            readers=readers,
-            dataset=dataset,
-            dst_bounds=dst_bounds,
-            dst_crs=crs,
-            width=width,
-            height=height,
-            step_idx=step_idx,
-            variable=variable,
-            colormap=colormap,
-            vmin=vmin,
-            vmax=vmax,
-            unit_conversion=unit_conversion,
-        )
+    with tempfile.TemporaryDirectory(prefix="ghs-bbox-", dir=_scratch_base()) as tmp_root:
+        handle = await _materialize_asset(asset, storage, Path(tmp_root))
+        try:
+            return await asyncio.to_thread(
+                _render_sync,
+                asset=asset,
+                asset_path=handle.path,
+                readers=readers,
+                dataset=dataset,
+                dst_bounds=dst_bounds,
+                dst_crs=crs,
+                width=width,
+                height=height,
+                step_idx=step_idx,
+                variable=variable,
+                colormap=colormap,
+                vmin=vmin,
+                vmax=vmax,
+                unit_conversion=unit_conversion,
+            )
+        finally:
+            handle.release()
 
 
-def _evaluate_qa_pass(product: str, qa_code: int) -> bool | None:
+def _evaluate_qa_pass(product: str, qa_code: float | int, qa_var_name: str = "") -> bool | None:
+    if isinstance(qa_code, float) and not math.isfinite(qa_code):
+        return False
     upper = product.upper()
+    if "IMERG" in upper:
+        return float(qa_code) >= 0.5
+    qa_int = int(qa_code)
     if "MOD13" in upper:
-        return qa_code in (0, 1)
+        if "vi quality" in qa_var_name.lower():
+            return (qa_int & 0b11) <= 1
+        return qa_int in (0, 1)
     if "MOD11" in upper:
-        mandatory = qa_code & 0b11
-        err_bits = (qa_code >> 6) & 0b11
+        mandatory = qa_int & 0b11
+        err_bits = (qa_int >> 6) & 0b11
         return mandatory <= 1 and err_bits <= 1
     if "SPL3SMP" in upper:
-        return (qa_code & 0b1) == 0
+        return qa_int >= 0 and (qa_int & 0b1) == 0
     return None
 
 
 def _point_query_sync(
     *,
     asset: AssetReference,
-    asset_path: Path,
+    asset_path: Path | None,
     readers: ReaderRegistry,
     dataset: SpatialDataset,
     lon: float,
@@ -705,27 +1225,23 @@ def _point_query_sync(
     timestamp: str | None,
     unit_conversion: str | None,
 ) -> dict[str, Any]:
-    eps = 0.05
-    aoi_wgs84 = SpatialBounds(
-        max(-180.0, lon - eps),
-        max(-90.0, lat - eps),
-        min(180.0, lon + eps),
-        min(90.0, lat + eps),
-    )
-    decoded = readers.read_windowed(
-        asset,
-        asset_path,
-        aoi_bounds=aoi_wgs84,
-        aoi_crs="EPSG:4326",
-        allow_disjoint_fallback=True,
+    decoded = _read_decoded_sync(
+        asset=asset,
+        asset_path=asset_path,
+        readers=readers,
+        dataset=dataset,
     )
     var_name, spec = _select_raster_variable(decoded, dataset, variable)
-    src_grid = spec.grid or decoded.grid or dataset.spatial_metadata.grid
-    if src_grid is None:
-        raise IncompatibleDatasetError(f"Raster variable '{var_name}' lacks spatial grid metadata.")
-
     raw_arr = np.asarray(decoded.arrays[var_name])
     slice_arr, slice_spec = _slice_2d_and_spec(raw_arr, spec, step_idx)
+    src_grid = (
+        spec.grid
+        or decoded.grid
+        or dataset.spatial_metadata.grid
+        or _infer_fallback_grid(dataset, slice_arr)
+    )
+    if src_grid is None:
+        raise IncompatibleDatasetError(f"Raster variable '{var_name}' lacks spatial grid metadata.")
     oriented, _ = orient_to_north_up(slice_arr, slice_spec.dimensions, decoded.coordinates)
     src_res = src_grid.resolved()
     aff = to_rasterio_affine(src_res)
@@ -736,13 +1252,15 @@ def _point_query_sync(
         tx = Transformer.from_crs("EPSG:4326", src_res.crs, always_xy=True)
         x_nat, y_nat = tx.transform(lon, lat)
 
-    col_f, row_f = (~aff) * (x_nat, y_nat)
+    col_f, row_f = (~aff) @ (x_nat, y_nat)
     col, row = math.floor(col_f), math.floor(row_f)
 
     ds_bbox = _dataset_wgs84_bounds(dataset) or (-180.0, -90.0, 180.0, 90.0)
     ts_list = _extract_timestamps_list(dataset, var_name)
     fallback_ts = dataset.temporal_metadata.start.isoformat()
     active_ts = timestamp or (ts_list[step_idx] if step_idx < len(ts_list) else fallback_ts)
+
+    convert_to_celsius = _should_convert_kelvin_to_celsius(spec, dataset, None, unit_conversion)
 
     time_series_pts: list[dict[str, Any]] = []
     ts_ext = dataset.extensions.get("time_series")
@@ -761,8 +1279,15 @@ def _point_query_sync(
             e_ts = ts_entry.get("timestamps") or []
             e_vals = ts_entry.get("values") or []
             for t_str, t_val in zip(e_ts, e_vals, strict=False):
-                time_series_pts.append({"timestamp": str(t_str), "value": t_val})
+                out_ts_val: float | None = None
+                if isinstance(t_val, (int, float)) and math.isfinite(float(t_val)):
+                    v_num = float(t_val)
+                    if convert_to_celsius and v_num > 120.0:
+                        v_num -= 273.15
+                    out_ts_val = v_num
+                time_series_pts.append({"timestamp": str(t_str), "value": out_ts_val})
 
+    unit_out = "°C" if convert_to_celsius else dataset.units.get(var_name, spec.units)
     base_resp: dict[str, Any] = {
         "dataset_id": dataset.dataset_id,
         "product": dataset.product,
@@ -789,7 +1314,7 @@ def _point_query_sync(
             "status": "outside_bounds",
             "value": None,
             "raw_value": None,
-            "unit": dataset.units.get(var_name, spec.units),
+            "unit": unit_out,
             "qa_value": None,
             "qa_passed": None,
             "pixel_row": None,
@@ -806,15 +1331,18 @@ def _point_query_sync(
         qa_raw = np.asarray(decoded.arrays[qa_var])
         qa_slice, qa_spec = _slice_2d_and_spec(qa_raw, decoded.variables[qa_var], step_idx)
         qa_oriented, _ = orient_to_north_up(qa_slice, qa_spec.dimensions, decoded.coordinates)
-        qa_val = int(qa_oriented[row, col])
-        qa_passed = _evaluate_qa_pass(dataset.product, qa_val)
+        qa_scalar = float(qa_oriented[row, col])
+        if math.isfinite(qa_scalar):
+            qa_val = round(qa_scalar)
+            qa_passed = _evaluate_qa_pass(dataset.product, qa_scalar, qa_var)
+        else:
+            qa_passed = False
 
     is_nodata = not math.isfinite(raw_scalar)
     if not is_nodata and spec.nodata is not None:
         nd = float(spec.nodata)
         is_nodata = math.isnan(nd) if math.isnan(raw_scalar) else raw_scalar == nd
 
-    unit_out = dataset.units.get(var_name, spec.units)
     if is_nodata:
         return {
             **base_resp,
@@ -828,9 +1356,35 @@ def _point_query_sync(
             "pixel_col": col,
         }
 
+    if qa_passed is False:
+        return {
+            **base_resp,
+            "status": "nodata",
+            "value": None,
+            "raw_value": raw_scalar,
+            "unit": unit_out,
+            "qa_value": qa_val,
+            "qa_passed": False,
+            "pixel_row": row,
+            "pixel_col": col,
+        }
+
     scale = spec.scale_factor if spec.scale_factor is not None else 1.0
     offset = spec.add_offset if spec.add_offset is not None else 0.0
     phys = raw_scalar * scale + offset
+
+    if not math.isfinite(phys):
+        return {
+            **base_resp,
+            "status": "nodata",
+            "value": None,
+            "raw_value": raw_scalar,
+            "unit": unit_out,
+            "qa_value": qa_val,
+            "qa_passed": qa_passed,
+            "pixel_row": row,
+            "pixel_col": col,
+        }
 
     if spec.valid_range is not None:
         lo, hi = spec.valid_range
@@ -847,11 +1401,23 @@ def _point_query_sync(
                 "pixel_col": col,
             }
 
-    if _should_convert_kelvin_to_celsius(
+    if convert_to_celsius and _should_convert_kelvin_to_celsius(
         spec, dataset, None, unit_conversion, np.array([phys], dtype=np.float64)
     ):
         phys -= 273.15
         unit_out = "°C"
+        if phys < -100.0 or phys > 80.0:
+            return {
+                **base_resp,
+                "status": "nodata",
+                "value": None,
+                "raw_value": raw_scalar,
+                "unit": unit_out,
+                "qa_value": qa_val,
+                "qa_passed": qa_passed,
+                "pixel_row": row,
+                "pixel_col": col,
+            }
 
     return {
         **base_resp,
@@ -879,18 +1445,21 @@ async def query_dataset_point(
 ) -> dict[str, Any]:
     """Sample exact native grid pixel value and QA metadata at WGS 84 (lon, lat)."""
     asset, step_idx = _select_raster_asset(dataset, timestamp=timestamp, variable=variable)
-    with tempfile.TemporaryDirectory(prefix="ghs-pt-") as tmp_root:
-        local_path = await _materialize_asset(asset, storage, Path(tmp_root))
-        return await asyncio.to_thread(
-            _point_query_sync,
-            asset=asset,
-            asset_path=local_path,
-            readers=readers,
-            dataset=dataset,
-            lon=lon,
-            lat=lat,
-            step_idx=step_idx,
-            variable=variable,
-            timestamp=timestamp,
-            unit_conversion=unit_conversion,
-        )
+    with tempfile.TemporaryDirectory(prefix="ghs-pt-", dir=_scratch_base()) as tmp_root:
+        handle = await _materialize_asset(asset, storage, Path(tmp_root))
+        try:
+            return await asyncio.to_thread(
+                _point_query_sync,
+                asset=asset,
+                asset_path=handle.path,
+                readers=readers,
+                dataset=dataset,
+                lon=lon,
+                lat=lat,
+                step_idx=step_idx,
+                variable=variable,
+                timestamp=timestamp,
+                unit_conversion=unit_conversion,
+            )
+        finally:
+            handle.release()

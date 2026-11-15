@@ -15,9 +15,11 @@ from geospatial_harmonization.domain.ports import (
 )
 from geospatial_harmonization.handlers.registry import HandlerRegistry
 from geospatial_harmonization.readers import ReaderRegistry
+from geospatial_harmonization.storage.dedup import ContentDeduplicationService
 from geospatial_harmonization.storage.lifecycle import StorageLifecycleManager
 from geospatial_harmonization.storage.monitoring import StorageMonitoringService
 from geospatial_harmonization.storage.quota import StorageQuotaManager
+from geospatial_harmonization.storage.zones import StorageZoneManager
 
 
 def get_runtime_settings(request: Request) -> Settings:
@@ -80,6 +82,21 @@ def get_storage_monitoring(request: Request) -> StorageMonitoringService:
     return cast("StorageMonitoringService", request.app.state.monitoring)
 
 
+def get_optional_storage_quota(request: Request) -> StorageQuotaManager | None:
+    """Return StorageQuotaManager when lifecycle/quota subsystem is initialized."""
+    return cast("StorageQuotaManager | None", getattr(request.app.state, "quota", None))
+
+
+def get_optional_storage_dedup(request: Request) -> ContentDeduplicationService | None:
+    """Return ContentDeduplicationService when initialized."""
+    return cast("ContentDeduplicationService | None", getattr(request.app.state, "dedup", None))
+
+
+def get_optional_storage_zones(request: Request) -> StorageZoneManager | None:
+    """Return StorageZoneManager when initialized."""
+    return cast("StorageZoneManager | None", getattr(request.app.state, "zones", None))
+
+
 SettingsDep = Annotated[Settings, Depends(get_runtime_settings)]
 EngineDep = Annotated[AsyncEngine, Depends(get_db_engine)]
 StorageDep = Annotated[StoragePort, Depends(get_storage)]
@@ -90,5 +107,10 @@ JobRepoDep = Annotated[JobRepository, Depends(get_job_repo)]
 HarmonizationServiceDep = Annotated[HarmonizationService, Depends(get_harmonization_service)]
 StorageLedgerDep = Annotated[StorageLedgerRepository, Depends(get_storage_ledger)]
 StorageQuotaDep = Annotated[StorageQuotaManager, Depends(get_storage_quota)]
+OptionalStorageQuotaDep = Annotated[StorageQuotaManager | None, Depends(get_optional_storage_quota)]
+OptionalStorageDedupDep = Annotated[
+    ContentDeduplicationService | None, Depends(get_optional_storage_dedup)
+]
+OptionalStorageZonesDep = Annotated[StorageZoneManager | None, Depends(get_optional_storage_zones)]
 StorageLifecycleDep = Annotated[StorageLifecycleManager, Depends(get_storage_lifecycle)]
 StorageMonitoringDep = Annotated[StorageMonitoringService, Depends(get_storage_monitoring)]

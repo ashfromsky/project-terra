@@ -22,6 +22,9 @@ function syncScienceRasterSource(map: MapLibreMap, state: MapRenderState): void 
 
   if (hasLayer && hasSource && prevUrl === nextUrl) {
     map.setPaintProperty('active-science-raster-layer', 'raster-opacity', state.activeLayer?.opacity ?? 0.85)
+    if (map.getLayer('terra-user-aois-line')) {
+      map.moveLayer('active-science-raster-layer', 'terra-user-aois-line')
+    }
     return
   }
 
@@ -32,17 +35,19 @@ function syncScienceRasterSource(map: MapLibreMap, state: MapRenderState): void 
     type: 'raster',
     tiles: [nextUrl],
     tileSize: 256,
-    minzoom: 0,
-    maxzoom: 18,
+    minzoom: nextRaster.minzoom ?? 0,
+    maxzoom: nextRaster.maxzoom ?? 18,
     ...(nextRaster.bounds ? { bounds: nextRaster.bounds } : {}),
     attribution: state.activeLayer?.layer.attribution ?? 'NASA Earth Observations via TERRA',
   })
 
-  const beforeId = map.getLayer('graticule-grid-lines')
-    ? 'graticule-grid-lines'
-    : map.getLayer('ofm-boundary-country')
-      ? 'ofm-boundary-country'
-      : undefined
+  const beforeId = map.getLayer('terra-user-aois-line')
+    ? 'terra-user-aois-line'
+    : map.getLayer('graticule-grid-lines')
+      ? 'graticule-grid-lines'
+      : map.getLayer('ofm-boundary-country')
+        ? 'ofm-boundary-country'
+        : undefined
 
   map.addLayer(
     {
@@ -58,6 +63,9 @@ function syncScienceRasterSource(map: MapLibreMap, state: MapRenderState): void 
     beforeId,
   )
   ACTIVE_RASTER_URL_BY_MAP.set(map, nextUrl)
+  if (map.getLayer('terra-user-aois-line')) {
+    map.moveLayer('active-science-raster-layer', 'terra-user-aois-line')
+  }
 }
 
 export function syncMapLibreLayersAndSources(map: MapLibreMap, state: MapRenderState): void {

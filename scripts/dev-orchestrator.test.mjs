@@ -442,6 +442,51 @@ test('runDoctor validates DB isolation, S3 credentials, and never leaks secret v
     assert.ok(okResult.checks.some((c) => c.name === 'db:isolation' && c.status === 'pass'))
     assert.ok(okResult.checks.some((c) => c.name === 'creds:earthdata' && c.status === 'pass'))
     assert.equal(JSON.stringify(okResult).includes('super-secret-earthdata-token'), false)
+
+    const badEndpointResult = await runDoctor({
+      rootDir: tmpRoot,
+      hasCommand: () => true,
+      checkPort: async () => {},
+      env: {
+        DATABASE_URL: `sqlite+aiosqlite:///${path.join(tmpRoot, 'core.db')}`,
+        GHS_DATABASE_URL: `sqlite+aiosqlite:///${path.join(tmpRoot, 'ghs.db')}`,
+        SCIENTIFIC_ARTIFACT_DIR: path.join(tmpRoot, 'artifacts'),
+        LOCAL_STORAGE_DIR: path.join(tmpRoot, 'storage'),
+        STORAGE_BACKEND: 's3',
+        S3_BUCKET: 'terra',
+        S3_ENDPOINT_URL: 'https://acc123.r2.cloudflarestorage.com/terra',
+        AWS_ACCESS_KEY_ID: 'key-id',
+        AWS_SECRET_ACCESS_KEY: 'super-secret-r2-key',
+      },
+      probeStorage: async () => ({ ok: true }),
+    })
+    assert.equal(badEndpointResult.ok, false)
+    assert.ok(badEndpointResult.checks.some((c) => c.name === 'creds:s3_endpoint' && c.status === 'fail'))
+    assert.equal(JSON.stringify(badEndpointResult).includes('super-secret-r2-key'), false)
+
+    const validS3Result = await runDoctor({
+      rootDir: tmpRoot,
+      hasCommand: () => true,
+      checkPort: async () => {},
+      env: {
+        DATABASE_URL: `sqlite+aiosqlite:///${path.join(tmpRoot, 'core.db')}`,
+        GHS_DATABASE_URL: `sqlite+aiosqlite:///${path.join(tmpRoot, 'ghs.db')}`,
+        GHS_BASE_URL: 'http://127.0.0.1:8080',
+        SCIENTIFIC_ARTIFACT_DIR: path.join(tmpRoot, 'artifacts'),
+        LOCAL_STORAGE_DIR: path.join(tmpRoot, 'storage'),
+        STORAGE_BACKEND: 's3',
+        S3_BUCKET: 'terra',
+        S3_ENDPOINT_URL: 'https://acc123.r2.cloudflarestorage.com',
+        S3_REGION: 'auto',
+        AWS_ACCESS_KEY_ID: 'key-id',
+        AWS_SECRET_ACCESS_KEY: 'super-secret-r2-key',
+      },
+      probeStorage: async () => ({ ok: true }),
+    })
+    assert.equal(validS3Result.ok, true)
+    assert.ok(validS3Result.checks.some((c) => c.name === 'creds:storage' && c.status === 'pass'))
+    assert.ok(validS3Result.checks.some((c) => c.name === 'storage:s3_bucket' && c.status === 'pass'))
+    assert.equal(JSON.stringify(validS3Result).includes('super-secret-r2-key'), false)
   } finally {
     rmSync(tmpRoot, { recursive: true, force: true })
   }

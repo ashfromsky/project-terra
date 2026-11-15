@@ -41,9 +41,15 @@ export type MethodCatalogItemResponse = components['schemas']['MethodCatalogItem
 export type CreateAssessmentRequest = components['schemas']['CreateAssessmentRequest']
 export type AssessmentSummaryResponse = components['schemas']['AssessmentSummaryResponse']
 export type AssessmentDetailResponse = components['schemas']['AssessmentDetailResponse']
+export type AssessmentReadinessRequest = components['schemas']['AssessmentReadinessRequest']
+export type AssessmentReadinessResponse = components['schemas']['AssessmentReadinessResponse']
+export type DatasetReadinessProfileResponse = components['schemas']['DatasetReadinessProfileResponse']
+export type ReadinessCriterionResponse = components['schemas']['ReadinessCriterionResponse']
+export type MetricAvailabilityResponse = components['schemas']['MetricAvailabilityResponse']
 export type CompareAssessmentsRequest = components['schemas']['CompareAssessmentsRequest']
 export type VariableComparisonSummary = components['schemas']['VariableComparisonSummary']
 export type AssessmentComparisonResponse = components['schemas']['AssessmentComparisonResponse']
+export type AssessmentArtifactItemResponse = components['schemas']['AssessmentArtifactItemResponse']
 
 export type ProviderVariableSchema = components['schemas']['ProviderVariableSchema']
 export type ProviderProductSchema = components['schemas']['ProviderProductSchema']
@@ -52,8 +58,20 @@ export type DiscoverObservationsRequest = components['schemas']['DiscoverObserva
 export type DiscoveredObservationResponse = components['schemas']['DiscoveredObservationResponse']
 export type DiscoverObservationsResponse = components['schemas']['DiscoverObservationsResponse']
 export type StartIngestionRequest = components['schemas']['StartIngestionRequest']
+export type AutoProvisionRequest = components['schemas']['AutoProvisionRequest']
+export type AutoProvisionResponse = components['schemas']['AutoProvisionResponse']
+export type ProvisioningStepResponse = components['schemas']['ProvisioningStepResponse']
 export type PreparedDatasetTimeSeriesPreviewSchema =
   components['schemas']['PreparedDatasetTimeSeriesPreviewSchema']
 export type PreparedDatasetSummaryResponse =
   components['schemas']['PreparedDatasetSummaryResponse']
 export type IngestionOperationResponse = components['schemas']['IngestionOperationResponse']
+export type DatasetAssetDownloadUrlResponse =
+  components['schemas']['DatasetAssetDownloadUrlResponse']
+
+export type ZonalHistogramResponse = components['schemas']['ZonalHistogramResponse']
+export type ZonalStatisticsRequest = components['schemas']['ZonalStatisticsRequest']
+export type ZonalStatisticsResponse = components['schemas']['ZonalStatisticsResponse']
+export type ZonalTimeseriesPointResponse = components['schemas']['ZonalTimeseriesPointResponse']
+export type ZonalTimeseriesRequest = components['schemas']['ZonalTimeseriesRequest']
+export type ZonalTimeseriesResponse = components['schemas']['ZonalTimeseriesResponse']

@@ -1,0 +1,284 @@
+# ==============================================================================
+# PROJECT TERRA — Local Development Docker Compose Configuration
+#
+# Runs the complete 5-process development environment:
+# 1. PostgreSQL (Isolated databases: terra_core, terra_ghs)
+# 2. GHS Database Migration (One-shot Alembic migration)
+# 3. GHS API (Geospatial Ingestion & Harmonization API)
+# 4. GHS Worker (Background Ingestion Runner)
+# 5. Core API (FastAPI Backend Application)
+# 6. Core Worker (Scientific Assessment Runner)
+# 7. Frontend (React 19 / Vite SPA Development Server)
+# ==============================================================================
+
+name: terra-dev
+
+networks:
+  terra-dev-net:
+    driver: bridge
+
+volumes:
+  dev_postgres_data:
+    name: terra_dev_postgres_data
+  dev_core_artifacts:
+    name: terra_dev_core_artifacts
+  dev_ghs_storage:
+    name: terra_dev_ghs_storage
+  dev_ghs_scratch:
+    name: terra_dev_ghs_scratch
+
+services:
+  # ----------------------------------------------------------------------------
+  # PostgreSQL Service (Multi-database: terra_core & terra_ghs)
+  # ----------------------------------------------------------------------------
+  postgres:
+    image: postgres:16-alpine
+    container_name: terra-dev-postgres
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: postgres
+    volumes:
+      - dev_postgres_data:/var/lib/postgresql/data
+      - ./postgres/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+    networks:
+      - terra-dev-net
+
+  # ----------------------------------------------------------------------------
+  # GHS Migration (Applies Alembic migrations to terra_ghs)
+  # ----------------------------------------------------------------------------
+  ghs-migration:
+    image: terra-ghs:dev
+    container_name: terra-dev-ghs-migration
+    build:
+      context: ../../backend/services/geospatial_harmonization
+      dockerfile: Dockerfile
+    command: ["alembic", "upgrade", "head"]
+    restart: "no"
+    environment:
+      ENVIRONMENT: development
+      GHS_DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/terra_ghs
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - terra-dev-net
+
+  # ----------------------------------------------------------------------------
+  # GHS API Service (Port 8080)
+  # ----------------------------------------------------------------------------
+  ghs-api:
+    image: terra-ghs:dev
+    container_name: terra-dev-ghs-api
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${GHS_PORT:-8080}:8080"
+    environment:
+      ENVIRONMENT: development
+      DEBUG: ${DEBUG:-true}
+      GHS_DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/terra_ghs
+      STORAGE_BACKEND: ${STORAGE_BACKEND:-local}
+      LOCAL_STORAGE_DIR: /data/ghs_storage
+      GHS_STORAGE_TEMP_DIR: /data/ghs_scratch
+      GHS_STORAGE_BUDGET_BYTES: ${GHS_STORAGE_BUDGET_BYTES:-8000000000}
+      GHS_STORAGE_MAX_OBJECT_BYTES: ${GHS_STORAGE_MAX_OBJECT_BYTES:-2147483648}
+      GHS_STORAGE_MAX_JOB_OUTPUT_BYTES: ${GHS_STORAGE_MAX_JOB_OUTPUT_BYTES:-1073741824}
+      EARTHDATA_TOKEN: ${EARTHDATA_TOKEN:-}
+      CMR_BASE_URL: ${CMR_BASE_URL:-https://cmr.earthdata.nasa.gov/search}
+      NASA_POWER_BASE_URL: ${NASA_POWER_BASE_URL:-https://power.larc.nasa.gov/api}
+      APPEEARS_BASE_URL: ${APPEEARS_BASE_URL:-https://appeears.earthdatacloud.nasa.gov/api}
+      MODIS_ENABLED: ${MODIS_ENABLED:-true}
+      GPM_ENABLED: ${GPM_ENABLED:-true}
+      SMAP_ENABLED: ${SMAP_ENABLED:-true}
+      NASA_POWER_ENABLED: ${NASA_POWER_ENABLED:-true}
+      GENERIC_HANDLER_ALLOWED_HOSTS: ${GENERIC_HANDLER_ALLOWED_HOSTS:-[]}
+      GHS_ADMIN_TOKEN: ${GHS_ADMIN_TOKEN:-}
+      # S3 / R2 Configuration (Used when STORAGE_BACKEND=s3)
+      S3_BUCKET: ${S3_BUCKET:-}
+      S3_ENDPOINT_URL: ${S3_ENDPOINT_URL:-}
+      S3_REGION: ${S3_REGION:-auto}
+      S3_PREFIX: ${S3_PREFIX:-}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
+    volumes:
+      - dev_ghs_storage:/data/ghs_storage
+      - dev_ghs_scratch:/data/ghs_scratch
+    depends_on:
+      postgres:
+        condition: service_healthy
+      ghs-migration:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/ready', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    networks:
+      - terra-dev-net
+
+  # ----------------------------------------------------------------------------
+  # GHS Worker Service (Background Ingestion Runner)
+  # ----------------------------------------------------------------------------
+  ghs-worker:
+    image: terra-ghs:dev
+    container_name: terra-dev-ghs-worker
+    command: ["python", "-m", "geospatial_harmonization.worker"]
+    restart: unless-stopped
+    environment:
+      ENVIRONMENT: development
+      DEBUG: ${DEBUG:-true}
+      GHS_DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/terra_ghs
+      STORAGE_BACKEND: ${STORAGE_BACKEND:-local}
+      LOCAL_STORAGE_DIR: /data/ghs_storage
+      GHS_STORAGE_TEMP_DIR: /data/ghs_scratch
+      WORKER_POLL_INTERVAL_SECONDS: ${WORKER_POLL_INTERVAL_SECONDS:-2.0}
+      WORKER_LEASE_SECONDS: ${WORKER_LEASE_SECONDS:-300}
+      EARTHDATA_TOKEN: ${EARTHDATA_TOKEN:-}
+      CMR_BASE_URL: ${CMR_BASE_URL:-https://cmr.earthdata.nasa.gov/search}
+      NASA_POWER_BASE_URL: ${NASA_POWER_BASE_URL:-https://power.larc.nasa.gov/api}
+      APPEEARS_BASE_URL: ${APPEEARS_BASE_URL:-https://appeears.earthdatacloud.nasa.gov/api}
+      MODIS_ENABLED: ${MODIS_ENABLED:-true}
+      GPM_ENABLED: ${GPM_ENABLED:-true}
+      SMAP_ENABLED: ${SMAP_ENABLED:-true}
+      NASA_POWER_ENABLED: ${NASA_POWER_ENABLED:-true}
+      GENERIC_HANDLER_ALLOWED_HOSTS: ${GENERIC_HANDLER_ALLOWED_HOSTS:-[]}
+      # S3 / R2 Configuration
+      S3_BUCKET: ${S3_BUCKET:-}
+      S3_ENDPOINT_URL: ${S3_ENDPOINT_URL:-}
+      S3_REGION: ${S3_REGION:-auto}
+      S3_PREFIX: ${S3_PREFIX:-}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
+    volumes:
+      - dev_ghs_storage:/data/ghs_storage
+      - dev_ghs_scratch:/data/ghs_scratch
+    depends_on:
+      postgres:
+        condition: service_healthy
+      ghs-migration:
+        condition: service_completed_successfully
+      ghs-api:
+        condition: service_healthy
+    networks:
+      - terra-dev-net
+
+  # ----------------------------------------------------------------------------
+  # Core Backend API Service (Port 8000)
+  # ----------------------------------------------------------------------------
+  core:
+    image: terra-core:dev
+    container_name: terra-dev-core
+    build:
+      context: ../../
+      dockerfile: deploy/containerization/docker/core.Dockerfile
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${CORE_PORT:-8000}:8000"
+    environment:
+      ENVIRONMENT: development
+      DEBUG: ${DEBUG:-true}
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/terra_core
+      DATABASE_AUTO_CREATE_TABLES: "true"
+      GHS_BASE_URL: http://ghs-api:8080
+      GHS_TIMEOUT_SECONDS: ${GHS_TIMEOUT_SECONDS:-30.0}
+      SCIENTIFIC_ARTIFACT_DIR: /data/artifacts
+      STORAGE_BACKEND: ${STORAGE_BACKEND:-local}
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:-dev-only-jwt-secret-key-replace-before-production-32chars}
+      JWT_ALGORITHM: ${JWT_ALGORITHM:-HS256}
+      JWT_ACCESS_TOKEN_EXPIRE_MINUTES: ${JWT_ACCESS_TOKEN_EXPIRE_MINUTES:-1440}
+      AUTH_COOKIE_NAME: ${AUTH_COOKIE_NAME:-terra_session}
+      AUTH_COOKIE_SECURE: "false"
+      CORS_ORIGINS: ${CORS_ORIGINS:-["http://localhost:5173","http://127.0.0.1:5173"]}
+      CORS_ALLOW_CREDENTIALS: "true"
+      FRONTEND_AUTH_REDIRECT_URL: ${FRONTEND_AUTH_REDIRECT_URL:-http://localhost:5173/explore}
+      GITHUB_CLIENT_ID: ${GITHUB_CLIENT_ID:-}
+      GITHUB_CLIENT_SECRET: ${GITHUB_CLIENT_SECRET:-}
+      GITHUB_REDIRECT_URI: ${GITHUB_REDIRECT_URI:-http://localhost:8000/api/v1/auth/github/callback}
+      GITHUB_OAUTH_SCOPES: ${GITHUB_OAUTH_SCOPES:-read:user user:email}
+      # S3 / R2 Configuration
+      S3_BUCKET: ${S3_BUCKET:-}
+      CORE_S3_PREFIX: ${CORE_S3_PREFIX:-core}
+      S3_ENDPOINT_URL: ${S3_ENDPOINT_URL:-}
+      S3_REGION: ${S3_REGION:-auto}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
+    volumes:
+      - dev_core_artifacts:/data/artifacts
+    depends_on:
+      postgres:
+        condition: service_healthy
+      ghs-api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/ready', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    networks:
+      - terra-dev-net
+
+  # ----------------------------------------------------------------------------
+  # Core Worker Service (Scientific Assessment Runner)
+  # ----------------------------------------------------------------------------
+  core-worker:
+    image: terra-core:dev
+    container_name: terra-dev-core-worker
+    command: ["python", "-m", "terra_worker"]
+    restart: unless-stopped
+    environment:
+      ENVIRONMENT: development
+      DEBUG: ${DEBUG:-true}
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/terra_core
+      GHS_BASE_URL: http://ghs-api:8080
+      GHS_TIMEOUT_SECONDS: ${GHS_TIMEOUT_SECONDS:-30.0}
+      SCIENTIFIC_ARTIFACT_DIR: /data/artifacts
+      STORAGE_BACKEND: ${STORAGE_BACKEND:-local}
+      TERRA_WORKER_POLL_SECONDS: ${TERRA_WORKER_POLL_SECONDS:-2.0}
+      # S3 / R2 Configuration
+      S3_BUCKET: ${S3_BUCKET:-}
+      CORE_S3_PREFIX: ${CORE_S3_PREFIX:-core}
+      S3_ENDPOINT_URL: ${S3_ENDPOINT_URL:-}
+      S3_REGION: ${S3_REGION:-auto}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
+    volumes:
+      - dev_core_artifacts:/data/artifacts
+    depends_on:
+      postgres:
+        condition: service_healthy
+      core:
+        condition: service_healthy
+    networks:
+      - terra-dev-net
+
+  # ----------------------------------------------------------------------------
+  # Frontend Service (Vite Development Server with internal API proxy)
+  # ----------------------------------------------------------------------------
+  frontend:
+    image: terra-frontend:dev
+    container_name: terra-dev-frontend
+    build:
+      context: ../../
+      dockerfile: deploy/containerization/docker/frontend-dev.Dockerfile
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${FRONTEND_PORT:-5173}:5173"
+    environment:
+      VITE_API_PROXY_TARGET: http://core:8000
+      VITE_NASA_GIBS_BASE_URL: ${VITE_NASA_GIBS_BASE_URL:-https://gibs.earthdata.nasa.gov}
+    depends_on:
+      core:
+        condition: service_healthy
+    networks:
+      - terra-dev-net

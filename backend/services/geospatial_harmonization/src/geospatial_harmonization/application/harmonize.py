@@ -562,6 +562,33 @@ class HarmonizationService:
             return None
         return dt.replace(tzinfo=UTC) if dt.tzinfo is None else dt.astimezone(UTC)
 
+    @staticmethod
+    def _aggregate_qa_bucket(
+        qa_key: str,
+        samples: list[tuple[int | float, float]],
+    ) -> int | float | None:
+        if not samples:
+            return None
+        is_continuous = (
+            any(isinstance(val, float) and not val.is_integer() for val, _ in samples)
+            or "index" in qa_key.lower()
+            or "score" in qa_key.lower()
+            or "pqi" in qa_key.lower()
+        )
+        if is_continuous:
+            total_w = sum(w for _, w in samples if w > 0)
+            if total_w > 0:
+                val_num = sum(float(val) * w for val, w in samples if w > 0) / total_w
+            else:
+                val_num = sum(float(val) for val, _ in samples) / len(samples)
+            return round(val_num, 4)
+
+        weights: dict[int, float] = {}
+        for val, w in samples:
+            key_int = round(val)
+            weights[key_int] = weights.get(key_int, 0.0) + (w if w > 0 else 1.0)
+        return sorted(weights.items(), key=lambda kv: (-kv[1], kv[0]))[0][0]
+
     def _apply_temporal_harmonization(
         self, dataset: SpatialDataset, plan: HarmonizationPlan
     ) -> tuple[SpatialDataset, tuple[str, ...]]:
@@ -622,6 +649,9 @@ class HarmonizationService:
             var_unit = str(ts_payload.get("units") or (var_spec.units if var_spec else "1"))
             valid_counts = list(ts_payload.get("valid_pixel_counts") or [])
             total_counts = list(ts_payload.get("total_pixel_counts") or [])
+            raw_qa = ts_payload.get("qa_layers")
+            qa_layers_raw: Mapping[Any, Any] = raw_qa if isinstance(raw_qa, Mapping) else {}
+            overpass_raw = list(ts_payload.get("overpass_tags") or [])
 
             eff_agg: TemporalAggregationKind = target.aggregation
             if eff_agg == "none":
@@ -636,9 +666,21 @@ class HarmonizationService:
                     )
                 else:
                     eff_agg = "mean"
+            elif (
+                eff_agg in ("sum", "rate_to_depth_sum")
+                and var_spec is not None
+                and var_spec.semantics == "continuous_intensive"
+            ):
+                eff_agg = "mean"
+                msg = (
+                    f"Overrode '{target.aggregation}' to 'mean' for intensive variable "
+                    f"'{var_name}'."
+                )
+                if msg not in warnings_out:
+                    warnings_out.append(msg)
             applied_aggs.add(eff_agg)
 
-            buckets: dict[tuple[datetime, datetime], list[tuple[datetime, float, float]]] = {}
+            buckets: dict[tuple[datetime, datetime], list[tuple[int, datetime, float, float]]] = {}
             is_rate_per_day = eff_agg == "rate_to_depth_sum" and "/day" in var_unit.lower()
             for idx, raw_t in enumerate(raw_timestamps):
                 dt = self._parse_iso_utc(raw_t)
@@ -652,16 +694,23 @@ class HarmonizationService:
                 weight = 1.0
                 if idx < len(valid_counts) and idx < len(total_counts) and total_counts[idx] > 0:
                     weight = max(0.0, float(valid_counts[idx]) / float(total_counts[idx]))
-                buckets.setdefault(b_key, []).append((dt, fval, weight))
+                buckets.setdefault(b_key, []).append((idx, dt, fval, weight))
 
             if not buckets:
                 continue
 
             out_ts: list[datetime] = []
             out_vals: list[float | None] = []
+            out_qa: dict[str, list[int | float | None]] = {str(qk): [] for qk in qa_layers_raw}
+            out_overpass: list[str] = []
+            has_valid_counts = len(valid_counts) == len(raw_timestamps)
+            has_total_counts = len(total_counts) == len(raw_timestamps)
+            out_valid_counts: list[int] = []
+            out_total_counts: list[int] = []
+
             for (b_start, b_end), items in sorted(buckets.items(), key=lambda pair: pair[0][0]):
-                step_arrays = [np.array([v], dtype=np.float32) for _, v, _ in items]
-                step_weights = [np.array([w], dtype=np.float32) for _, _, w in items]
+                step_arrays = [np.array([v], dtype=np.float32) for _, _, v, _ in items]
+                step_weights = [np.array([w], dtype=np.float32) for _, _, _, w in items]
                 src_sem = (
                     "interval"
                     if eff_agg == "rate_to_depth_sum"
@@ -679,7 +728,7 @@ class HarmonizationService:
                             else None
                         ),
                     )
-                    for dt, _, _ in items
+                    for _, dt, _, _ in items
                 ]
                 b_sem = "interval" if target.semantics == "instantaneous" else target.semantics
                 b_comp = target.composite_days if b_sem == "composite" else None
@@ -714,18 +763,60 @@ class HarmonizationService:
                 global_starts.append(b_start)
                 global_ends.append(b_end)
 
-            out_unit = "mm" if eff_agg == "rate_to_depth_sum" else var_unit
+                if has_valid_counts:
+                    out_valid_counts.append(sum(int(valid_counts[idx]) for idx, _, _, _ in items))
+                if has_total_counts:
+                    out_total_counts.append(sum(int(total_counts[idx]) for idx, _, _, _ in items))
+                if overpass_raw:
+                    tags = {
+                        str(overpass_raw[idx]).strip()
+                        for idx, _, _, _ in items
+                        if idx < len(overpass_raw) and str(overpass_raw[idx] or "").strip()
+                    }
+                    if len(tags) == 1:
+                        out_overpass.append(next(iter(tags)))
+                    elif tags:
+                        out_overpass.append("mixed")
+                for qk, q_seq in qa_layers_raw.items():
+                    if not isinstance(q_seq, list | tuple):
+                        continue
+                    samples: list[tuple[int | float, float]] = []
+                    for idx, _, _, _ in items:
+                        if idx < len(q_seq) and q_seq[idx] is not None:
+                            q_val = q_seq[idx]
+                            if isinstance(q_val, int | float):
+                                px_w = (
+                                    float(valid_counts[idx])
+                                    if idx < len(valid_counts) and valid_counts[idx] is not None
+                                    else 1.0
+                                )
+                                samples.append((q_val, px_w))
+                    out_qa[str(qk)].append(self._aggregate_qa_bucket(str(qk), samples))
+
+            out_unit = var_unit
             if eff_agg == "rate_to_depth_sum":
-                new_units[str(var_name)] = "mm"
+                out_unit = "mm"
+            elif eff_agg == "sum" and var_unit.lower().endswith("/day"):
+                out_unit = var_unit[:-4].rstrip() or var_unit
+            if out_unit != var_unit:
+                new_units[str(var_name)] = out_unit
                 if var_spec is not None:
                     new_variables[str(var_name)] = replace(
-                        var_spec, units="mm", semantics="continuous_extensive"
+                        var_spec, units=out_unit, semantics="continuous_extensive"
                     )
 
             new_ts_map[str(var_name)] = build_time_series_extension(
                 timestamps=out_ts,
                 values=out_vals,
                 units=out_unit,
+                qa_layers={k: v for k, v in out_qa.items() if len(v) == len(out_ts)} or None,
+                overpass_tags=out_overpass if len(out_overpass) == len(out_ts) else None,
+                valid_pixel_counts=(
+                    out_valid_counts if len(out_valid_counts) == len(out_ts) else None
+                ),
+                total_pixel_counts=(
+                    out_total_counts if len(out_total_counts) == len(out_ts) else None
+                ),
                 is_scaled=True,
             )
 

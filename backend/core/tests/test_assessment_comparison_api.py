@@ -145,6 +145,7 @@ def test_compare_assessments_computes_deltas_and_enforces_rules() -> None:
             database_url="sqlite+aiosqlite:///:memory:",
             github_client_id="cid",
             github_client_secret="csec",
+            ghs_timeout_seconds=0.01,
         )
     )
     app.dependency_overrides[get_github_oauth_client] = lambda: github_stub

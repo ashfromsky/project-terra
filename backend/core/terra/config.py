@@ -8,16 +8,38 @@ example frontend `VITE_*` entries) are ignored.
 """
 
 import json
+import logging
 from functools import lru_cache
 from pathlib import Path
 from typing import Annotated, Any, Literal
+from urllib.parse import urlsplit, urlunsplit
 
 from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 Environment = Literal["development", "test", "production"]
+StorageBackend = Literal["local", "s3"]
 _DEFAULT_DEV_JWT_SECRET = "dev-insecure-jwt-secret-change-in-production"
 _REPO_ROOT = Path(__file__).resolve().parents[3]
+logger = logging.getLogger("terra.config")
+
+
+def normalize_s3_endpoint_url(endpoint_url: str | None, bucket: str | None = None) -> str | None:
+    """Normalize custom S3/R2 endpoint URL and strip accidental trailing bucket path."""
+    if endpoint_url is None:
+        return None
+    cleaned = endpoint_url.strip().rstrip("/")
+    if not cleaned:
+        return None
+    parsed = urlsplit(cleaned)
+    path = parsed.path.rstrip("/")
+    if bucket and path == f"/{bucket.strip()}":
+        logger.warning(
+            "Stripping trailing bucket segment '/%s' from S3_ENDPOINT_URL.",
+            bucket.strip(),
+        )
+        path = ""
+    return urlunsplit((parsed.scheme, parsed.netloc, path, "", ""))
 
 
 def _default_dev_database_url() -> str:
@@ -51,6 +73,20 @@ class Settings(BaseSettings):
     ghs_timeout_seconds: float = 30.0
     scientific_artifact_dir: str | None = None
     terra_worker_poll_seconds: float = Field(default=2.0, gt=0.0, le=60.0)
+
+    storage_backend: StorageBackend = "local"
+    s3_bucket: str | None = None
+    core_s3_prefix: str = "core"
+    s3_endpoint_url: str | None = None
+    s3_region: str = "auto"
+    s3_access_key_id: SecretStr | None = None
+    s3_secret_access_key: SecretStr | None = None
+    aws_access_key_id: SecretStr | None = None
+    aws_secret_access_key: SecretStr | None = None
+    s3_presign_ttl_seconds: int = Field(default=300, ge=30, le=86_400)
+    s3_connect_timeout_seconds: float = Field(default=10.0, gt=0.0, le=120.0)
+    s3_read_timeout_seconds: float = Field(default=60.0, gt=0.0, le=600.0)
+    s3_max_attempts: int = Field(default=4, ge=1, le=10)
 
     github_client_id: str = ""
     github_client_secret: SecretStr = SecretStr("")
@@ -98,6 +134,8 @@ class Settings(BaseSettings):
         if self.database_url.startswith("sqlite+aiosqlite:///./"):
             rel_part = self.database_url.removeprefix("sqlite+aiosqlite:///./")
             self.database_url = f"sqlite+aiosqlite:///{(_REPO_ROOT / rel_part).resolve()}"
+        if self.environment == "test" and "ghs_timeout_seconds" not in self.model_fields_set:
+            self.ghs_timeout_seconds = 0.05
         if self.environment == "production":
             secret = self.jwt_secret_key.get_secret_value()
             if not secret or secret == _DEFAULT_DEV_JWT_SECRET or len(secret) < 32:
@@ -105,6 +143,20 @@ class Settings(BaseSettings):
                     "JWT_SECRET_KEY must be set to a strong (>= 32 chars) secret in production"
                 )
         return self
+
+    def effective_s3_access_key_id(self) -> str | None:
+        """Resolve S3/R2 access key from ``S3_ACCESS_KEY_ID`` or ``AWS_ACCESS_KEY_ID``."""
+        for candidate in (self.s3_access_key_id, self.aws_access_key_id):
+            if candidate is not None and candidate.get_secret_value().strip():
+                return candidate.get_secret_value().strip()
+        return None
+
+    def effective_s3_secret_access_key(self) -> str | None:
+        """Resolve S3/R2 secret key from ``S3_SECRET_ACCESS_KEY`` or ``AWS_SECRET_ACCESS_KEY``."""
+        for candidate in (self.s3_secret_access_key, self.aws_secret_access_key):
+            if candidate is not None and candidate.get_secret_value().strip():
+                return candidate.get_secret_value().strip()
+        return None
 
 
 @lru_cache

@@ -6,8 +6,10 @@ import {
   parseScientificAssessmentResult,
 } from '../../shared/api/assessments'
 import { useCurrentUserQuery } from '../../shared/api/auth'
-import { ApiError } from '../../shared/api/client'
+import { ApiError, buildApiUrl } from '../../shared/api/client'
 import {
+  fetchDatasetDownloadUrl,
+  useAutoProvisionMutation,
   useDiscoverObservationsMutation,
   useIngestionDetailQuery,
   useIngestionsQuery,
@@ -15,6 +17,7 @@ import {
   usePreparedDatasetsQuery,
   useProvidersQuery,
   useStartIngestionMutation,
+  type AutoProvisionResponse,
 } from '../../shared/api/data-sources'
 import type { DiscoverObservationsResponse } from '../../shared/api/contracts'
 import { useLayerCatalogQuery } from '../../shared/api/layers'
@@ -72,6 +75,7 @@ export function DataSourcesPage() {
 
   const discoverMutation = useDiscoverObservationsMutation()
   const startIngestionMutation = useStartIngestionMutation()
+  const autoProvisionMutation = useAutoProvisionMutation()
 
   const [selectedProvider, setSelectedProvider] = useState('')
   const [selectedProduct, setSelectedProduct] = useState('')
@@ -79,7 +83,7 @@ export function DataSourcesPage() {
   const [bboxText, setBboxText] = useState('24.0, 48.0, 25.0, 49.0')
   const [startDate, setStartDate] = useState('2024-06-01')
   const [endDate, setEndDate] = useState('2024-08-31')
-  const [maxGranules, setMaxGranules] = useState(12)
+  const [maxGranules, setMaxGranules] = useState(48)
   const [targetCadence, setTargetCadence] = useState('monthly')
   const [runType, setRunType] = useState('Final')
   const [overpass, setOverpass] = useState('AM')
@@ -87,8 +91,10 @@ export function DataSourcesPage() {
   const [executeNow, setExecuteNow] = useState(false)
 
   const [discoveryResult, setDiscoveryResult] = useState<DiscoverObservationsResponse | null>(null)
+  const [provisionResult, setProvisionResult] = useState<AutoProvisionResponse | null>(null)
   const [selectedOperationId, setSelectedOperationId] = useState<string | null>(null)
   const [selectedDatasetId, setSelectedDatasetId] = useState<string | null>(null)
+  const [downloadingDatasetId, setDownloadingDatasetId] = useState<string | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
 
   const [groupFilter, setGroupFilter] = useState('all')
@@ -155,6 +161,29 @@ export function DataSourcesPage() {
       values,
     })
   }, [activeDataset?.product, activeDatasetPreview])
+
+  const handleDownloadDataset = async (datasetId: string) => {
+    setActionError(null)
+    setDownloadingDatasetId(datasetId)
+    try {
+      const info = await fetchDatasetDownloadUrl(datasetId)
+      const targetUrl = info.presigned ? info.downloadUrl : buildApiUrl(info.downloadUrl)
+      const anchor = document.createElement('a')
+      anchor.href = targetUrl
+      anchor.download = info.filename
+      if (info.presigned) {
+        anchor.target = '_blank'
+        anchor.rel = 'noopener noreferrer'
+      }
+      document.body.appendChild(anchor)
+      anchor.click()
+      anchor.remove()
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : 'Unable to prepare dataset download.')
+    } finally {
+      setDownloadingDatasetId(null)
+    }
+  }
 
   const layers = useMemo(() => layersQuery.data ?? [], [layersQuery.data])
   const availableGroups = useMemo(() => {
@@ -236,6 +265,35 @@ export function DataSourcesPage() {
       setSelectedOperationId(created.id)
       if (created.datasetId) {
         setSelectedDatasetId(created.datasetId)
+      }
+    } catch (cause) {
+      const msg = cause instanceof ApiError ? cause.message : String(cause)
+      setActionError(msg)
+    }
+  }
+
+  const handleAutoProvision = async () => {
+    setActionError(null)
+    try {
+      const manualBbox = parseManualBbox()
+      const res = await autoProvisionMutation.mutateAsync({
+        regionId: selectedRegionId || null,
+        bbox: manualBbox,
+        analysisStart: `${startDate}T00:00:00Z`,
+        analysisEnd: `${endDate}T23:59:59Z`,
+        targetCadence: targetCadence === 'native' ? 'monthly' : targetCadence,
+        baselineType: 'fixed_reference',
+        referenceStart: null,
+        referenceEnd: null,
+        minReferenceYears: 3,
+        qaLevel: 'strict',
+        existingDatasetIds: [],
+        desiredDomains: ['climate', 'precipitation', 'soil_moisture', 'vegetation'],
+        maxGranulesPerProduct: maxGranules,
+      })
+      setProvisionResult(res)
+      if ((res.datasetIds ?? []).length > 0) {
+        setSelectedDatasetId(res.datasetIds![0]!)
       }
     } catch (cause) {
       const msg = cause instanceof ApiError ? cause.message : String(cause)
@@ -466,17 +524,17 @@ export function DataSourcesPage() {
 
                   <div className="sci-field">
                     <label className="sci-label" htmlFor="ingest-max-granules">
-                      Max granules (1–64)
+                      Max granules (1–256)
                     </label>
                     <input
                       id="ingest-max-granules"
                       className="sci-input"
                       type="number"
                       min={1}
-                      max={64}
+                      max={256}
                       value={maxGranules}
                       onChange={(e) =>
-                        setMaxGranules(Math.max(1, Math.min(64, Number(e.target.value) || 1)))
+                        setMaxGranules(Math.max(1, Math.min(256, Number(e.target.value) || 1)))
                       }
                     />
                   </div>
@@ -563,6 +621,16 @@ export function DataSourcesPage() {
                   >
                     {startIngestionMutation.isPending ? 'Submitting…' : 'Start Ingestion'}
                   </Button>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    disabled={autoProvisionMutation.isPending}
+                    onClick={() => void handleAutoProvision()}
+                  >
+                    {autoProvisionMutation.isPending
+                      ? 'Auto-Provisioning…'
+                      : 'Auto-Provision Bundle'}
+                  </Button>
                 </div>
               </form>
             )}
@@ -617,6 +685,62 @@ export function DataSourcesPage() {
           </aside>
 
           <div className="sci-main-stack">
+            {provisionResult ? (
+              <section className="sci-panel" aria-label="Auto-provisioning results">
+                <div className="sci-panel__header">
+                  <div>
+                    <h2 className="sci-panel__title">Adaptive Bundle Provisioning Outcome</h2>
+                    <p className="sci-panel__subtitle">
+                      Window: {provisionResult.provisionStart.slice(0, 10)} →{' '}
+                      {provisionResult.provisionEnd.slice(0, 10)}
+                      {provisionResult.windowExpansionReason
+                        ? ` · ${provisionResult.windowExpansionReason}`
+                        : ''}
+                    </p>
+                  </div>
+                  <StatusBadge tone="teal">
+                    {(provisionResult.datasetIds ?? []).length} dataset(s)
+                  </StatusBadge>
+                </div>
+                <div className="provenance-table-wrapper">
+                  <table className="provenance-table">
+                    <thead>
+                      <tr>
+                        <th scope="col">Domain</th>
+                        <th scope="col">Provider · Product</th>
+                        <th scope="col">Status</th>
+                        <th scope="col">Details</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {(provisionResult.steps ?? []).map((step) => (
+                        <tr key={`${step.domain}-${step.provider}-${step.product}`}>
+                          <td className="provenance-table__primary">{step.domain}</td>
+                          <td>
+                            {step.provider} · {step.product}
+                          </td>
+                          <td>
+                            <StatusBadge
+                              tone={
+                                step.status === 'provisioned' || step.status === 'reused'
+                                  ? 'success'
+                                  : step.status === 'skipped'
+                                    ? 'warning'
+                                    : 'error'
+                              }
+                            >
+                              {step.status}
+                            </StatusBadge>
+                          </td>
+                          <td style={{ whiteSpace: 'normal', minWidth: 240 }}>{step.detail}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </section>
+            ) : null}
+
             {discoveryResult ? (
               <section className="sci-panel" aria-label="Discovered satellite observations">
                 <div className="sci-panel__header">
@@ -789,11 +913,19 @@ export function DataSourcesPage() {
                               </div>
                               <div className="sci-run-item__meta">{ds.datasetId}</div>
                             </td>
-                            <td>{(ds.variables ?? []).join(', ') || '—'}</td>
+                            <td>
+                              <div>{(ds.variables ?? []).join(', ') || '—'}</div>
+                              <div className="sci-run-item__meta">
+                                QA: {(ds.qaLayersPresent ?? []).join(', ') || 'None'}
+                              </div>
+                            </td>
                             <td>
                               {ds.temporalCadence ?? '—'} ·{' '}
                               {ds.temporalStart?.slice(0, 10) ?? '—'} to{' '}
                               {ds.temporalEnd?.slice(0, 10) ?? '—'}
+                              {ds.spanYears !== null && ds.spanYears !== undefined
+                                ? ` (${ds.spanYears.toFixed(1)} yr)`
+                                : ''}
                             </td>
                             <td>
                               {ds.observationCount} obs ·{' '}
@@ -809,6 +941,14 @@ export function DataSourcesPage() {
                                   onClick={() => setSelectedDatasetId(ds.datasetId)}
                                 >
                                   Inspect
+                                </Button>
+                                <Button
+                                  type="button"
+                                  variant="secondary"
+                                  disabled={downloadingDatasetId === ds.datasetId}
+                                  onClick={() => void handleDownloadDataset(ds.datasetId)}
+                                >
+                                  {downloadingDatasetId === ds.datasetId ? 'Preparing…' : 'Download'}
                                 </Button>
                                 <Link
                                   to={`${APP_ROUTES.assessments}?datasetId=${encodeURIComponent(ds.datasetId)}${ds.regionId ? `&regionId=${encodeURIComponent(ds.regionId)}` : ''}`}

@@ -185,17 +185,19 @@ def warp_variable(
     for idx in np.ndindex(lead_shape) if lead_shape else ((),):
         src_slice = np.ascontiguousarray(work[idx] if idx else work)
         dst_slice = np.ascontiguousarray(out[idx] if idx else out)
-        reproject(
-            source=src_slice,
-            destination=dst_slice,
-            src_transform=src_t,
-            src_crs=src_res.crs,
-            dst_transform=dst_t,
-            dst_crs=dst_res.crs,
-            src_nodata=src_nd,
-            dst_nodata=dst_nd,
-            resampling=_RESAMPLING_MAP[method],
-        )
+        with py_warnings.catch_warnings():
+            py_warnings.simplefilter("ignore", NotGeoreferencedWarning)
+            reproject(
+                source=src_slice,
+                destination=dst_slice,
+                src_transform=src_t,
+                src_crs=src_res.crs,
+                dst_transform=dst_t,
+                dst_crs=dst_res.crs,
+                src_nodata=src_nd,
+                dst_nodata=dst_nd,
+                resampling=_RESAMPLING_MAP[method],
+            )
         if idx:
             out[idx] = dst_slice
         else:

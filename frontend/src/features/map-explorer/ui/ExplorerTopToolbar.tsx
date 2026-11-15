@@ -80,6 +80,10 @@ export function ExplorerTopToolbar({
   const setBasemap = useExploreStore((s) => s.setBasemap)
   const selectedDate = useExploreStore((s) => s.selectedDate)
   const setSelectedDate = useExploreStore((s) => s.setSelectedDate)
+  const gibsLayerId = useExploreStore((s) => s.gibsLayerId)
+  const gibsDate = useExploreStore((s) => s.gibsDate)
+  const setGibsDate = useExploreStore((s) => s.setGibsDate)
+  const displayDate = gibsLayerId ? gibsDate : selectedDate
   const interactionMode = useExploreStore((s) => s.interactionMode)
   const setInteractionMode = useExploreStore((s) => s.setInteractionMode)
   const comparisonMode = useExploreStore((s) => s.comparisonMode)
@@ -168,11 +172,13 @@ export function ExplorerTopToolbar({
           <input
             type="date"
             className="explorer-date-chip__input"
-            value={selectedDate}
+            value={displayDate}
             min="2000-02-24"
             max="2026-11-02"
             onChange={(e) => {
-              if (e.target.value) setSelectedDate(e.target.value)
+              if (!e.target.value) return
+              setSelectedDate(e.target.value)
+              if (gibsLayerId) setGibsDate(e.target.value)
             }}
             aria-label="Observation date"
           />

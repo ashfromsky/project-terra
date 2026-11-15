@@ -1,5 +1,6 @@
 import type { FeatureCollection, Geometry } from 'geojson'
 import type { LayerSpecification, StyleSpecification } from 'maplibre-gl'
+import { buildApiUrl } from '../../../shared/api/client'
 import { buildLayerTileUrlTemplate, resolveLayerEffectiveDate } from '../../../shared/api/layers'
 import {
   BASEMAP_PROVIDER_REGISTRY,
@@ -17,28 +18,60 @@ const EMPTY_FC: FeatureCollection<Geometry> = {
 export function resolveScienceRasterConfig(
   activeLayer: LayerRenderConfig | null,
   selectedDate: string,
-): { tileUrl: string; bounds?: [number, number, number, number] } | null {
-  if (
-    !activeLayer ||
-    !activeLayer.visible ||
-    activeLayer.layer.availabilityStatus !== 'connected' ||
-    !activeLayer.layer.tileSource.isConnected
-  ) {
+): {
+  tileUrl: string
+  bounds?: [number, number, number, number]
+  minzoom?: number
+  maxzoom?: number
+} | null {
+  if (!activeLayer || !activeLayer.visible) {
+    return null
+  }
+  const hasExternalTemplate = Boolean(
+    activeLayer.layer.tileSource?.urlTemplate &&
+      (activeLayer.layer.tileSource.urlTemplate.startsWith('http://') ||
+        activeLayer.layer.tileSource.urlTemplate.startsWith('https://')),
+  )
+  const isAvailableLocally =
+    (activeLayer.layer.availabilityStatus === 'connected' ||
+      activeLayer.layer.availabilityStatus === 'preview') &&
+    activeLayer.layer.tileSource.isConnected
+
+  if (!hasExternalTemplate && !isAvailableLocally) {
     return null
   }
   const effectiveDate = resolveLayerEffectiveDate(activeLayer.layer, selectedDate)
-  const tileUrl = buildLayerTileUrlTemplate(activeLayer.layer.id, {
-    timestamp: effectiveDate,
-    vmin: activeLayer.minValue,
-    vmax: activeLayer.maxValue,
-    datasetId: activeLayer.layer.activeDatasetId ?? undefined,
-  })
+  let tileUrl: string
+  if (hasExternalTemplate && activeLayer.layer.tileSource.urlTemplate) {
+    const rawTemplate = activeLayer.layer.tileSource.urlTemplate
+    const withTime = rawTemplate
+      .replace('{time}', effectiveDate || 'default')
+      .replace('{timestamp}', effectiveDate || 'default')
+    tileUrl =
+      withTime.startsWith('http://') || withTime.startsWith('https://')
+        ? withTime
+        : buildApiUrl(withTime)
+  } else {
+    // Always build an absolute, date-aware tile URL. MapLibre does not reliably
+    // expand relative raster templates after the first style load.
+    tileUrl = buildLayerTileUrlTemplate(activeLayer.layer.id, {
+      timestamp: effectiveDate,
+      vmin: activeLayer.minValue,
+      vmax: activeLayer.maxValue,
+      datasetId: activeLayer.layer.activeDatasetId ?? undefined,
+    })
+  }
   const rawBounds = activeLayer.layer.datasetBbox
   const bounds: [number, number, number, number] | undefined =
     rawBounds && rawBounds.length === 4
       ? [rawBounds[0], rawBounds[1], rawBounds[2], rawBounds[3]]
       : undefined
-  return { tileUrl, bounds }
+  return {
+    tileUrl,
+    bounds,
+    minzoom: (activeLayer.layer.tileSource as { minZoom?: number }).minZoom ?? 0,
+    maxzoom: (activeLayer.layer.tileSource as { maxZoom?: number }).maxZoom ?? 18,
+  }
 }
 
 export function buildDatasetBboxGeoJson(
@@ -279,8 +312,8 @@ export function buildMapLibreStyle(state: MapRenderState): StyleSpecification {
       type: 'raster',
       tiles: [scienceRaster.tileUrl],
       tileSize: 256,
-      minzoom: 0,
-      maxzoom: 18,
+      minzoom: scienceRaster.minzoom ?? 0,
+      maxzoom: scienceRaster.maxzoom ?? 18,
       ...(scienceRaster.bounds ? { bounds: scienceRaster.bounds } : {}),
       attribution: state.activeLayer?.layer.attribution ?? 'NASA Earth Observations via TERRA',
     }

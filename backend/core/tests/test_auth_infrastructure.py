@@ -85,7 +85,9 @@ def test_httpx_github_client_exchanges_code_and_resolves_private_email() -> None
 
 
 def test_httpx_github_client_raises_on_rejected_code_or_missing_config() -> None:
-    client = HttpxGitHubOAuthClient(Settings(environment="test"))
+    client = HttpxGitHubOAuthClient(
+        Settings(_env_file=None, environment="test", github_client_id="", github_client_secret="")
+    )
     with pytest.raises(OAuthConfigurationError):
         client.build_authorize_url("state")
 

@@ -3,7 +3,7 @@
 from fastapi import APIRouter, Response, status
 
 from terra import __version__
-from terra.api.dependencies import DatabaseManagerDep, SettingsDep
+from terra.api.dependencies import DatabaseManagerDep, ObjectStorageDep, SettingsDep
 from terra.api.schemas import DependencyHealth, HealthResponse, ReadinessResponse
 
 router = APIRouter(tags=["health"])
@@ -26,14 +26,20 @@ async def health_ready(
     response: Response,
     settings: SettingsDep,
     db: DatabaseManagerDep,
+    object_storage: ObjectStorageDep,
 ) -> ReadinessResponse:
-    """Verify runtime dependency readiness (database connectivity)."""
+    """Verify runtime dependency readiness (database and object storage connectivity)."""
     db_ok = await db.check_readiness()
-    if not db_ok:
+    storage_ok = await object_storage.check_health()
+    all_ok = db_ok and storage_ok
+    if not all_ok:
         response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
     return ReadinessResponse(
-        status="ready" if db_ok else "not_ready",
+        status="ready" if all_ok else "not_ready",
         service=settings.app_name,
         version=__version__,
-        checks={"database": DependencyHealth(status="ok" if db_ok else "unavailable")},
+        checks={
+            "database": DependencyHealth(status="ok" if db_ok else "unavailable"),
+            "object_storage": DependencyHealth(status="ok" if storage_ok else "unavailable"),
+        },
     )

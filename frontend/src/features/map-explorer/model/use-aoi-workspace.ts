@@ -163,6 +163,51 @@ export function useAoiWorkspace() {
     [addLocalCountryAoi, createPersistedRegion, isAuthenticated, setInspectorTab],
   )
 
+  const createPointAoi = useCallback(
+    async (lon: number, lat: number) => {
+      if (!isAuthenticated) {
+        setAoiSyncError('Sign in to save a point AOI and run a scientific assessment.')
+        setRightInspectorOpen(true)
+        setInspectorTab('aoi')
+        return null
+      }
+      const halfSpan = 0.05
+      const west = Math.max(-180, lon - halfSpan)
+      const east = Math.min(180, lon + halfSpan)
+      const south = Math.max(-90, lat - halfSpan)
+      const north = Math.min(90, lat + halfSpan)
+      const geometry: AoiGeometry = {
+        type: 'Polygon',
+        coordinates: [
+          [
+            [west, south],
+            [east, south],
+            [east, north],
+            [west, north],
+            [west, south],
+          ],
+        ],
+      }
+      const role = useExploreStore.getState().activeAoiRole
+      return createPersistedRegion(
+        {
+          name: `Point AOI · ${lat.toFixed(3)}, ${lon.toFixed(3)}`,
+          role,
+          shapeType: 'polygon',
+          geometry: toRegionGeometryInput(geometry),
+        },
+        role,
+      )
+    },
+    [
+      createPersistedRegion,
+      isAuthenticated,
+      setAoiSyncError,
+      setInspectorTab,
+      setRightInspectorOpen,
+    ],
+  )
+
   const updateAoiRole = useCallback(
     async (aoiId: string, role: AoiRole) => {
       if (!isAuthenticated) {
@@ -275,6 +320,7 @@ export function useAoiWorkspace() {
     clearSyncError: () => setAoiSyncError(null),
     completeDraftAoi,
     assignCountryAsAoi,
+    createPointAoi,
     updateAoiRole,
     renameAoi,
     removeAoi,

@@ -4,14 +4,19 @@ import { buildGitHubLoginUrl, loginDevSession } from '../auth'
 import {
   compareAssessments,
   createAssessment,
+  evaluateAssessmentReadiness,
   executeAssessment,
+  fetchAssessmentArtifacts,
   fetchAssessmentDetail,
   fetchAssessmentMethods,
   fetchAssessments,
+  parseReadinessReport,
   parseScientificAssessmentResult,
 } from '../assessments'
 import {
+  autoProvisionDatasets,
   discoverObservations,
+  fetchDatasetDownloadUrl,
   fetchPreparedDatasets,
   fetchProviders,
   startIngestion,
@@ -24,6 +29,8 @@ import {
   inspectLayerPoint,
   resolveLayerEffectiveDate,
 } from '../layers'
+import { fetchZonalStatistics, fetchZonalTimeseries } from '../analytics'
+import { buildHistogramChartOption } from '../../lib/scientific-charts'
 import { normalizeAoiGeometry } from '../../lib/geojson-utils'
 import type { AoiGeometry, MapLayerDefinition } from '../../types/geospatial'
 import { resolveLayerControlState } from '../../../features/map-explorer/model/explore-store.types'
@@ -713,6 +720,119 @@ describe('assessments API adapters and result parser', () => {
     })
   })
 
+  it('parses canonical Scientific Core BaselineClimatologyResult.bins, PersistentAnomalyRun, CrossVariableResult.pairwise, and summary_warnings', () => {
+    const parsed = parseScientificAssessmentResult({
+      assessment_id: 'assess-canon-01',
+      status: 'completed_partial',
+      summary_warnings: ['Baseline window has fewer than 3 years.'],
+      limitations: ['Exploratory full-period baseline includes assessment period.'],
+      baselines: [
+        {
+          dataset_id: 'ds-mod11',
+          variable_name: 'LST_Day_1km',
+          units: 'K',
+          baseline_type: 'fixed_reference',
+          seasonal_grouping: 'composite_doy_bin',
+          reference_start: '2024-06-01T00:00:00Z',
+          reference_end: '2024-07-01T00:00:00Z',
+          sufficient: true,
+          bins: [
+            {
+              bin_key: 153,
+              bin_label: 'DOY 153',
+              sample_count: 3,
+              mean: 298.4,
+              median: 298.1,
+              std: 1.2,
+              mad: 0.9,
+              iqr: 1.1,
+              q10: 297.2,
+              q90: 299.6,
+            },
+          ],
+          warnings: [],
+        },
+      ],
+      anomalies: [
+        {
+          dataset_id: 'ds-mod11',
+          variable_name: 'LST_Day_1km',
+          units: 'K',
+          timestamps: ['2024-06-01T00:00:00Z'],
+          raw_anomalies: [2.1],
+          standard_zscores: [1.75],
+          robust_zscores: [1.82],
+          persistent_runs: [
+            {
+              start_timestamp: '2024-06-01T00:00:00Z',
+              end_timestamp: '2024-06-17T00:00:00Z',
+              step_count: 3,
+              polarity: 'positive',
+              peak_zscore: 2.3,
+              mean_zscore: 1.9,
+              cumulative_departure: 5.7,
+            },
+          ],
+          warnings: [],
+        },
+      ],
+      cross_variable: {
+        pairwise: [
+          {
+            driver_variable: 'PRECIP',
+            response_variable: 'NDVI',
+            deseasonalized: true,
+            overlap_count: 18,
+            pearson_r: 0.64,
+            pearson_p: 0.004,
+            spearman_rho: 0.61,
+            spearman_p: 0.007,
+            best_lag_steps: 2,
+            compatibility_warnings: [],
+            non_causal_notice: 'Correlation does not imply causation.',
+          },
+        ],
+      },
+    })
+
+    expect(parsed).not.toBeNull()
+    expect(parsed?.warnings).toEqual(['Baseline window has fewer than 3 years.'])
+    expect(parsed?.limitations).toEqual([
+      'Exploratory full-period baseline includes assessment period.',
+    ])
+    expect(parsed?.baselines[0]).toMatchObject({
+      datasetId: 'ds-mod11',
+      baselineType: 'fixed_reference',
+      seasonalGrouping: 'composite_doy_bin',
+      sufficient: true,
+      binCounts: [3],
+      binMeans: [298.4],
+      binStds: [1.2],
+    })
+    expect(parsed?.baselines[0]?.bins[0]).toMatchObject({
+      binKey: 153,
+      binLabel: 'DOY 153',
+      sampleCount: 3,
+      mad: 0.9,
+      q10: 297.2,
+      q90: 299.6,
+    })
+    expect(parsed?.anomalies[0]?.persistentRuns[0]).toMatchObject({
+      durationSteps: 3,
+      severity: 'positive',
+      meanZscore: 1.9,
+      cumulativeDeparture: 5.7,
+    })
+    expect(parsed?.crossVariable[0]).toMatchObject({
+      xVariable: 'PRECIP',
+      yVariable: 'NDVI',
+      lagSteps: 2,
+      pValue: 0.004,
+      sampleCount: 18,
+      caveat: 'Correlation does not imply causation.',
+    })
+  })
+
   it('calls dev-session auth, data-sources discovery/ingestion/datasets, and comparison endpoints', async () => {
     const getSpy = vi.spyOn(apiFetchClient, 'GET')
     const postSpy = vi.spyOn(apiFetchClient, 'POST')
@@ -917,5 +1037,407 @@ describe('assessments API adapters and result parser', () => {
         comparisonAssessmentId: 'a-2',
       },
     })
+  })
+
+  it('resolves science raster config for connected and AOI preview layers only', async () => {
+    const { resolveScienceRasterConfig } = await import(
+      '../../../entities/map/lib/maplibre-style-builder'
+    )
+
+    const baseLayer = {
+      ...makeSampleLayer(),
+      id: 'ndvi-anomaly',
+      name: 'NDVI Anomaly',
+      shortName: 'NDVI Anom',
+      groupId: 'derived' as const,
+      unit: 'z-score',
+      productId: 'TERRA-NDVI-ANOM',
+      availabilityStatus: 'preview' as const,
+      isExperimental: false,
+      unavailableReason: null,
+      activeDatasetId: 'ds-anom-1',
+      datasetBbox: [23, 48, 25, 49.5] as [number, number, number, number],
+      availableDates: ['2024-06-01'],
+      defaultDate: '2024-06-01',
+    }
+
+    const previewState = resolveLayerControlState(baseLayer, undefined, baseLayer.id)
+    const resolvedPreview = resolveScienceRasterConfig(
+      { ...previewState, layer: baseLayer },
+      '2024-06-01',
+    )
+    expect(resolvedPreview).not.toBeNull()
+    expect(resolvedPreview?.bounds).toEqual([23, 48, 25, 49.5])
+
+    const disconnectedLayer = {
+      ...baseLayer,
+      tileSource: { ...baseLayer.tileSource, isConnected: false },
+    }
+    const disconnectedPreview = resolveLayerControlState(
+      disconnectedLayer,
+      undefined,
+      disconnectedLayer.id,
+    )
+    expect(
+      resolveScienceRasterConfig({ ...disconnectedPreview, layer: disconnectedLayer }, '2024-06-01'),
+    ).toBeNull()
+
+    const plannedLayer = {
+      ...baseLayer,
+      availabilityStatus: 'planned' as const,
+    }
+    const plannedConfig = resolveLayerControlState(plannedLayer, undefined, plannedLayer.id)
+    expect(
+      resolveScienceRasterConfig({ ...plannedConfig, layer: plannedLayer }, '2024-06-01'),
+    ).toBeNull()
+
+    const gibsLayer = {
+      ...baseLayer,
+      id: 'ndvi-mod13q1',
+      availabilityStatus: 'unavailable' as const,
+      tileSource: {
+        ...baseLayer.tileSource,
+        isConnected: false,
+        urlTemplate:
+          'https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/MODIS_Terra_L3_NDVI_16Day/default/{time}/GoogleMapsCompatible_Level9/{z}/{y}/{x}.png',
+      },
+    }
+    const gibsConfig = resolveLayerControlState(gibsLayer, undefined, gibsLayer.id)
+    const resolvedGibs = resolveScienceRasterConfig(
+      { ...gibsConfig, layer: gibsLayer },
+      '2024-06-01',
+    )
+    expect(resolvedGibs).not.toBeNull()
+    expect(resolvedGibs?.tileUrl).toContain('2024-06-01')
+    expect(resolvedGibs?.tileUrl).toContain('https://gibs.earthdata.nasa.gov')
+  })
+
+  it('calls assessment artifacts and prepared dataset download-url endpoints via typed client', async () => {
+    const getSpy = vi.spyOn(apiFetchClient, 'GET')
+    getSpy
+      .mockResolvedValueOnce({
+        data: [
+          {
+            name: 'result.json',
+            objectKey: 'assessments/a-1/result.json',
+            contentType: 'application/json',
+            sizeBytes: 2048,
+            checksumSha256: 'abc',
+            storageBackend: 's3',
+            downloadPath: '/api/v1/assessments/a-1/artifacts/result.json',
+            presignedUrl: 'https://r2.example.test/terra/core/assessments/a-1/result.json?sig=1',
+            presigned: true,
+          },
+        ],
+        response: new Response(null, { status: 200 }),
+      } as never)
+      .mockResolvedValueOnce({
+        data: {
+          datasetId: 'ds-99',
+          assetId: 'asset-1',
+          storageKey: 'derived/ds-99/out.tif',
+          filename: 'out.tif',
+          mediaType: 'image/tiff',
+          sizeBytes: 4096,
+          checksumSha256: 'def',
+          downloadUrl: 'https://r2.example.test/terra/derived/ds-99/out.tif?sig=1',
+          presigned: true,
+          expiresIn: 300,
+        },
+        response: new Response(null, { status: 200 }),
+      } as never)
+
+    const artifacts = await fetchAssessmentArtifacts('a-1')
+    expect(artifacts[0]?.presigned).toBe(true)
+    expect(getSpy).toHaveBeenCalledWith('/api/v1/assessments/{assessment_id}/artifacts', {
+      params: { path: { assessment_id: 'a-1' } },
+    })
+
+    const dl = await fetchDatasetDownloadUrl('ds-99')
+    expect(dl.filename).toBe('out.tif')
+    expect(getSpy).toHaveBeenCalledWith('/api/v1/data-sources/datasets/{dataset_id}/download-url', {
+      params: { path: { dataset_id: 'ds-99' }, query: undefined },
+    })
+  })
+
+  it('calls readiness evaluation and auto-provision endpoints and parses readiness payload', async () => {
+    const postSpy = vi.spyOn(apiFetchClient, 'POST')
+    const sampleReadiness = {
+      specVersion: '1.0.0',
+      evaluatedAtUtc: '2026-11-15T18:00:00Z',
+      overallStatus: 'partial',
+      summary: 'Precipitation ready; NDVI missing QA layer.',
+      datasets: [
+        {
+          datasetId: 'ds-precip',
+          sourceId: 'gpm_imerg',
+          product: 'GPM_3IMERGDF',
+          variables: ['precipitation'],
+          nativeCadence: 'daily',
+          targetCadence: 'monthly',
+          observationStart: '2020-01-01T00:00:00Z',
+          observationEnd: '2024-12-31T00:00:00Z',
+          spanYears: 5.0,
+          rawStepCount: 60,
+          validQaCount: 58,
+          validFraction: 0.967,
+          qaLayersPresent: ['probabilityLiquidPrecipitation'],
+          hasGridStack: false,
+          minQaFractionRequired: 0.5,
+          minStepCoverageRequired: 0.65,
+          minTrendSamplesRequired: 18,
+          minBaselineYearsRequired: 3,
+          status: 'ready',
+          notes: [],
+        },
+      ],
+      criteria: [
+        {
+          criterionId: 'crit-qa',
+          category: 'qa',
+          datasetId: 'ds-precip',
+          variableName: 'precipitation',
+          stageOrMetric: 'quality_screening',
+          title: 'QA fraction check',
+          requiredSummary: '>= 50%',
+          actualSummary: '96.7%',
+          requiredValue: 0.5,
+          actualValue: 0.967,
+          unit: 'fraction',
+          status: 'passed',
+          scientificRationale: 'GPM IMERG quality check',
+          missingGap: null,
+          remediation: null,
+          specVersion: '1.0.0',
+        },
+        {
+          criterionId: 'crit-trend',
+          category: 'trend',
+          datasetId: 'ds-ndvi',
+          variableName: 'ndvi',
+          stageOrMetric: 'trends',
+          title: 'Trend length check',
+          requiredSummary: '>= 24 steps',
+          actualSummary: '8 steps',
+          requiredValue: 24,
+          actualValue: 8,
+          unit: 'steps',
+          status: 'failed',
+          scientificRationale: 'Seasonal Mann-Kendall power requirement.',
+          missingGap: 'Need 16 more observations.',
+          remediation: 'Auto-provision a multi-year window.',
+          specVersion: '1.0.0',
+        },
+      ],
+      metrics: [
+        {
+          metricId: 'anomalies',
+          label: 'Standardized Anomalies',
+          priority: 'P0',
+          required: true,
+          status: 'available',
+          blockingCriteria: [],
+          reason: 'All reference bins satisfied.',
+          remediation: null,
+        },
+        {
+          metricId: 'trends',
+          label: 'Mann-Kendall Trends',
+          priority: 'P1',
+          required: false,
+          status: 'unavailable',
+          blockingCriteria: ['crit-trend'],
+          reason: 'Insufficient 16-day steps for MODIS NDVI.',
+          remediation: 'Auto-provision a multi-year window.',
+        },
+      ],
+      recommendedActions: ['Auto-provision a multi-year window.'],
+      suggestedWindowStart: '2018-01-01T00:00:00Z',
+      suggestedWindowEnd: '2024-12-31T00:00:00Z',
+    }
+
+    postSpy
+      .mockResolvedValueOnce({
+        data: sampleReadiness,
+        response: new Response(null, { status: 200 }),
+      } as never)
+      .mockResolvedValueOnce({
+        data: {
+          bbox: [24, 48, 25, 49],
+          analysisStart: '2024-01-01T00:00:00Z',
+          analysisEnd: '2024-12-31T00:00:00Z',
+          provisionStart: '2020-01-01T00:00:00Z',
+          provisionEnd: '2024-12-31T00:00:00Z',
+          windowExpanded: true,
+          windowExpansionReason: 'Expanded window to 2020-01-01 for baseline.',
+          datasetIds: ['ds-precip'],
+          datasets: [],
+          steps: [
+            {
+              domain: 'climate',
+              provider: 'nasa_power',
+              product: 'POWER_AG_DAILY',
+              status: 'provisioned',
+              datasetId: 'ds-precip',
+              windowStart: '2020-01-01T00:00:00Z',
+              windowEnd: '2024-12-31T00:00:00Z',
+              detail: 'Ingested multi-year POWER dataset.',
+            },
+          ],
+          readiness: sampleReadiness,
+        },
+        response: new Response(null, { status: 200 }),
+      } as never)
+
+    const readiness = await evaluateAssessmentReadiness({
+      regionId: null,
+      requestConfig: { qa_level: 'strict' },
+      ghsDatasetIds: ['ds-precip'],
+      inlineDatasets: [],
+    })
+    expect(readiness.overallStatus).toBe('partial')
+    expect(postSpy).toHaveBeenCalledWith('/api/v1/assessments/readiness', {
+      body: {
+        regionId: null,
+        requestConfig: { qa_level: 'strict' },
+        ghsDatasetIds: ['ds-precip'],
+        inlineDatasets: [],
+      },
+    })
+
+    const provision = await autoProvisionDatasets({
+      regionId: null,
+      bbox: [24, 48, 25, 49],
+      analysisStart: '2024-01-01T00:00:00Z',
+      analysisEnd: '2024-12-31T00:00:00Z',
+      targetCadence: 'monthly',
+      baselineType: 'fixed_reference',
+      minReferenceYears: 3,
+      qaLevel: 'strict',
+      existingDatasetIds: [],
+      desiredDomains: ['climate'],
+      maxGranulesPerProduct: 48,
+    })
+    expect(provision.windowExpanded).toBe(true)
+    expect(provision.datasetIds).toEqual(['ds-precip'])
+
+    const parsedCamel = parseReadinessReport(sampleReadiness)
+    expect(parsedCamel?.criteria).toHaveLength(2)
+    expect(parsedCamel?.metrics[1]?.status).toBe('unavailable')
+
+    const parsedSnakeResult = parseScientificAssessmentResult({
+      assessment_id: 'assess-1',
+      status: 'completed_partial',
+      readiness: {
+        spec_version: '1.0.0',
+        evaluated_at_utc: '2026-11-15T18:00:00Z',
+        overall_status: 'partial',
+        summary: 'Optional stage trends skipped.',
+        datasets: [],
+        criteria: [
+          {
+            criterion_id: 'c1',
+            category: 'trend',
+            stage_or_metric: 'trends',
+            title: 'Minimum trend steps',
+            required_summary: '>= 18 steps',
+            actual_summary: '12 steps',
+            status: 'warning',
+            scientific_rationale: 'Statistical power',
+            missing_gap: 'Short by 6 steps',
+            remediation: 'Extend window',
+            spec_version: '1.0.0',
+          },
+        ],
+        metrics: [],
+        recommended_actions: ['Extend window'],
+      },
+    })
+    expect(parsedSnakeResult?.readiness?.overallStatus).toBe('partial')
+    expect(parsedSnakeResult?.readiness?.criteria[0]?.missingGap).toBe('Short by 6 steps')
+  })
+
+  it('queries zonal statistics, time series, and builds histogram options', async () => {
+    const postSpy = vi.spyOn(apiFetchClient, 'POST').mockImplementation(async (path: string) => {
+      if (path === '/api/v1/analytics/zonal-statistics') {
+        return {
+          data: {
+            metricId: 'ndvi-mod13q1',
+            date: '2024-06-01',
+            datasetId: 'ds-1',
+            mean: 0.65,
+            median: 0.66,
+            min: 0.1,
+            max: 0.9,
+            std: 0.08,
+            q10: 0.52,
+            q25: 0.59,
+            q75: 0.72,
+            q90: 0.79,
+            validPixelCount: 500,
+            totalPixelCount: 500,
+            validDataCoverage: 1.0,
+            approxAreaKm2: 250.0,
+            units: 'index',
+            histogram: {
+              bins: [0.2, 0.4, 0.6, 0.8],
+              counts: [10, 50, 200, 240],
+            },
+          },
+          error: undefined,
+          response: new Response(),
+        } as never
+      }
+      if (path === '/api/v1/analytics/zonal-statistics/timeseries') {
+        return {
+          data: {
+            metricId: 'ndvi-mod13q1',
+            units: 'index',
+            series: [
+              {
+                date: '2024-06-01',
+                mean: 0.65,
+                median: 0.66,
+                min: 0.1,
+                max: 0.9,
+                q25: 0.59,
+                q75: 0.72,
+                validDataCoverage: 1.0,
+              },
+            ],
+          },
+          error: undefined,
+          response: new Response(),
+        } as never
+      }
+      return { data: undefined, error: 'Not found', response: new Response() } as never
+    })
+
+    const stats = await fetchZonalStatistics({
+      metricId: 'ndvi',
+      date: '2024-06-01',
+      geometry: { type: 'Polygon', coordinates: [] },
+    })
+    expect(stats.mean).toBe(0.65)
+    expect(stats.histogram.counts).toHaveLength(4)
+
+    const ts = await fetchZonalTimeseries({
+      metricId: 'ndvi',
+      regionId: '00000000-0000-0000-0000-000000000001',
+    })
+    expect(ts.series).toHaveLength(1)
+    expect(ts.series[0]?.mean).toBe(0.65)
+
+    const histOpt = buildHistogramChartOption({
+      bins: [0.2, 0.4, 0.6, 0.8],
+      counts: [10, 50, 200, 240],
+      variableName: 'NDVI',
+      units: 'index',
+    })
+    const seriesList = Array.isArray(histOpt.series) ? histOpt.series : []
+    expect(seriesList).toHaveLength(1)
+    expect((seriesList[0] as { data?: unknown }).data).toEqual([10, 50, 200, 240])
+
+    postSpy.mockRestore()
   })
 })

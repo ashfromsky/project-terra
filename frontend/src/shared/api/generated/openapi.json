@@ -55,7 +55,7 @@
           "health"
         ],
         "summary": "Health Ready",
-        "description": "Verify runtime dependency readiness (database connectivity).",
+        "description": "Verify runtime dependency readiness (database and object storage connectivity).",
         "operationId": "health_ready_health_ready_get",
         "responses": {
           "200": {
@@ -187,10 +187,16 @@
           {
             "name": "state",
             "in": "query",
-            "required": true,
+            "required": false,
             "schema": {
-              "type": "string",
-              "minLength": 1,
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
               "title": "State"
             }
           },
@@ -201,8 +207,7 @@
             "schema": {
               "anyOf": [
                 {
-                  "type": "string",
-                  "minLength": 1
+                  "type": "string"
                 },
                 {
                   "type": "null"
@@ -1052,6 +1057,99 @@
         }
       }
     },
+    "/api/v1/layers/{layer_id}/tilejson.json": {
+      "get": {
+        "tags": [
+          "layers"
+        ],
+        "summary": "Get Layer Tilejson",
+        "description": "Return TileJSON 2.2.0 metadata for this layer.",
+        "operationId": "get_layer_tilejson_api_v1_layers__layer_id__tilejson_json_get",
+        "parameters": [
+          {
+            "name": "layer_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Layer Id"
+            }
+          },
+          {
+            "name": "timestamp",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Timestamp"
+            }
+          },
+          {
+            "name": "vmin",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Vmin"
+            }
+          },
+          {
+            "name": "vmax",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Vmax"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Get Layer Tilejson Api V1 Layers  Layer Id  Tilejson Json Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/layers/{layer_id}/render.png": {
       "get": {
         "tags": [
@@ -1273,6 +1371,376 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/LayerPointInspectionResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/tiles/{metric_id}/{date}/{z}/{x}/{y}.png": {
+      "get": {
+        "tags": [
+          "tiles"
+        ],
+        "summary": "Get Metric Tile",
+        "description": "Serve an XYZ RGBA PNG tile for the specified metric, date, and tile coordinates.",
+        "operationId": "get_metric_tile_api_v1_tiles__metric_id___date___z___x___y__png_get",
+        "parameters": [
+          {
+            "name": "metric_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Metric Id"
+            }
+          },
+          {
+            "name": "date",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Date"
+            }
+          },
+          {
+            "name": "z",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Z"
+            }
+          },
+          {
+            "name": "x",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "X"
+            }
+          },
+          {
+            "name": "y",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Y"
+            }
+          },
+          {
+            "name": "vmin",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Vmin"
+            }
+          },
+          {
+            "name": "vmax",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Vmax"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              },
+              "image/png": {}
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/tiles/{metric_id}/{date}/tilejson.json": {
+      "get": {
+        "tags": [
+          "tiles"
+        ],
+        "summary": "Get Metric Tilejson",
+        "description": "Generate TileJSON 2.2.0 metadata for the metric and date.",
+        "operationId": "get_metric_tilejson_api_v1_tiles__metric_id___date__tilejson_json_get",
+        "parameters": [
+          {
+            "name": "metric_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Metric Id"
+            }
+          },
+          {
+            "name": "date",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Date"
+            }
+          },
+          {
+            "name": "vmin",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Vmin"
+            }
+          },
+          {
+            "name": "vmax",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Vmax"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Get Metric Tilejson Api V1 Tiles  Metric Id   Date  Tilejson Json Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/analytics/zonal-statistics": {
+      "post": {
+        "tags": [
+          "analytics"
+        ],
+        "summary": "Compute Zonal Statistics",
+        "description": "Compute physical raster zonal statistics within a GeoJSON geometry or region.",
+        "operationId": "compute_zonal_statistics_api_v1_analytics_zonal_statistics_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ZonalStatisticsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ZonalStatisticsResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/analytics/zonal-statistics/timeseries": {
+      "post": {
+        "tags": [
+          "analytics"
+        ],
+        "summary": "Compute Zonal Timeseries Post",
+        "description": "Compute temporal time series of zonal statistics within a geometry or region.",
+        "operationId": "compute_zonal_timeseries_post_api_v1_analytics_zonal_statistics_timeseries_post",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ZonalTimeseriesRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ZonalTimeseriesResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "analytics"
+        ],
+        "summary": "Compute Zonal Timeseries Get",
+        "description": "Query temporal time series of zonal statistics for a saved region.",
+        "operationId": "compute_zonal_timeseries_get_api_v1_analytics_zonal_statistics_timeseries_get",
+        "parameters": [
+          {
+            "name": "metricId",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Metricid"
+            }
+          },
+          {
+            "name": "regionId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Regionid"
+            }
+          },
+          {
+            "name": "startDate",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Startdate"
+            }
+          },
+          {
+            "name": "endDate",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Enddate"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ZonalTimeseriesResponse"
                 }
               }
             }
@@ -1577,6 +2045,182 @@
         }
       }
     },
+    "/api/v1/data-sources/datasets/{dataset_id}/download-url": {
+      "get": {
+        "tags": [
+          "data-sources"
+        ],
+        "summary": "Get Prepared Dataset Download Url",
+        "description": "Resolve a direct presigned R2 URL (when enabled) or authenticated Core download endpoint.",
+        "operationId": "get_prepared_dataset_download_url_api_v1_data_sources_datasets__dataset_id__download_url_get",
+        "parameters": [
+          {
+            "name": "dataset_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Dataset Id"
+            }
+          },
+          {
+            "name": "asset_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Asset Id"
+            }
+          },
+          {
+            "name": "expires_in",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "maximum": 3600,
+                  "minimum": 30
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Expires In"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatasetAssetDownloadUrlResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/data-sources/datasets/{dataset_id}/download": {
+      "get": {
+        "tags": [
+          "data-sources"
+        ],
+        "summary": "Download Prepared Dataset Asset",
+        "description": "Stream the primary harmonized GeoTIFF/JSON asset from GHS/R2 via Core authentication.",
+        "operationId": "download_prepared_dataset_asset_api_v1_data_sources_datasets__dataset_id__download_get",
+        "parameters": [
+          {
+            "name": "dataset_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Dataset Id"
+            }
+          },
+          {
+            "name": "asset_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Asset Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/data-sources/provision": {
+      "post": {
+        "tags": [
+          "data-sources"
+        ],
+        "summary": "Auto Provision Datasets",
+        "description": "Adaptively resolve, ingest, and evaluate real datasets for an AOI and analysis window.",
+        "operationId": "auto_provision_datasets_api_v1_data_sources_provision_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AutoProvisionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AutoProvisionResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/assessments/methods": {
       "get": {
         "tags": [
@@ -1798,6 +2442,147 @@
           }
         }
       }
+    },
+    "/api/v1/assessments/{assessment_id}/artifacts": {
+      "get": {
+        "tags": [
+          "assessments"
+        ],
+        "summary": "List Assessment Artifacts",
+        "description": "List downloadable artifacts (keys and optional presigned R2 URLs) for an assessment.",
+        "operationId": "list_assessment_artifacts_api_v1_assessments__assessment_id__artifacts_get",
+        "parameters": [
+          {
+            "name": "assessment_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Assessment Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/AssessmentArtifactItemResponse"
+                  },
+                  "title": "Response List Assessment Artifacts Api V1 Assessments  Assessment Id  Artifacts Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/assessments/readiness": {
+      "post": {
+        "tags": [
+          "assessments"
+        ],
+        "summary": "Evaluate Assessment Readiness Endpoint",
+        "description": "Evaluate adaptive dataset and methodological readiness prior to running an assessment.",
+        "operationId": "evaluate_assessment_readiness_endpoint_api_v1_assessments_readiness_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AssessmentReadinessRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AssessmentReadinessResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/assessments/{assessment_id}/artifacts/{artifact_name}": {
+      "get": {
+        "tags": [
+          "assessments"
+        ],
+        "summary": "Download Assessment Artifact",
+        "description": "Download an assessment JSON/provenance artifact owned by the authenticated user.",
+        "operationId": "download_assessment_artifact_api_v1_assessments__assessment_id__artifacts__artifact_name__get",
+        "parameters": [
+          {
+            "name": "assessment_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Assessment Id"
+            }
+          },
+          {
+            "name": "artifact_name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Artifact Name"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -1905,6 +2690,72 @@
         ],
         "title": "AoiPropertiesResponse",
         "description": "GeoJSON Feature properties matching frontend AoiFeature contract."
+      },
+      "AssessmentArtifactItemResponse": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "objectKey": {
+            "type": "string",
+            "title": "Objectkey"
+          },
+          "contentType": {
+            "type": "string",
+            "title": "Contenttype"
+          },
+          "sizeBytes": {
+            "type": "integer",
+            "title": "Sizebytes"
+          },
+          "checksumSha256": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Checksumsha256"
+          },
+          "storageBackend": {
+            "type": "string",
+            "title": "Storagebackend"
+          },
+          "downloadPath": {
+            "type": "string",
+            "title": "Downloadpath"
+          },
+          "presignedUrl": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Presignedurl"
+          },
+          "presigned": {
+            "type": "boolean",
+            "title": "Presigned",
+            "default": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "objectKey",
+          "contentType",
+          "sizeBytes",
+          "storageBackend",
+          "downloadPath"
+        ],
+        "title": "AssessmentArtifactItemResponse",
+        "description": "Descriptor and download endpoints for a persisted assessment artifact."
       },
       "AssessmentComparisonResponse": {
         "properties": {
@@ -2095,6 +2946,130 @@
         "title": "AssessmentDetailResponse",
         "description": "Detailed representation including full Scientific Core output payload and artifacts."
       },
+      "AssessmentReadinessRequest": {
+        "properties": {
+          "regionId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Regionid"
+          },
+          "requestConfig": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Requestconfig"
+          },
+          "ghsDatasetIds": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Ghsdatasetids"
+          },
+          "inlineDatasets": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Inlinedatasets"
+          }
+        },
+        "type": "object",
+        "required": [
+          "requestConfig"
+        ],
+        "title": "AssessmentReadinessRequest",
+        "description": "Request payload evaluating pre-run scientific readiness for datasets and AOI."
+      },
+      "AssessmentReadinessResponse": {
+        "properties": {
+          "specVersion": {
+            "type": "string",
+            "title": "Specversion"
+          },
+          "evaluatedAtUtc": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Evaluatedatutc"
+          },
+          "overallStatus": {
+            "type": "string",
+            "title": "Overallstatus"
+          },
+          "summary": {
+            "type": "string",
+            "title": "Summary"
+          },
+          "datasets": {
+            "items": {
+              "$ref": "#/components/schemas/DatasetReadinessProfileResponse"
+            },
+            "type": "array",
+            "title": "Datasets"
+          },
+          "criteria": {
+            "items": {
+              "$ref": "#/components/schemas/ReadinessCriterionResponse"
+            },
+            "type": "array",
+            "title": "Criteria"
+          },
+          "metrics": {
+            "items": {
+              "$ref": "#/components/schemas/MetricAvailabilityResponse"
+            },
+            "type": "array",
+            "title": "Metrics"
+          },
+          "recommendedActions": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Recommendedactions"
+          },
+          "suggestedWindowStart": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Suggestedwindowstart"
+          },
+          "suggestedWindowEnd": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Suggestedwindowend"
+          }
+        },
+        "type": "object",
+        "required": [
+          "specVersion",
+          "evaluatedAtUtc",
+          "overallStatus",
+          "summary"
+        ],
+        "title": "AssessmentReadinessResponse",
+        "description": "Structured pre-run or post-run adaptive readiness diagnostic report."
+      },
       "AssessmentSummaryResponse": {
         "properties": {
           "id": {
@@ -2215,6 +3190,237 @@
         ],
         "title": "AuthCallbackResponse",
         "description": "Session payload returned after successful GitHub OAuth callback."
+      },
+      "AutoProvisionRequest": {
+        "properties": {
+          "regionId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Regionid"
+          },
+          "bbox": {
+            "anyOf": [
+              {
+                "prefixItems": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "number"
+                  }
+                ],
+                "type": "array",
+                "maxItems": 4,
+                "minItems": 4
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bbox"
+          },
+          "analysisStart": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Analysisstart"
+          },
+          "analysisEnd": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Analysisend"
+          },
+          "targetCadence": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Targetcadence",
+            "default": "monthly"
+          },
+          "baselineType": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Baselinetype",
+            "default": "out_of_sample"
+          },
+          "referenceStart": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Referencestart"
+          },
+          "referenceEnd": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Referenceend"
+          },
+          "minReferenceYears": {
+            "type": "integer",
+            "maximum": 30.0,
+            "minimum": 1.0,
+            "title": "Minreferenceyears",
+            "default": 3
+          },
+          "qaLevel": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Qalevel",
+            "default": "strict"
+          },
+          "existingDatasetIds": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Existingdatasetids"
+          },
+          "desiredDomains": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Desireddomains"
+          },
+          "maxGranulesPerProduct": {
+            "type": "integer",
+            "maximum": 256.0,
+            "minimum": 1.0,
+            "title": "Maxgranulesperproduct",
+            "default": 48
+          }
+        },
+        "type": "object",
+        "required": [
+          "analysisStart",
+          "analysisEnd"
+        ],
+        "title": "AutoProvisionRequest",
+        "description": "Adaptive multi-source discovery and provisioning request for an AOI and window."
+      },
+      "AutoProvisionResponse": {
+        "properties": {
+          "bbox": {
+            "prefixItems": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              }
+            ],
+            "type": "array",
+            "maxItems": 4,
+            "minItems": 4,
+            "title": "Bbox"
+          },
+          "analysisStart": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Analysisstart"
+          },
+          "analysisEnd": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Analysisend"
+          },
+          "provisionStart": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Provisionstart"
+          },
+          "provisionEnd": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Provisionend"
+          },
+          "windowExpanded": {
+            "type": "boolean",
+            "title": "Windowexpanded"
+          },
+          "windowExpansionReason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Windowexpansionreason"
+          },
+          "datasetIds": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Datasetids"
+          },
+          "datasets": {
+            "items": {
+              "$ref": "#/components/schemas/PreparedDatasetSummaryResponse"
+            },
+            "type": "array",
+            "title": "Datasets"
+          },
+          "steps": {
+            "items": {
+              "$ref": "#/components/schemas/ProvisioningStepResponse"
+            },
+            "type": "array",
+            "title": "Steps"
+          },
+          "readiness": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AssessmentReadinessResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "bbox",
+          "analysisStart",
+          "analysisEnd",
+          "provisionStart",
+          "provisionEnd",
+          "windowExpanded"
+        ],
+        "title": "AutoProvisionResponse",
+        "description": "Adaptive provisioning outcome, provisioned datasets, and readiness diagnostics."
       },
       "AvailableTimeRangeResponse": {
         "properties": {
@@ -2370,6 +3576,200 @@
         ],
         "title": "CreateAssessmentRequest",
         "description": "Request payload creating and optionally executing a Scientific Assessment."
+      },
+      "DatasetAssetDownloadUrlResponse": {
+        "properties": {
+          "datasetId": {
+            "type": "string",
+            "title": "Datasetid"
+          },
+          "assetId": {
+            "type": "string",
+            "title": "Assetid"
+          },
+          "storageKey": {
+            "type": "string",
+            "title": "Storagekey"
+          },
+          "filename": {
+            "type": "string",
+            "title": "Filename"
+          },
+          "mediaType": {
+            "type": "string",
+            "title": "Mediatype"
+          },
+          "sizeBytes": {
+            "type": "integer",
+            "title": "Sizebytes"
+          },
+          "checksumSha256": {
+            "type": "string",
+            "title": "Checksumsha256"
+          },
+          "downloadUrl": {
+            "type": "string",
+            "title": "Downloadurl"
+          },
+          "presigned": {
+            "type": "boolean",
+            "title": "Presigned"
+          },
+          "expiresIn": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expiresin"
+          }
+        },
+        "type": "object",
+        "required": [
+          "datasetId",
+          "assetId",
+          "storageKey",
+          "filename",
+          "mediaType",
+          "sizeBytes",
+          "checksumSha256",
+          "downloadUrl",
+          "presigned"
+        ],
+        "title": "DatasetAssetDownloadUrlResponse",
+        "description": "Download descriptor for a prepared GHS/R2 dataset asset."
+      },
+      "DatasetReadinessProfileResponse": {
+        "properties": {
+          "datasetId": {
+            "type": "string",
+            "title": "Datasetid"
+          },
+          "sourceId": {
+            "type": "string",
+            "title": "Sourceid"
+          },
+          "product": {
+            "type": "string",
+            "title": "Product"
+          },
+          "variables": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Variables"
+          },
+          "nativeCadence": {
+            "type": "string",
+            "title": "Nativecadence"
+          },
+          "targetCadence": {
+            "type": "string",
+            "title": "Targetcadence"
+          },
+          "observationStart": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Observationstart"
+          },
+          "observationEnd": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Observationend"
+          },
+          "spanYears": {
+            "type": "number",
+            "title": "Spanyears",
+            "default": 0.0
+          },
+          "rawStepCount": {
+            "type": "integer",
+            "title": "Rawstepcount",
+            "default": 0
+          },
+          "validQaCount": {
+            "type": "integer",
+            "title": "Validqacount",
+            "default": 0
+          },
+          "validFraction": {
+            "type": "number",
+            "title": "Validfraction",
+            "default": 0.0
+          },
+          "qaLayersPresent": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Qalayerspresent"
+          },
+          "hasGridStack": {
+            "type": "boolean",
+            "title": "Hasgridstack",
+            "default": false
+          },
+          "minQaFractionRequired": {
+            "type": "number",
+            "title": "Minqafractionrequired"
+          },
+          "minStepCoverageRequired": {
+            "type": "number",
+            "title": "Minstepcoveragerequired"
+          },
+          "minTrendSamplesRequired": {
+            "type": "integer",
+            "title": "Mintrendsamplesrequired"
+          },
+          "minBaselineYearsRequired": {
+            "type": "integer",
+            "title": "Minbaselineyearsrequired"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "notes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Notes"
+          }
+        },
+        "type": "object",
+        "required": [
+          "datasetId",
+          "sourceId",
+          "product",
+          "nativeCadence",
+          "targetCadence",
+          "minQaFractionRequired",
+          "minStepCoverageRequired",
+          "minTrendSamplesRequired",
+          "minBaselineYearsRequired",
+          "status"
+        ],
+        "title": "DatasetReadinessProfileResponse",
+        "description": "Per-dataset observed coverage, QA presence, and adaptive thresholds."
       },
       "DependencyHealth": {
         "properties": {
@@ -3929,6 +5329,63 @@
         "title": "MethodCatalogItemResponse",
         "description": "Catalog metadata describing an implemented (P0/P1) or deferred (P2) scientific method."
       },
+      "MetricAvailabilityResponse": {
+        "properties": {
+          "metricId": {
+            "type": "string",
+            "title": "Metricid"
+          },
+          "label": {
+            "type": "string",
+            "title": "Label"
+          },
+          "priority": {
+            "type": "string",
+            "title": "Priority"
+          },
+          "required": {
+            "type": "boolean",
+            "title": "Required",
+            "default": true
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "blockingCriteria": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Blockingcriteria"
+          },
+          "reason": {
+            "type": "string",
+            "title": "Reason"
+          },
+          "remediation": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Remediation"
+          }
+        },
+        "type": "object",
+        "required": [
+          "metricId",
+          "label",
+          "priority",
+          "status",
+          "reason"
+        ],
+        "title": "MetricAvailabilityResponse",
+        "description": "Availability status of one scientific stage or derived metric."
+      },
       "PreparedDatasetSummaryResponse": {
         "properties": {
           "datasetId": {
@@ -4075,6 +5532,24 @@
               }
             ],
             "title": "Qapolicy"
+          },
+          "qaLayersPresent": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Qalayerspresent"
+          },
+          "spanYears": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Spanyears"
           },
           "regionId": {
             "anyOf": [
@@ -4361,6 +5836,75 @@
         "title": "ProviderVariableSchema",
         "description": "Variable metadata exposed by a registered GHS environmental provider."
       },
+      "ProvisioningStepResponse": {
+        "properties": {
+          "domain": {
+            "type": "string",
+            "title": "Domain"
+          },
+          "provider": {
+            "type": "string",
+            "title": "Provider"
+          },
+          "product": {
+            "type": "string",
+            "title": "Product"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "datasetId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Datasetid"
+          },
+          "windowStart": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Windowstart"
+          },
+          "windowEnd": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Windowend"
+          },
+          "detail": {
+            "type": "string",
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "required": [
+          "domain",
+          "provider",
+          "product",
+          "status",
+          "detail"
+        ],
+        "title": "ProvisioningStepResponse",
+        "description": "Single domain/provider attempt during adaptive data provisioning."
+      },
       "RasterPointBBoxResponse": {
         "properties": {
           "minLon": {
@@ -4389,6 +5933,149 @@
         ],
         "title": "RasterPointBBoxResponse",
         "description": "WGS 84 bounding box of the inspected raster dataset."
+      },
+      "ReadinessCriterionResponse": {
+        "properties": {
+          "criterionId": {
+            "type": "string",
+            "title": "Criterionid"
+          },
+          "category": {
+            "type": "string",
+            "title": "Category"
+          },
+          "datasetId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Datasetid"
+          },
+          "variableName": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Variablename"
+          },
+          "stageOrMetric": {
+            "type": "string",
+            "title": "Stageormetric"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "requiredSummary": {
+            "type": "string",
+            "title": "Requiredsummary"
+          },
+          "actualSummary": {
+            "type": "string",
+            "title": "Actualsummary"
+          },
+          "requiredValue": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "integer"
+              },
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Requiredvalue"
+          },
+          "actualValue": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "integer"
+              },
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Actualvalue"
+          },
+          "unit": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unit"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "scientificRationale": {
+            "type": "string",
+            "title": "Scientificrationale"
+          },
+          "missingGap": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Missinggap"
+          },
+          "remediation": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Remediation"
+          },
+          "specVersion": {
+            "type": "string",
+            "title": "Specversion"
+          }
+        },
+        "type": "object",
+        "required": [
+          "criterionId",
+          "category",
+          "stageOrMetric",
+          "title",
+          "requiredSummary",
+          "actualSummary",
+          "status",
+          "scientificRationale",
+          "specVersion"
+        ],
+        "title": "ReadinessCriterionResponse",
+        "description": "Evaluated dataset/method readiness criterion with required vs actual diagnostics."
       },
       "ReadinessResponse": {
         "properties": {
@@ -4987,7 +6674,7 @@
           },
           "maxGranules": {
             "type": "integer",
-            "maximum": 64.0,
+            "maximum": 256.0,
             "minimum": 1.0,
             "title": "Maxgranules",
             "default": 24
@@ -5124,6 +6811,11 @@
             "type": "boolean",
             "title": "Devauthenabled",
             "default": false
+          },
+          "storageBackend": {
+            "type": "string",
+            "title": "Storagebackend",
+            "default": "local"
           }
         },
         "type": "object",
@@ -5656,6 +7348,410 @@
         ],
         "title": "VariableComparisonSummary",
         "description": "Variable-level trend, resilience, and series mean deltas between two runs."
+      },
+      "ZonalHistogramResponse": {
+        "properties": {
+          "bins": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array",
+            "title": "Bins"
+          },
+          "counts": {
+            "items": {
+              "type": "integer"
+            },
+            "type": "array",
+            "title": "Counts"
+          }
+        },
+        "type": "object",
+        "required": [
+          "bins",
+          "counts"
+        ],
+        "title": "ZonalHistogramResponse"
+      },
+      "ZonalStatisticsRequest": {
+        "properties": {
+          "metricId": {
+            "type": "string",
+            "title": "Metricid"
+          },
+          "date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Date"
+          },
+          "geometry": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Geometry"
+          },
+          "regionId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Regionid"
+          }
+        },
+        "type": "object",
+        "required": [
+          "metricId"
+        ],
+        "title": "ZonalStatisticsRequest"
+      },
+      "ZonalStatisticsResponse": {
+        "properties": {
+          "metricId": {
+            "type": "string",
+            "title": "Metricid"
+          },
+          "date": {
+            "type": "string",
+            "title": "Date"
+          },
+          "datasetId": {
+            "type": "string",
+            "title": "Datasetid"
+          },
+          "mean": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mean"
+          },
+          "median": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Median"
+          },
+          "min": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Min"
+          },
+          "max": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max"
+          },
+          "std": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Std"
+          },
+          "q10": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Q10"
+          },
+          "q25": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Q25"
+          },
+          "q75": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Q75"
+          },
+          "q90": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Q90"
+          },
+          "validPixelCount": {
+            "type": "integer",
+            "title": "Validpixelcount"
+          },
+          "totalPixelCount": {
+            "type": "integer",
+            "title": "Totalpixelcount"
+          },
+          "validDataCoverage": {
+            "type": "number",
+            "title": "Validdatacoverage"
+          },
+          "approxAreaKm2": {
+            "type": "number",
+            "title": "Approxareakm2"
+          },
+          "units": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Units"
+          },
+          "histogram": {
+            "$ref": "#/components/schemas/ZonalHistogramResponse"
+          }
+        },
+        "type": "object",
+        "required": [
+          "metricId",
+          "date",
+          "datasetId",
+          "validPixelCount",
+          "totalPixelCount",
+          "validDataCoverage",
+          "approxAreaKm2",
+          "histogram"
+        ],
+        "title": "ZonalStatisticsResponse"
+      },
+      "ZonalTimeseriesPointResponse": {
+        "properties": {
+          "date": {
+            "type": "string",
+            "title": "Date"
+          },
+          "mean": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mean"
+          },
+          "median": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Median"
+          },
+          "min": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Min"
+          },
+          "max": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max"
+          },
+          "q25": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Q25"
+          },
+          "q75": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Q75"
+          },
+          "validDataCoverage": {
+            "type": "number",
+            "title": "Validdatacoverage"
+          }
+        },
+        "type": "object",
+        "required": [
+          "date",
+          "validDataCoverage"
+        ],
+        "title": "ZonalTimeseriesPointResponse"
+      },
+      "ZonalTimeseriesRequest": {
+        "properties": {
+          "metricId": {
+            "type": "string",
+            "title": "Metricid"
+          },
+          "geometry": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Geometry"
+          },
+          "regionId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Regionid"
+          },
+          "startDate": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Startdate"
+          },
+          "endDate": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Enddate"
+          }
+        },
+        "type": "object",
+        "required": [
+          "metricId"
+        ],
+        "title": "ZonalTimeseriesRequest"
+      },
+      "ZonalTimeseriesResponse": {
+        "properties": {
+          "metricId": {
+            "type": "string",
+            "title": "Metricid"
+          },
+          "units": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Units"
+          },
+          "series": {
+            "items": {
+              "$ref": "#/components/schemas/ZonalTimeseriesPointResponse"
+            },
+            "type": "array",
+            "title": "Series"
+          }
+        },
+        "type": "object",
+        "required": [
+          "metricId",
+          "series"
+        ],
+        "title": "ZonalTimeseriesResponse"
       }
     }
   }
