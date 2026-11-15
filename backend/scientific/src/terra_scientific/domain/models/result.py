@@ -237,6 +237,10 @@ class CrossVariablePairResult(BaseModel):
     pearson_ci_high: float | None = None
     spearman_rho: float | None
     spearman_p: float | None
+    ols_slope: float | None = None
+    ols_slope_se: float | None = None
+    ols_slope_p: float | None = None
+    slope_unit: str = ""
     partial_correlation: float | None = None
     partial_p: float | None = None
     best_lag_steps: int | None = None
@@ -333,6 +337,18 @@ class RecoveryEventResult(BaseModel):
     warnings: list[str] = Field(default_factory=list)
 
 
+class EventResistanceDetail(BaseModel):
+    """Per-event resistance traceability from a negative disturbance peak."""
+
+    model_config = ConfigDict(frozen=True)
+
+    event_start: datetime
+    event_end: datetime | None = None
+    event_peak_timestamp: datetime | None = None
+    peak_negative_zscore: float
+    resistance: float
+
+
 class ResilienceMetricValue(BaseModel):
     """Single interpretable resilience dimension with explicit formula and status."""
 
@@ -347,6 +363,7 @@ class ResilienceMetricValue(BaseModel):
     interpretation: str
     assumptions: list[str] = Field(default_factory=list)
     limitations: list[str] = Field(default_factory=list)
+    event_values: list[EventResistanceDetail] = Field(default_factory=list)
 
 
 class CompositeTriStatus(BaseModel):

@@ -100,6 +100,37 @@ def _safe_correlations(
     return float(pr), float(pp), float(sr), float(sp), n
 
 
+def _bivariate_ols(
+    x: NDArray[np.float64],
+    y: NDArray[np.float64],
+    min_samples: int,
+) -> tuple[float | None, float | None, float | None]:
+    """Compute OLS regression slope y ~ 1 + x with standard error and two-sided p-value."""
+    valid = np.isfinite(x) & np.isfinite(y)
+    xv = x[valid]
+    yv = y[valid]
+    n = int(xv.size)
+    if n < max(min_samples, 3):
+        return None, None, None
+    dx = xv - float(np.mean(xv))
+    sxx = float(np.dot(dx, dx))
+    if sxx <= 1e-15:
+        return None, None, None
+    dy = yv - float(np.mean(yv))
+    slope = float(np.dot(dx, dy) / sxx)
+    intercept = float(np.mean(yv)) - slope * float(np.mean(xv))
+    resid = yv - (intercept + slope * xv)
+    ss_res = float(np.dot(resid, resid))
+    dof = n - 2
+    se = float(np.sqrt(max(ss_res / float(dof), 0.0) / sxx))
+    if se > 1e-15:
+        t_stat = slope / se
+        p_val = float(2.0 * student_t.sf(abs(t_stat), df=dof))
+    else:
+        p_val = 0.0 if abs(slope) > 1e-15 else 1.0
+    return slope, se, p_val
+
+
 def compute_partial_correlation(
     target: NDArray[np.float64],
     predictor: NDArray[np.float64],
@@ -241,9 +272,10 @@ def analyze_cross_variables(
     pairwise_results: list[CrossVariablePairResult] = []
 
     for pred_name, pred_bundle in predictors.items():
-        p_ts, p_vals, _, _, p_res = pred_bundle
+        p_ts, p_vals, p_meta, _, p_res = pred_bundle
         joined_ts, r_al, p_al = _align_two_series(resp_ts, resp_vals, p_ts, p_vals)
         compat_warnings: list[str] = []
+        slope_unit = f"{resp_meta.units}/{p_meta.units}" if resp_meta.units and p_meta.units else ""
 
         if resp_res is not None and p_res is not None and min(resp_res, p_res) > 0.0:
             ratio = max(resp_res, p_res) / min(resp_res, p_res)
@@ -275,11 +307,13 @@ def analyze_cross_variables(
                     pearson_p=None,
                     spearman_rho=None,
                     spearman_p=None,
+                    slope_unit=slope_unit,
                     compatibility_warnings=compat_warnings,
                 )
             )
             continue
 
+        ols_slope, ols_se, ols_p = _bivariate_ols(p_work, r_work, cfg.min_overlap_samples)
         ci_low, ci_high = _fisher_z_ci(pr, n_ov, cfg.alpha) if pr is not None else (None, None)
 
         lag_entries: list[LagCorrelationEntry] = []
@@ -319,6 +353,10 @@ def analyze_cross_variables(
                 pearson_ci_high=ci_high,
                 spearman_rho=sr,
                 spearman_p=sp,
+                ols_slope=ols_slope,
+                ols_slope_se=ols_se,
+                ols_slope_p=ols_p,
+                slope_unit=slope_unit,
                 best_lag_steps=best_lag,
                 best_lag_r=best_r,
                 lag_profile=lag_entries,
