@@ -86,6 +86,76 @@ def test_map_ghs_mod13q1_payload_preserves_provenance_scale_and_fill() -> None:
     assert ds.raster_refs["NDVI"] == "derived/mod13q1/ndvi.tif"
 
 
+def test_map_ghs_mod11a2_payload_treats_null_scale_and_offset_as_absent() -> None:
+    """GHS emits null scale/offset for MOD11A2 QA and LST metadata."""
+    payload: dict[str, object] = {
+        "dataset_id": "33333333-3333-3333-3333-333333333333",
+        "source_id": "MOD11A2.061_20240601_20240624_12",
+        "provider": "modis",
+        "product": "MOD11A2.061",
+        "product_version": "061",
+        "granule_id": "MOD11A2.A2024153.h18v03.061",
+        "units": {"LST_Day_1km": "K", "QC_Day": "bitmask"},
+        "variables": {
+            "LST_Day_1km": {
+                "name": "LST_Day_1km",
+                "units": "K",
+                "dtype": "uint16",
+                "dimensions": ["YDim", "XDim"],
+                "semantics": "continuous_intensive",
+                "nodata": 0,
+                "scale_factor": 0.02,
+                "add_offset": None,
+                "valid_range": None,
+                "attributes": {},
+            },
+            "QC_Day": {
+                "name": "QC_Day",
+                "units": "bitmask",
+                "dtype": "uint8",
+                "dimensions": ["YDim", "XDim"],
+                "semantics": "qa_flag",
+                "nodata": None,
+                "scale_factor": None,
+                "add_offset": None,
+                "valid_range": None,
+                "attributes": {},
+            },
+        },
+        "spatial_metadata": {"crs": MODIS_SINUSOIDAL_WKT, "nominal_resolution_m": 1000.0},
+        "temporal_metadata": {
+            "start": "2024-06-01T00:00:00Z",
+            "end": "2024-07-01T00:00:00Z",
+            "cadence": "monthly",
+            "semantics": "interval",
+        },
+        "extensions": {
+            "time_series": {
+                "LST_Day_1km": {
+                    "timestamps": ["2024-06-01T00:00:00Z"],
+                    "values": [295.81],
+                    "units": "K",
+                    "is_scaled": True,
+                    "qa_layers": {"QC_Day": [0]},
+                }
+            }
+        },
+    }
+
+    ds = map_ghs_dataset_payload(payload)
+
+    assert ds.source_id == DataSourceId.MODIS_MOD11A2
+    ls_day = ds.variables["LST_Day_1km"]
+    assert ls_day.scale_factor == pytest.approx(0.02)
+    assert ls_day.add_offset == pytest.approx(0.0)
+    qc_day = ds.variables["QC_Day"]
+    assert qc_day.scale_factor == pytest.approx(1.0)
+    assert qc_day.add_offset == pytest.approx(0.0)
+    series = ds.series["LST_Day_1km"]
+    assert series.metadata.is_scaled is True
+    assert series.values == [pytest.approx(295.81)]
+
+
 def test_map_ghs_rejects_gibs_and_preserves_imerg_run_type() -> None:
     gibs_payload: dict[str, object] = {
         "dataset_id": "gibs-id",
