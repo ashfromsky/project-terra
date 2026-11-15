@@ -40,3 +40,19 @@ export type MethodCatalogItemResponse = components['schemas']['MethodCatalogItem
 export type CreateAssessmentRequest = components['schemas']['CreateAssessmentRequest']
 export type AssessmentSummaryResponse = components['schemas']['AssessmentSummaryResponse']
 export type AssessmentDetailResponse = components['schemas']['AssessmentDetailResponse']
+export type CompareAssessmentsRequest = components['schemas']['CompareAssessmentsRequest']
+export type VariableComparisonSummary = components['schemas']['VariableComparisonSummary']
+export type AssessmentComparisonResponse = components['schemas']['AssessmentComparisonResponse']
+
+export type ProviderVariableSchema = components['schemas']['ProviderVariableSchema']
+export type ProviderProductSchema = components['schemas']['ProviderProductSchema']
+export type ProviderStatusResponse = components['schemas']['ProviderStatusResponse']
+export type DiscoverObservationsRequest = components['schemas']['DiscoverObservationsRequest']
+export type DiscoveredObservationResponse = components['schemas']['DiscoveredObservationResponse']
+export type DiscoverObservationsResponse = components['schemas']['DiscoverObservationsResponse']
+export type StartIngestionRequest = components['schemas']['StartIngestionRequest']
+export type PreparedDatasetTimeSeriesPreviewSchema =
+  components['schemas']['PreparedDatasetTimeSeriesPreviewSchema']
+export type PreparedDatasetSummaryResponse =
+  components['schemas']['PreparedDatasetSummaryResponse']
+export type IngestionOperationResponse = components['schemas']['IngestionOperationResponse']

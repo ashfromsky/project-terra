@@ -1,5 +1,5 @@
 import { useMemo, useState, type FormEvent } from 'react'
-import { Link } from 'react-router'
+import { Link, useSearchParams } from 'react-router'
 import {
   parseScientificAssessmentResult,
   useAssessmentDetailQuery,
@@ -9,11 +9,18 @@ import {
   useExecuteAssessmentMutation,
   type ParsedResilienceDimension,
 } from '../../shared/api/assessments'
-import { buildGitHubLoginUrl, useCurrentUserQuery } from '../../shared/api/auth'
+import { useCurrentUserQuery } from '../../shared/api/auth'
 import { ApiError } from '../../shared/api/client'
+import { usePreparedDatasetsQuery } from '../../shared/api/data-sources'
 import { useRegionsQuery } from '../../shared/api/regions'
 import { APP_ROUTES } from '../../shared/config/routes'
+import {
+  buildAnomaliesChartOption,
+  buildTimeSeriesChartOption,
+} from '../../shared/lib/scientific-charts'
+import { AuthActionBanner } from '../../shared/ui/auth-action-banner'
 import { Button } from '../../shared/ui/button'
+import { Chart } from '../../shared/ui/chart'
 import { StatusBadge, type StatusBadgeTone } from '../../shared/ui/status-badge'
 import { buildSampleMod13InlineDataset } from './sample-inline-fixture'
 
@@ -103,17 +110,226 @@ function renderDimensionCard(dim: ParsedResilienceDimension | null, label: strin
   )
 }
 
+function PreparedDatasetPickerField(props: {
+  enabled: boolean
+  selectedDatasetIds: string[]
+  onToggle: (datasetId: string) => void
+}) {
+  const datasetsQuery = usePreparedDatasetsQuery(props.enabled)
+  const datasets = datasetsQuery.data ?? []
+
+  return (
+    <div className="sci-field">
+      <div className="sci-run-item__top">
+        <span className="sci-label">Prepared GHS datasets</span>
+        <Link to={APP_ROUTES.dataSources} className="sci-dim-card__note">
+          Ingest new data
+        </Link>
+      </div>
+      {datasetsQuery.isPending ? (
+        <p className="sci-dim-card__note">Loading prepared GHS datasets…</p>
+      ) : datasetsQuery.isError ? (
+        <p className="sci-dim-card__note">
+          GHS inventory unreachable right now (manual IDs below still work if offline).
+        </p>
+      ) : datasets.length === 0 ? (
+        <p className="sci-dim-card__note">
+          No GHS datasets ingested yet. Use Data Sources to ingest real NASA observations.
+        </p>
+      ) : (
+        <div className="sci-dataset-picker" role="group" aria-label="Prepared GHS datasets">
+          {datasets.map((ds) => {
+            const checked = props.selectedDatasetIds.includes(ds.datasetId)
+            return (
+              <label
+                key={ds.datasetId}
+                className={`sci-dataset-option ${checked ? 'sci-dataset-option--selected' : ''}`.trim()}
+              >
+                <input
+                  type="checkbox"
+                  checked={checked}
+                  onChange={() => props.onToggle(ds.datasetId)}
+                />
+                <span>
+                  <strong>
+                    {ds.provider} · {ds.product}
+                  </strong>
+                  <div className="sci-run-item__meta">
+                    {(ds.variables ?? []).join(', ') || 'variables'} · {ds.observationCount} obs ·{' '}
+                    {ds.datasetId.slice(0, 8)}
+                  </div>
+                </span>
+              </label>
+            )
+          })}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function AssessmentVisualizationsSection(props: {
+  parsedResult: NonNullable<ReturnType<typeof parseScientificAssessmentResult>>
+}) {
+  const { parsedResult } = props
+  const [selectedVar, setSelectedVar] = useState('')
+
+  const availableVars = useMemo(() => {
+    const names = new Set<string>()
+    parsedResult.temporalSeries.forEach((s) => names.add(s.variableName))
+    parsedResult.anomalies.forEach((a) => names.add(a.variableName))
+    return Array.from(names)
+  }, [parsedResult.anomalies, parsedResult.temporalSeries])
+
+  const activeVar = useMemo(() => {
+    if (selectedVar && availableVars.includes(selectedVar)) return selectedVar
+    return availableVars[0] ?? ''
+  }, [availableVars, selectedVar])
+
+  const activeSeries = parsedResult.temporalSeries.find((s) => s.variableName === activeVar) ?? null
+  const activeAnomaly = parsedResult.anomalies.find((a) => a.variableName === activeVar) ?? null
+  const activeBaseline = parsedResult.baselines.find((b) => b.variableName === activeVar) ?? null
+
+  const seriesOption = useMemo(() => {
+    if (!activeSeries || activeSeries.timestamps.length === 0) return null
+    return buildTimeSeriesChartOption({
+      title: `Temporal Series · ${activeSeries.variableName}`,
+      variableName: activeSeries.variableName,
+      units: activeSeries.units || undefined,
+      timestamps: activeSeries.timestamps,
+      values: activeSeries.values,
+    })
+  }, [activeSeries])
+
+  const anomalyOption = useMemo(() => {
+    if (!activeAnomaly || activeAnomaly.timestamps.length === 0) return null
+    return buildAnomaliesChartOption({
+      variableName: activeAnomaly.variableName,
+      timestamps: activeAnomaly.timestamps,
+      standardZscores: activeAnomaly.standardZscores,
+      robustZscores: activeAnomaly.robustZscores,
+    })
+  }, [activeAnomaly])
+
+  if (!seriesOption && !anomalyOption && parsedResult.crossVariable.length === 0) {
+    return null
+  }
+
+  return (
+    <section className="sci-main-stack" aria-label="Time series and anomaly charts">
+      <div className="sci-panel__header">
+        <div>
+          <h3 className="sci-panel__title">Time Series &amp; Standardized Anomalies</h3>
+          {activeSeries ? (
+            <p className="sci-panel__subtitle">
+              Cadence: {activeSeries.cadence} · Aggregation: {activeSeries.aggregationOperator}
+              {activeBaseline
+                ? ` · Baseline (${activeBaseline.baselineType}, ${activeBaseline.binCounts.reduce((a, b) => a + b, 0)} ref samples)`
+                : ''}
+            </p>
+          ) : null}
+        </div>
+        {availableVars.length > 1 ? (
+          <div className="sci-filter-bar">
+            <label className="sci-label" htmlFor="assessment-chart-var">
+              Variable
+            </label>
+            <select
+              id="assessment-chart-var"
+              className="sci-select"
+              style={{ width: 'auto', minWidth: 150 }}
+              value={activeVar}
+              onChange={(e) => setSelectedVar(e.target.value)}
+            >
+              {availableVars.map((v) => (
+                <option key={v} value={v}>
+                  {v}
+                </option>
+              ))}
+            </select>
+          </div>
+        ) : null}
+      </div>
+
+      {seriesOption ? (
+        <div className="sci-dim-card">
+          <span className="sci-dim-card__name">AOI Temporal Trajectory · {activeVar}</span>
+          <Chart option={seriesOption} className="sci-chart-box" />
+        </div>
+      ) : null}
+
+      {anomalyOption ? (
+        <div className="sci-dim-card">
+          <div className="sci-dim-card__head">
+            <span className="sci-dim-card__name">
+              Standardized &amp; Robust Z-Score Anomalies · {activeVar}
+            </span>
+            {activeAnomaly && activeAnomaly.persistentRuns.length > 0 ? (
+              <StatusBadge tone="warning">
+                {activeAnomaly.persistentRuns.length} persistent anomaly runs
+              </StatusBadge>
+            ) : null}
+          </div>
+          <Chart option={anomalyOption} className="sci-chart-box" />
+        </div>
+      ) : null}
+
+      {parsedResult.crossVariable.length > 0 ? (
+        <div>
+          <h3 className="sci-panel__title">Cross-Variable Associations</h3>
+          <div className="provenance-table-wrapper">
+            <table className="provenance-table">
+              <thead>
+                <tr>
+                  <th scope="col">Variables (X ↔ Y)</th>
+                  <th scope="col">Pearson r</th>
+                  <th scope="col">Spearman ρ</th>
+                  <th scope="col">Lag</th>
+                  <th scope="col">p-value (n)</th>
+                  <th scope="col">Epistemic Caveat</th>
+                </tr>
+              </thead>
+              <tbody>
+                {parsedResult.crossVariable.map((cv) => (
+                  <tr key={`${cv.xVariable}-${cv.yVariable}-${cv.lagSteps}`}>
+                    <td className="provenance-table__primary">
+                      {cv.xVariable} ↔ {cv.yVariable}
+                    </td>
+                    <td>{formatNumber(cv.pearsonR, 3)}</td>
+                    <td>{formatNumber(cv.spearmanRho, 3)}</td>
+                    <td>{cv.lagSteps}</td>
+                    <td>
+                      {formatNumber(cv.pValue, 4)} (n={cv.sampleCount})
+                    </td>
+                    <td style={{ whiteSpace: 'normal', minWidth: 220 }}>{cv.caveat}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      ) : null}
+    </section>
+  )
+}
+
 export default function AssessmentsPage() {
+  const [searchParams] = useSearchParams()
   const [activeTab, setActiveTab] = useState<WorkspaceTab>('results')
   const [selectedId, setSelectedId] = useState<string | null>(null)
-
-  // Creation form state
   const [title, setTitle] = useState('')
-  const [regionId, setRegionId] = useState('')
+  const [regionId, setRegionId] = useState(() => searchParams.get('regionId') ?? '')
   const [analysisStart, setAnalysisStart] = useState('2021-01-01')
   const [analysisEnd, setAnalysisEnd] = useState('2024-12-31')
   const [baselineStart, setBaselineStart] = useState('2018-01-01')
   const [baselineEnd, setBaselineEnd] = useState('2020-12-31')
+  const [targetCadence, setTargetCadence] = useState<'monthly' | 'daily' | 'sixteen_day'>('monthly')
+  const [qaPolicy, setQaPolicy] = useState<'standard' | 'strict' | 'exploratory'>('standard')
+  const [minYearsRequired, setMinYearsRequired] = useState(1)
+  const [selectedDatasetIds, setSelectedDatasetIds] = useState<string[]>(() => {
+    const preselected = searchParams.get('datasetId')
+    return preselected ? [preselected] : []
+  })
   const [ghsDatasetIdsText, setGhsDatasetIdsText] = useState('')
   const [inlineJsonText, setInlineJsonText] = useState('')
   const [executeNow, setExecuteNow] = useState(true)
@@ -161,10 +377,11 @@ export default function AssessmentsPage() {
       return
     }
 
-    const ghsIds = ghsDatasetIdsText
+    const manualIds = ghsDatasetIdsText
       .split(',')
       .map((item) => item.trim())
       .filter(Boolean)
+    const ghsIds = Array.from(new Set([...selectedDatasetIds, ...manualIds]))
 
     let inlineDatasets: Record<string, unknown>[] = []
     if (inlineJsonText.trim().length > 0) {
@@ -197,13 +414,14 @@ export default function AssessmentsPage() {
           request_id: `ui-${Date.now()}`,
           analysis_start: `${analysisStart}T00:00:00Z`,
           analysis_end: `${analysisEnd}T23:59:59Z`,
-          target_cadence: 'monthly',
+          target_cadence: targetCadence,
+          qa_policy: qaPolicy,
           baseline: {
             baseline_type: 'fixed_reference',
             start: `${baselineStart}T00:00:00Z`,
             end: `${baselineEnd}T23:59:59Z`,
-            min_years_required: 3,
-            min_samples_per_bin: 3,
+            min_years_required: minYearsRequired,
+            min_samples_per_bin: Math.max(1, minYearsRequired),
           },
         },
       })
@@ -265,15 +483,11 @@ export default function AssessmentsPage() {
               Checking session status…
             </div>
           ) : !isAuthenticated ? (
-            <div className="sci-banner sci-banner--warning">
-              <p>
-                Authentication is required to create, list, or execute persisted assessments (
-                <code className="sci-code-chip">401 Unauthorized</code> otherwise).
-              </p>
-              <a href={buildGitHubLoginUrl(APP_ROUTES.assessments)} className="terra-link-reset">
-                <Button variant="primary">Sign in with GitHub</Button>
-              </a>
-            </div>
+            <AuthActionBanner
+              returnTo={APP_ROUTES.assessments}
+              title="Authentication required"
+              description="Sign in to select prepared GHS datasets, create assessments, and run Scientific Core pipelines."
+            />
           ) : (
             <form className="sci-form" onSubmit={handleCreateSubmit}>
               <div className="sci-field">
@@ -364,9 +578,73 @@ export default function AssessmentsPage() {
                 </div>
               </div>
 
+              <div className="sci-field-row">
+                <div className="sci-field">
+                  <label className="sci-label" htmlFor="target-cadence">
+                    Target cadence
+                  </label>
+                  <select
+                    id="target-cadence"
+                    className="sci-select"
+                    value={targetCadence}
+                    onChange={(e) =>
+                      setTargetCadence(e.target.value as 'monthly' | 'daily' | 'sixteen_day')
+                    }
+                  >
+                    <option value="monthly">Monthly</option>
+                    <option value="sixteen_day">16-Day</option>
+                    <option value="daily">Daily</option>
+                  </select>
+                </div>
+                <div className="sci-field">
+                  <label className="sci-label" htmlFor="qa-policy">
+                    QA policy
+                  </label>
+                  <select
+                    id="qa-policy"
+                    className="sci-select"
+                    value={qaPolicy}
+                    onChange={(e) =>
+                      setQaPolicy(e.target.value as 'standard' | 'strict' | 'exploratory')
+                    }
+                  >
+                    <option value="standard">Standard</option>
+                    <option value="strict">Strict</option>
+                    <option value="exploratory">Exploratory</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="sci-field">
+                <label className="sci-label" htmlFor="min-baseline-years">
+                  Min baseline years
+                </label>
+                <input
+                  id="min-baseline-years"
+                  className="sci-input"
+                  type="number"
+                  min={1}
+                  max={10}
+                  value={minYearsRequired}
+                  onChange={(e) =>
+                    setMinYearsRequired(Math.max(1, Math.min(10, Number(e.target.value) || 1)))
+                  }
+                />
+              </div>
+
+              <PreparedDatasetPickerField
+                enabled={isAuthenticated}
+                selectedDatasetIds={selectedDatasetIds}
+                onToggle={(dsId) =>
+                  setSelectedDatasetIds((prev) =>
+                    prev.includes(dsId) ? prev.filter((id) => id !== dsId) : [...prev, dsId],
+                  )
+                }
+              />
+
               <div className="sci-field">
                 <label className="sci-label" htmlFor="ghs-dataset-ids">
-                  GHS dataset IDs (comma-separated, optional)
+                  Additional GHS dataset IDs (comma-separated, optional)
                 </label>
                 <input
                   id="ghs-dataset-ids"
@@ -374,7 +652,7 @@ export default function AssessmentsPage() {
                   type="text"
                   value={ghsDatasetIdsText}
                   onChange={(e) => setGhsDatasetIdsText(e.target.value)}
-                  placeholder="Requires running GHS service"
+                  placeholder="Optional manual IDs"
                 />
               </div>
 
@@ -612,7 +890,25 @@ export default function AssessmentsPage() {
                           {formatDate(detail.createdAt)} · Completed {formatDate(detail.completedAt)}
                         </p>
                       </div>
-                      <StatusBadge tone={statusTone(detail.status)}>{detail.status}</StatusBadge>
+                      <div className="sci-btn-row">
+                        <StatusBadge tone={statusTone(detail.status)}>{detail.status}</StatusBadge>
+                        {parsedResult ? (
+                          <>
+                            <Link
+                              to={`${APP_ROUTES.comparativeAnalysis}?primaryId=${encodeURIComponent(detail.id)}`}
+                              className="terra-link-reset"
+                            >
+                              <Button variant="secondary">Compare</Button>
+                            </Link>
+                            <Link
+                              to={`${APP_ROUTES.reports}?assessmentId=${encodeURIComponent(detail.id)}`}
+                              className="terra-link-reset"
+                            >
+                              <Button variant="secondary">Report &amp; Export</Button>
+                            </Link>
+                          </>
+                        ) : null}
+                      </div>
                     </div>
 
                     {detail.status === 'queued' ? (
@@ -662,6 +958,8 @@ export default function AssessmentsPage() {
                             </ul>
                           </div>
                         ) : null}
+
+                        <AssessmentVisualizationsSection parsedResult={parsedResult} />
 
                         {parsedResult.resilience.map((resBlock) => (
                           <section
