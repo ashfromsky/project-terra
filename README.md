@@ -1,174 +1,410 @@
+<div align="center">
+
 # PROJECT TERRA
 
 **Ecosystem Response & Resilience Intelligence**
 
-TERRA is an open-source environmental analysis platform designed to investigate how ecosystems respond to environmental stress, change over time, and recover from disturbances.
+Turn Earth observation into transparent, reproducible ecosystem assessments.
 
-The project aims to transform Earth observation data into interpretable environmental insights through remote sensing, time-series analysis, and ecosystem resilience assessment.
+[![License](https://img.shields.io/badge/license-Apache--2.0-159B91?style=flat-square)](LICENSE)
+[![Python](https://img.shields.io/badge/python-3.13+-3776AB?style=flat-square&logo=python&logoColor=white)](backend/core/pyproject.toml)
+[![React](https://img.shields.io/badge/react-19-61DAFB?style=flat-square&logo=react&logoColor=111111)](frontend/package.json)
+[![FastAPI](https://img.shields.io/badge/FastAPI-009688?style=flat-square&logo=fastapi&logoColor=white)](backend/core)
+[![Scientific Core](https://img.shields.io/badge/scientific__core-P0%2FP1-159B91?style=flat-square)](docs/scientific/SCIENTIFIC_CORE.md)
+[![Status](https://img.shields.io/badge/status-active__development-3193CE?style=flat-square)](#project-status)
 
-> Project status: Active development. Core API (`auth`, `layers`, `regions`, `data_sources`, `assessments`), P0/P1 Scientific Core (`terra-scientific`), Core Worker (`terra-worker`), isolated Geospatial Harmonization Service (`GHS`, ADR-0002) with bounded multi-granule ingestion and temporal harmonization, all six analytical/workspace React/Vite routes (`/overview`, `/explore`, `/data-sources`, `/assessments`, `/comparative-analysis`, `/reports`), and offline GitHub Actions CI are implemented. P2 scientific methods (`composite_tri`, `critical_slowing_down`, `causal_attribution`), AppEEARS/Harmony task polling, and external production deployment remain in progress or deferred.
+[Overview](#overview) · [Screenshots](#screenshots) · [Architecture](#architecture) · [Scientific Core](#scientific-core) · [Quick Start](#quick-start) · [Docker](#docker-compose) · [Documentation](#documentation)
+
+</div>
+
+---
+
+![PROJECT TERRA Map Explorer — live NDVI raster, AOI, legend and provenance](docs/assets/screenshots/map-explorer.png)
 
 ## Overview
 
-Environmental changes such as droughts, heatwaves, and long-term precipitation shifts can significantly affect ecosystems.
+**PROJECT TERRA** is an open-source environmental analysis platform for investigating how ecosystems respond to environmental stress, change over time, and recover from disturbances.
 
-TERRA aims to help investigate these processes by combining multiple environmental indicators and analyzing their temporal relationships.
+The platform connects a geographic **Area of Interest (AOI)** to **real NASA observations**, runs the existing **Scientific Core**, and returns an assessment with trends, anomalies, resilience dimensions, quality diagnostics, and provenance. It is designed to keep three things separate and visible:
 
-Instead of relying exclusively on vegetation indices or individual satellite observations, TERRA focuses on ecosystem response dynamics.
+- **Observations** — real provider data with units, timestamps, QA layers, and product identifiers.
+- **Scientific analysis** — deterministic, versioned algorithms with explicit assumptions and readiness requirements.
+- **Visualization** — map previews and charts that never become the source of a quantitative result.
 
-## Main Objectives
+> PROJECT TERRA was initiated in the context of the NASA Space Apps Challenge 2026. It is an independent open-source project and is not an official NASA product.
 
-- Detect long-term environmental trends.
-- Investigate ecosystem responses to environmental stress.
-- Evaluate vegetation resistance and recovery.
-- Compare environmental dynamics across geographic regions.
-- Identify potential signs of ecosystem vulnerability.
-- Present analytical results with transparent data provenance and uncertainty.
+---
 
-## Scientific Approach
+## Screenshots
 
-TERRA is being designed around several analytical dimensions:
+| Map Explorer — live metric preview | Assessments — readiness diagnostics |
+| :---: | :---: |
+| ![Map Explorer with NDVI overlay](docs/assets/screenshots/map-explorer.png) | ![Pre-run adaptive data readiness](docs/assets/screenshots/assessment-readiness.png) |
 
-| Dimension | Description |
-|---|---|
-| Resistance | How well an ecosystem maintains its characteristics during environmental stress. |
-| Recovery | How quickly and completely observed indicators return toward their baseline after disturbance. |
-| Stability | How much ecosystem indicators fluctuate over time. |
-| Sensitivity | How strongly ecosystem indicators respond to environmental changes. |
+| Assessment outputs — AOI, period, provenance | Scientific charts — time series and anomalies |
+| :---: | :---: |
+| ![Selected AOI and analysis period](docs/assets/screenshots/assessment-results.png) | ![Time series and anomaly diagnostics](docs/assets/screenshots/assessment-charts.png) |
 
-These dimensions are intended to form the foundation of a future integrated resilience assessment model.
+| Data Sources — provider readiness and ingestion |
+| :--- |
+| ![Provider readiness, ingestion, and prepared datasets](docs/assets/screenshots/data-sources.png) |
 
-All metrics and aggregation methods require appropriate scientific justification and validation.
+---
 
-## Data Sources
+## What TERRA does
 
-Planned environmental data sources include:
+| Capability | What it means in practice |
+| :--- | :--- |
+| **AOI-driven workflow** | Draw a polygon/rectangle or select a point AOI in Map Explorer; save it as an EPSG:4326 region and carry it into an assessment. |
+| **Real data acquisition** | Discover and ingest bounded NASA granules or point/regional meteorology through GHS. No global dataset downloads, no synthetic substitutions. |
+| **Adaptive readiness** | Check source-specific QA, temporal coverage, baseline depth, and method requirements **before** execution. Missing gaps are reported with remediation. |
+| **Scientific Core execution** | Run only implemented P0/P1 methods, with preserved units, timestamps, missing-value masks, QA flags, and method versions. |
+| **Truthful results** | Terminal statuses distinguish `completed`, `completed_partial`, and `insufficient_data`. Unavailable metrics are reported as unavailable, not zero. |
+| **Map metric preview** | Switch between supported environmental layers with legends, units, loading states, and explicit unavailable reasons. Preview is visualization, not assessment. |
+| **Provenance everywhere** | Input hashes, product versions, source datasets, method versions, artifact manifests, and object-storage checksums. |
 
-- **NASA MODIS** — vegetation indices (NDVI, EVI) and land surface temperature.
-- **NASA GPM IMERG** — precipitation estimates.
-- **NASA SMAP** — soil moisture observations.
-- **NASA POWER** — meteorological and solar data.
+---
 
-The availability, temporal coverage, spatial resolution, and quality of each dataset will be considered during analysis.
+## End-to-end workflow
 
-## Technology Stack
+```mermaid
+sequenceDiagram
+    autonumber
+    actor User
+    participant Map as Map Explorer
+    participant Core as terra-core
+    participant GHS as GHS
+    participant NASA as NASA providers
+    participant Worker as terra-worker
+    participant Sci as terra-scientific
 
-### Frontend
+    User->>Map: Draw AOI + choose analysis period
+    Map->>Core: POST /api/v1/regions (GeoJSON EPSG:4326)
+    Core-->>Map: region_id + area + bbox + centroid
+    Map->>Core: POST /api/v1/data-sources/provision
+    Core->>GHS: Discover bounded observations
+    GHS->>NASA: CMR / POWER requests
+    GHS-->>Core: Prepared dataset IDs + readiness
+    Map->>Core: POST /api/v1/assessments (queued)
+    Core-->>Map: assessment_id
+    Worker->>Core: Claim queued assessment
+    Worker->>GHS: Fetch prepared dataset
+    Worker->>Sci: run_assessment(request, datasets)
+    Sci-->>Worker: Result, diagnostics, provenance
+    Worker->>Core: Persist terminal status + artifacts
+    Map->>Core: Poll GET /api/v1/assessments/{id}
+    Core-->>Map: Completed result
+```
 
-- React 19
-- TypeScript
-- Vite
-- MapLibre GL JS
-- deck.gl
-- Zustand
-- TanStack Query
-- Apache ECharts
+The map is an **AOI and preview interface**. Scientific analysis never depends on rendered raster tiles, screenshots, or NASA GIBS imagery.
 
-### Backend
-
-- Python
-- FastAPI
-- Granian
-- Pydantic
-
-### Data and Scientific Computing
-
-Implemented in `backend/scientific/` (`terra-scientific`) and `backend/services/geospatial_harmonization/`:
-
-- NumPy, SciPy, Pandas, Pydantic (pure Scientific Core `terra-scientific`, zero HTTP/DB dependencies)
-- Xarray, Rasterio, GeoPandas, h5py, netCDF4, Zarr, Shapely (inside isolated `geospatial_harmonization` service per ADR-0002)
-- SQLAlchemy async (`aiosqlite` development fallback; `asyncpg`/PostgreSQL supported in config)
-
-Planned / Target infrastructure (not currently wired in runtime):
-
-- PostGIS spatial queries in Core
-- DuckDB analytical engine
-- TiTiler dynamic COG/Zarr tile service
-- Caddy reverse proxy and PgBouncer connection pooling
-
-### Development & CI
-
-- pnpm, uv, Vitest, pytest, Ruff, mypy (strict on Scientific Core, Worker, GHS), ESLint, TypeScript
-- GitHub Actions workflows in `.github/workflows/`:
-  - `ci.yml`: Offline lint, strict mypy, unit/integration tests (`backend-core`, `scientific-core`, `worker`, `ghs-offline`, `frontend-and-contracts`), `make dev-check`, OpenAPI contract synchronization verification (`make contracts`), Vite production build (`frontend/dist` artifact), and GHS container image build verification (`cd-artifact-readiness`).
-  - `optional-live-and-postgres.yml`: Manual `workflow_dispatch` workflow for GHS PostgreSQL `FOR UPDATE SKIP LOCKED` integration tests and optional `EARTHDATA_TOKEN`-gated live NASA smoke tests.
-
-#### Deployment Readiness
-
-No external hosting provider, container registry target, or deployment credentials are configured in the repository yet. To enable automated deployment beyond the CI artifact stage (`terra-frontend-dist` and local `terra-ghs:ci` Docker build check):
-
-1. Add a container registry destination (e.g., GHCR) and Dockerfiles for `backend/core`, `backend/worker`, and `frontend` static serving alongside `backend/services/geospatial_harmonization/Dockerfile`.
-2. Provision production PostgreSQL/PostGIS, S3-compatible object storage, and configured secrets (`GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, `JWT_SECRET_KEY`, `DATABASE_URL`, `GHS_DATABASE_URL`, `EARTHDATA_TOKEN`).
-3. Add a deployment job scoped to protected environment approvals in GitHub Actions referencing those configured secrets.
-
-Run locally from the repository root via `Makefile` (requires Node.js 20+ with `pnpm`, `uv`, and Python 3.13+):
-
-- **Frontend only:** `cd frontend && pnpm dev` (or `make frontend-dev`) — regenerates OpenAPI/TypeScript contracts via `predev` and starts Vite (`http://localhost:5173`) with `/api` and `/health` proxied to `VITE_API_PROXY_TARGET` (default `http://127.0.0.1:8000`).
-- **Main development environment:** `make dev` — regenerates contracts, then starts `backend/core` (`http://127.0.0.1:8000`, `/health`, `/health/ready`), `CORE-WORKER` (`terra-worker`), and Vite (`http://localhost:5173`).
-- **GHS-only environment:** `make dev-ghs` — starts the isolated Geospatial Harmonization Service API (`http://127.0.0.1:8080`, `/health`, `/ready`) and `GHS-WORKER` as separate processes sharing `GHS_DATABASE_URL` and local/S3 storage. Run components individually with `make ghs-api-dev`, `make ghs-worker-dev`, and `make ghs-migrate`.
-- **Complete local environment:** `make dev-full` — regenerates contracts and starts all five independent processes (`CORE`, `GHS`, `CORE-WORKER`, `GHS-WORKER`, `FRONTEND`) with health checks, shared Core `DATABASE_URL` / independent `GHS_DATABASE_URL`, and unified addressing (`8000` / `8080` / `5173`). Core consumes GHS over HTTP (`GHS_BASE_URL`) per ADR-0002.
-- **Environment diagnostics & utilities:** `make doctor` (validates CLIs, config, DB isolation, ports `8000`/`8080`/`5173`, workers, storage, and credential readiness without printing secrets), `make backend-dev`, `make worker-dev`, `make contracts`, `make test` (Core + Scientific + Worker + Frontend), `make ghs-test`, `make dev-check` (orchestrator tests), `make lint`, `make ghs-lint`, `make frontend-typecheck`, `make frontend-build`. See [`docs/ENVIRONMENT_SETUP.md`](docs/ENVIRONMENT_SETUP.md).
-
-#### Environment & Process Supervision
-
-- **Configuration:** All services read the root `.env` (copied from `.env.example`, never committed) with default SQLite persistence isolated in `<repo>/.data/terra.db` (shared by `CORE` + `CORE-WORKER` via `DATABASE_URL`) and `<repo>/.data/ghs.db` (shared by `GHS` + `GHS-WORKER` via `GHS_DATABASE_URL`). Optional port overrides: `CORE_HOST`, `CORE_PORT` (default `8000`), `GHS_HOST`, `GHS_PORT` (default `8080`), `FRONTEND_PORT` (default `5173`).
-- **Logs & shutdown:** `scripts/dev.mjs` prefixes logs (`[CONTRACTS]`, `[CORE]`, `[CORE-WORKER]`, `[GHS]`, `[GHS-WORKER]`, `[FRONTEND]`), validates port availability, waits for `/health` before launching dependent workers, and shuts down all child process groups cleanly on `Ctrl+C` (`SIGINT`/`SIGTERM`).
+---
 
 ## Architecture
 
-TERRA is intended to follow a modular architecture with independently runnable frontend and backend components.
+TERRA is a modular monolith for Core plus two isolated execution boundaries: **GHS** for heavy geospatial ingestion (ADR-0002) and **terra-scientific** for pure, independently testable algorithms.
 
-The planned system includes:
+```mermaid
+flowchart LR
+    subgraph Browser["Frontend — React 19 / Vite"]
+        UI["Map Explorer · Assessments<br/>Data Sources · Reports"]
+    end
 
-- Frontend — interactive maps, visualizations, and analytical interfaces.
-- Backend — API, application orchestration, and job management.
-- Scientific Core — independent scientific calculations and statistical methods.
-- Analytical Engine — analytical processing of environmental datasets.
-- Worker — asynchronous execution of computationally intensive tasks.
-- Data Storage — structured metadata and geospatial data storage.
+    subgraph Core["backend/core — terra-core"]
+        API["FastAPI /api/v1"]
+        APP["Application services"]
+        DB[("Core DB<br/>PostgreSQL / SQLite dev")]
+        OBJ[("Object storage<br/>local / S3 · R2")]
+    end
 
-The initial implementation will prioritize a modular monolith rather than unnecessary distributed infrastructure.
+    subgraph GHS["backend/services/geospatial_harmonization"]
+        GAPI["GHS API"]
+        GW["GHS Worker"]
+        GDB[("GHS DB")]
+        GST[("Raster / object storage")]
+    end
 
-## Scientific Principles
+    subgraph Sci["backend/scientific — terra-scientific"]
+        SC["Pure Scientific Core"]
+    end
 
-TERRA aims to follow several principles:
+    Worker["backend/worker — terra-worker"]
+    Providers["NASA MODIS · GPM · SMAP · POWER"]
 
-1. Reproducibility — analytical results should be reproducible from documented inputs and methods.
-2. Data provenance — sources, product versions, processing steps, and retrieval dates should be traceable.
-3. Quality awareness — missing observations and satellite quality flags must be considered.
-4. Spatial and temporal consistency — datasets with different resolutions and sampling intervals must be appropriately harmonized.
-5. Scientific transparency — assumptions, limitations, and uncertainty must be communicated.
-6. No unsupported causal claims — statistical relationships alone do not establish causality.
+    UI -->|OpenAPI-typed REST| API
+    API --> APP
+    APP --> DB
+    APP --> OBJ
+    APP -->|HTTP| GAPI
+    Worker --> DB
+    Worker --> OBJ
+    Worker -->|HTTP| GAPI
+    Worker --> SC
+    GAPI --> GDB
+    GAPI --> GST
+    GW --> GDB
+    GW --> GST
+    GAPI -->|CMR / Earthdata| Providers
+```
 
-## Project Status
+### Component responsibilities
 
-TERRA is in active development with Core API (`auth`, `layers`, `regions`, `data_sources`, `assessments`), `terra-scientific` v1.1.0, `terra-worker`, GHS (isolated geospatial ingestion service with bounded multi-granule workflows & temporal harmonization), and all six workspace routes connected (`/overview`, `/explore`, `/data-sources`, `/assessments`, `/comparative-analysis`, `/reports`). Several P2 scientific methods, AppEEARS/Harmony polling, and production deployment remain deferred:
+| Component | Runtime | Responsibility |
+| :--- | :--- | :--- |
+| **Frontend** | React 19, Vite 8, MapLibre 5, deck.gl, TanStack Query, Zustand, ECharts 6 | Map/AOI interaction, metric previews, assessment configuration, readiness and result visualization, reports. |
+| **terra-core** | FastAPI, Granian, SQLAlchemy async, Pydantic | Auth, regions, layers, data-source proxy, assessment orchestration, readiness, artifacts, comparison. |
+| **terra-scientific** | Pure Python, NumPy, Pandas, SciPy, Pydantic | Deterministic scientific methods and contracts. No HTTP, database, storage, or UI dependencies. |
+| **terra-worker** | Async queue runner | Claims queued assessments, fetches prepared GHS datasets, runs Scientific Core, persists results and artifacts. |
+| **GHS** | FastAPI, Granian, rasterio/xarray/h5py/netCDF4/Zarr/Shapely | Multi-provider discovery, bounded ingestion, QA, temporal harmonization, COG publishing, tile and zonal-statistics services. |
+| **PostgreSQL** | Optional production / Docker | Shared Core and GHS database engine with isolated databases and migrations. |
+| **Object storage** | Local filesystem or S3-compatible | Assessment artifacts and GHS raster/object lifecycle. |
 
-- [x] Repository and development environment initialization (`make dev-full`, `make doctor`, unified ports `8000`/`8080`/`5173`).
-- [x] Frontend and backend Core API integration (`auth` including dev-only `dev-session`, `layers`, `regions`, `data_sources`, `assessments` + `compare`).
-- [x] Offline Scientific Core time-series pipeline (`terra-scientific`: climatology, disturbance detection, OLS cross-variable regression, consecutive-step recovery, and Resistance/Recovery/Stability/Sensitivity resilience dimensions).
-- [x] GHS multi-granule ingestion, `temporal.py` harmonization (`integrate_rate_to_depth` / `aggregate_temporal_stack`) wired into `HarmonizationService.execute_plan`, and `extensions["time_series"]` consumption by Core/`terra-scientific`.
-- [x] Live Core API integration across `/overview`, `/explore`, `/data-sources`, `/assessments`, `/comparative-analysis`, and `/reports` (including Apache ECharts diagnostics & JSON/CSV/Markdown/PDF exports).
-- [ ] AppEEARS/Harmony task submission workflows and streaming COG/Zarr tile serving (TiTiler).
-- [ ] P2 scientific methods (spatial trend mapping, regime shifts, causal attribution) and calibrated composite TRI benchmarks (`composite_tri` remains withheld/`unavailable_unvalidated`).
-- [ ] Production deployment environment, container registry, and hosting secrets configuration.
+### Repository layout
 
-## Open Source
+```text
+project-terra/
+├── frontend/                       # React 19 SPA (FSD-lite: app → pages → widgets → features → entities → shared)
+│   ├── src/entities/map/            # MapLibre/deck.gl renderers and projections
+│   ├── src/features/map-explorer/   # AOI workspace, drawing, scientific assessment launcher
+│   ├── src/pages/assessments/       # Readiness, execution, results, diagnostics
+│   └── src/shared/api/              # OpenAPI-generated typed client and adapters
+├── backend/
+│   ├── core/                        # terra-core FastAPI application
+│   ├── scientific/                  # terra-scientific pure Scientific Core
+│   ├── worker/                      # terra-worker assessment queue runner
+│   └── services/
+│       └── geospatial_harmonization/ # GHS service, readers, handlers, workers, migrations
+├── deploy/containerization/         # Docker Compose development and production profiles
+├── docs/                            # Architecture, ADRs, scientific specification, screenshots
+├── scripts/                         # Orchestrator, doctor, contract generation
+└── Makefile                         # Unified install/test/lint/dev commands
+```
 
-TERRA is intended to be an open-source project.
+---
 
-License: Apache License 2.0.
+## Scientific Core
 
-See [LICENSE](LICENSE) for details.
+The method registry exposes **18 catalogued methods**: **15 implemented P0/P1 methods** plus **3 explicitly deferred P2 methods**. Deferred methods are reported as deferred and are never presented as calculated.
 
-## Disclaimer
+### Implemented P0/P1 methods
 
-TERRA is an experimental environmental analysis project.
+| Priority | Method | Purpose |
+| :---: | :--- | :--- |
+| P0 | `qa_screening` | Source-specific QA and physical-range screening with missing-value accounting. |
+| P0 | `spatial_zonal_stats` | Area-weighted zonal aggregation and coverage tracking. |
+| P0 | `imerg_rate_to_depth` | Half-hourly IMERG precipitation rate-to-depth integration. |
+| P0 | `climatology_baseline` | Seasonal reference baseline climatology with leakage protection. |
+| P0 | `anomaly_detection` | Standardized, robust Z-score, and percentile anomalies. |
+| P0 | `mann_kendall` | Non-parametric monotonic trend test (exact for small samples). |
+| P0 | `seasonal_mann_kendall` | Hirsch–Slack seasonal Mann–Kendall test. |
+| P0 | `sens_slope` | Theil–Sen slope with Gilbert confidence interval. |
+| P0 | `autocorrelation_diagnostics` | ACF, Ljung–Box Q, effective sample size, Hamed–Rao / TFPW options. |
+| P1 | `cross_variable_association` | Pearson/Spearman, lagged cross-correlation, OLS, VIF, partial correlation. |
+| P1 | `pettitt_change_point` | Pettitt structural break and change-point detection. |
+| P1 | `event_recovery` | Event-centered recovery, elapsed-time rate, and completeness. |
+| P1 | `resilience_dimensions` | Separated Resistance, Recovery, Stability, and Sensitivity. |
+| P1 | `spatial_autocorrelation` | Global Moran's I and local Getis–Ord Gi* hotspots. |
+| P1 | `benjamini_hochberg_fdr` | False discovery rate control for pixel-level inference. |
 
-Its outputs should not be interpreted as definitive ecological assessments, forecasts, or proof of causal relationships without appropriate scientific validation.
+### Deferred P2 methods
+
+| Method | Status | Reason |
+| :--- | :--- | :--- |
+| `composite_tri` | `unavailable_unvalidated` | Requires ecological calibration and out-of-sample validation. |
+| `critical_slowing_down` | Deferred | Not yet calibrated for authoritative use. |
+| `causal_attribution` | Deferred | Counterfactual assumptions not yet validated. |
+
+### Scientific guardrails
+
+- Formulas, thresholds, weights, and QA policies are **not changed by the UI**.
+- Missing observations remain missing; they are never displayed as zero.
+- GIBS rendered tiles are **contextual visualization only** and are never used as quantitative input.
+- Readiness checks are preserved; a successful HTTP response does not imply a successful scientific result.
+- Every result carries method versions, input lineage, and limitations.
+
+---
+
+## Data sources
+
+| Provider | Products | Role |
+| :--- | :--- | :--- |
+| **NASA LP DAAC** | `MOD13Q1.061` (NDVI/EVI), `MOD11A2.061` (LST) | Vegetation indices and land surface temperature. |
+| **NASA GES DISC** | `GPM_3IMERGHH.07`, `GPM_3IMERGHHL.07` | Half-hourly precipitation. |
+| **NASA NSIDC** | `SPL3SMP_E.006` | Soil moisture (AM/PM overpass split). |
+| **NASA LaRC POWER** | `power_daily`, `power_hourly` (MERRA-2, CERES SYN1deg) | Meteorology, precipitation, humidity, radiation. |
+| **NASA GIBS** | XYZ browse tiles | Contextual basemap/imagery only — **never quantitative**. |
+
+Earthdata credentials are supplied via `EARTHDATA_TOKEN` for providers that require them. Provider readiness is visible in **Data Sources** and through `GET /api/v1/data-sources/providers`.
+
+---
+
+## Quick start
+
+### Prerequisites
+
+- **Node.js 20+** with **pnpm**
+- **Python 3.13+** with **uv**
+- **Docker** (optional; only for the Compose profile)
+- NASA Earthdata account/token for restricted providers
+
+### Local development
+
+```bash
+# 1. Configure the environment
+cp .env.example .env
+#    Set EARTHDATA_TOKEN and any optional storage/database settings.
+
+# 2. Install dependencies
+make install
+
+# 3. Validate the local environment
+make doctor
+
+# 4. Start Core, GHS, Core Worker, GHS Worker, and the frontend
+make dev-full
+```
+
+| Service | URL |
+| :--- | :--- |
+| Frontend | <http://localhost:5173> |
+| Core API | <http://127.0.0.1:8000> |
+| Core API docs | <http://127.0.0.1:8000/docs> |
+| GHS API | <http://127.0.0.1:8080> |
+
+### First run
+
+1. Open **Explore** and sign in with the dev session or GitHub.
+2. Select an AOI or create a point AOI, choose an analysis period, and select **Provision Data & Run Assessment**.
+3. Open **Assessments** to follow readiness, job status, and the returned scientific results.
+4. Use **Data Sources** to inspect provider readiness, ingestion operations, prepared datasets, and provenance.
+
+---
+
+## Docker Compose
+
+Two self-contained profiles are provided under `deploy/containerization/`:
+
+| Profile | File | Services |
+| :--- | :--- | :--- |
+| Development | `compose.dev.yaml` | postgres, ghs-migration, ghs-api, ghs-worker, core, core-worker, frontend |
+| Production | `compose.prod.yaml` | postgres, ghs-migration, ghs-api, ghs-worker, core, core-worker |
+
+```bash
+# Development stack
+cp deploy/containerization/.env.compose.example .env
+docker compose --env-file .env -f deploy/containerization/compose.dev.yaml up --build
+
+# Production backend stack
+cp deploy/containerization/.env.compose.example .env.production
+docker compose --env-file .env.production -f deploy/containerization/compose.prod.yaml up -d --build
+docker compose --env-file .env.production -f deploy/containerization/compose.prod.yaml ps
+```
+
+The production profile keeps PostgreSQL, GHS, and the workers on the internal network while exposing Core for an external tunnel/reverse proxy. The frontend is deployed independently.
+
+> A running Docker daemon is required. Compose configuration can be validated without one via `docker compose ... config --quiet`.
+
+---
+
+## API surface
+
+All Core routes are versioned under `/api/v1` (health probes are separate). The frontend is generated from the FastAPI OpenAPI schema — there is no hand-maintained duplicate client.
+
+| Area | Representative endpoints |
+| :--- | :--- |
+| Auth | `GET /auth/me`, `POST /auth/dev-session`, GitHub OAuth routes |
+| Regions / AOI | `POST /regions`, `GET /regions`, `PATCH /regions/{id}`, `PUT /regions/{id}/geometry` |
+| Layers | `GET /layers`, `GET /layers/{id}`, `GET /layers/{id}/tiles/{z}/{x}/{y}.png` |
+| Data sources | `GET /data-sources/providers`, `POST /data-sources/discover`, `POST /data-sources/ingestions`, `POST /data-sources/provision`, `GET /data-sources/datasets` |
+| Assessments | `GET /assessments/methods`, `POST /assessments/readiness`, `POST /assessments`, `POST /assessments/{id}/execute`, `GET /assessments/{id}` |
+| Artifacts | `GET /assessments/{id}/artifacts`, `GET /assessments/{id}/artifacts/{name}` |
+| Comparison | `POST /assessments/compare` |
+| Scientific tiles | `GET /tiles/{metric}/{date}/{z}/{x}/{y}.png`, `GET /analytics/zonal-statistics` |
+
+GHS exposes its own ingestion and raster API (`/api/v1/{providers,discover,jobs,harmonize,datasets,...}`) and remains isolated from Core `/api/v1` as defined by ADR-0002.
+
+---
+
+## Verification
+
+```bash
+make test                 # Core + Scientific Core + Worker + Frontend
+make lint                 # Frontend + Core + Scientific + Worker
+make frontend-typecheck   # Strict TypeScript
+make frontend-build       # Production Vite build
+make ghs-test             # GHS tests (PostgreSQL skips unless GHS_TEST_POSTGRES_URL is set)
+make ghs-lint             # GHS Ruff + strict mypy
+make contracts            # Regenerate OpenAPI + TypeScript contracts
+```
+
+Live NASA and PostgreSQL locking checks are available through the manual GitHub Actions workflow and the documented environment setup. A green frontend build is not evidence of a working scientific workflow; the authoritative check is a real AOI-driven assessment with traceable outputs.
+
+---
+
+## Scientific integrity & current limitations
+
+- **P2 methods are deferred.** TRI and causal attribution are not authoritative and are withheld from rankings.
+- **Map preview requires prepared raster data.** If no tile-capable GeoTIFF/COG exists for a metric, the UI shows an explicit unavailable reason instead of a synthetic layer.
+- **GIBS is not a measurement source.** Quantitative values come only from decoded products.
+- **Coverage matters.** Small AOIs, short periods, or missing granules can produce `completed_partial` or `insufficient_data`. The readiness diagnostics explain why.
+- **Core database.** Core supports PostgreSQL and a SQLite development fallback. Core does not currently use PostGIS spatial queries.
+- **AppEEARS/Harmony** task workflows remain incomplete; GHS discovery/ingestion supports the implemented providers.
+- **Docker runtime** depends on a host with a Docker daemon; the Compose definitions are provided and config-validated.
+
+---
+
+## Project status
+
+| Area | State |
+| :--- | :--- |
+| Frontend workspaces | Connected to Core for auth, layers, regions, data sources, assessments, comparison, reports |
+| Core API | Implemented: auth, layers, regions, data sources, assessments, artifacts, tiles/analytics |
+| Scientific Core | 15 implemented P0/P1 methods; 3 P2 methods deferred |
+| Shared worker | Implemented: queued assessment execution, artifact persistence |
+| GHS | Implemented: provider handlers, bounded ingestion, temporal harmonization, COG/tile/zonal services |
+| Docker Compose | Development and production profiles provided; runtime requires Docker daemon |
+| Deployment | Container assets and CI workflows provided; external production target not configured |
+
+---
+
+## Documentation
+
+| Document | Contents |
+| :--- | :--- |
+| [`docs/PROJECT_OVERVIEW.md`](docs/PROJECT_OVERVIEW.md) | Living source of truth for current implementation and gaps |
+| [`docs/architecture/SYSTEM_ARCHITECTURE.md`](docs/architecture/SYSTEM_ARCHITECTURE.md) | Target architecture and component boundaries |
+| [`docs/scientific/SCIENTIFIC_CORE.md`](docs/scientific/SCIENTIFIC_CORE.md) | Scientific methods, contracts, QA rules, P0/P1/P2 status |
+| [`docs/ENVIRONMENT_SETUP.md`](docs/ENVIRONMENT_SETUP.md) | Environment, credentials, databases, and process setup |
+| [`docs/adr/`](docs/adr) | Architecture decision records (bootstrap stack, GHS boundary) |
+| [`frontend/DESIGN.md`](frontend/DESIGN.md) | Visual language and interaction specification |
+| [`AGENTS.md`](AGENTS.md) | Engineering contract for AI agents and contributors |
+
+---
+
+## Contributing
+
+Contributions are welcome when they preserve scientific correctness and provenance.
+
+1. Read `AGENTS.md`, `docs/PROJECT_OVERVIEW.md`, and the relevant architecture/ADR documents.
+2. Keep changes small and reviewable; do not change formulas, thresholds, or public contracts without an approved decision.
+3. Add deterministic tests for new behavior and run the relevant `make` targets.
+4. Never commit secrets, real user data, or environment files.
+5. Describe data sources, assumptions, and limitations in any scientific change.
+
+---
 
 ## Acknowledgements
 
-Developed as part of the NASA Space Apps Challenge 2026.
+PROJECT TERRA builds on the work of NASA's Earth observation community and the open-source ecosystem:
 
-TERRA is an independent project and is not an official NASA product or service.
+**NASA MODIS · GPM IMERG · SMAP · POWER · GIBS**, and the teams behind **FastAPI**, **MapLibre**, **deck.gl**, **Apache ECharts**, **OpenFreeMap**, **NumPy**, **SciPy**, **Pandas**, **xarray**, **rasterio**, **GDAL**, and **PostgreSQL**.
+
+---
+
+<div align="center">
+
+**PROJECT TERRA** · *Observe. Understand. Respond.*
+
+Licensed under the [Apache License 2.0](LICENSE).
+
+</div>
