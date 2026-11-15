@@ -9,11 +9,14 @@ import pytest
 
 from terra_scientific.adapters.ghs import LocalArtifactDatasetLoader, map_ghs_dataset_payload
 from terra_scientific.domain.enums import (
+    AssessmentStatus,
     DataSourceId,
     TemporalCadence,
     TemporalSemantics,
 )
 from terra_scientific.domain.exceptions import ScientificInputError
+from terra_scientific.domain.models.request import AssessmentRequest
+from terra_scientific.pipeline.service import ScientificAssessmentService
 from terra_scientific.sources.catalog import MODIS_SINUSOIDAL_WKT
 
 
@@ -294,3 +297,136 @@ def test_map_ghs_payload_resolves_aliases_pqi_milli_and_preserves_pre_scaled() -
     assert imerg_vals[0] == pytest.approx(8.0)
     assert np.isnan(imerg_vals[1])
     assert imerg_summary.filtered_by_qa == 1
+
+
+def test_map_ghs_mod11a2_handles_none_numeric_metadata_and_quality_fields() -> None:
+    payload: dict[str, object] = {
+        "dataset_id": "55555555-5555-5555-5555-555555555555",
+        "source_id": "modis_terra_lst",
+        "provider": "nasa_earthdata",
+        "product": "MOD11A2.061",
+        "product_version": "061",
+        "units": {"LST_Day_1km": "K"},
+        "variables": {
+            "LST_Day_1km": {
+                "name": "LST_Day_1km",
+                "units": "K",
+                "dtype": "uint16",
+                "dimensions": ["time", "y", "x"],
+                "semantics": "continuous_intensive",
+                "nodata": None,
+                "scale_factor": None,
+                "add_offset": None,
+                "valid_range": [None, None],
+                "attributes": {},
+            },
+            "Extra_Diagnostic_SDS": {
+                "name": "Extra_Diagnostic_SDS",
+                "units": "dimensionless",
+                "dtype": "uint8",
+                "dimensions": ["time", "y", "x"],
+                "semantics": "continuous_intensive",
+            },
+        },
+        "spatial_metadata": {
+            "crs": MODIS_SINUSOIDAL_WKT,
+            "nominal_resolution_m": None,
+            "resolution_x": None,
+            "bounds": [0.0, 0.0, None, None],
+        },
+        "temporal_metadata": {
+            "start": "2024-06-01T00:00:00Z",
+            "end": "2024-06-17T00:00:00Z",
+            "cadence": "eight_day",
+            "semantics": "composite",
+            "composite_days": None,
+        },
+        "quality_metadata": {
+            "valid_pixel_count": None,
+            "masked_pixel_count": None,
+            "valid_fraction": None,
+            "qa_summary": None,
+        },
+        "extensions": {
+            "time_series": {
+                "LST_Day_1km": {
+                    "timestamps": [
+                        "2024-06-01T00:00:00Z",
+                        "2024-06-09T00:00:00Z",
+                        "2024-06-17T00:00:00Z",
+                    ],
+                    "values": [14800.0, None, 14950.0],
+                    "qa_values": {"QC_Day": [0, 0, 0]},
+                }
+            }
+        },
+    }
+
+    dataset = map_ghs_dataset_payload(payload)
+    assert dataset.source_id == DataSourceId.MODIS_MOD11A2
+    assert "LST_Day_1km" in dataset.variables
+    assert "Extra_Diagnostic_SDS" not in dataset.variables
+    assert dataset.variables["LST_Day_1km"].scale_factor == pytest.approx(0.02)
+    assert dataset.spatial_support.nominal_resolution_m == pytest.approx(1000.0)
+    assert dataset.temporal_metadata.composite_days == 1
+    assert dataset.series["LST_Day_1km"].values == [14800.0, None, 14950.0]
+
+
+def test_short_window_assessment_adapts_baseline_for_mod11a2() -> None:
+    payload: dict[str, object] = {
+        "dataset_id": "66666666-6666-6666-6666-666666666666",
+        "source_id": "modis_terra_lst",
+        "provider": "nasa_earthdata",
+        "product": "MOD11A2.061",
+        "variables": {
+            "LST_Day_1km": {
+                "name": "LST_Day_1km",
+                "units": "K",
+                "dtype": "uint16",
+                "scale_factor": None,
+                "add_offset": None,
+                "nodata": None,
+            }
+        },
+        "spatial_metadata": {
+            "crs": MODIS_SINUSOIDAL_WKT,
+            "nominal_resolution_m": None,
+            "bounds": [0.0, 0.0, 10000.0, 10000.0],
+        },
+        "temporal_metadata": {
+            "start": "2024-06-01T00:00:00Z",
+            "end": "2024-07-15T00:00:00Z",
+            "cadence": "eight_day",
+            "semantics": "composite",
+            "composite_days": None,
+        },
+        "extensions": {
+            "time_series": {
+                "LST_Day_1km": {
+                    "timestamps": [
+                        "2024-06-01T00:00:00Z",
+                        "2024-06-09T00:00:00Z",
+                        "2024-06-17T00:00:00Z",
+                        "2024-07-01T00:00:00Z",
+                        "2024-07-09T00:00:00Z",
+                    ],
+                    "values": [14700.0, 14800.0, 14850.0, 14900.0, 14950.0],
+                    "qa_values": {"QC_Day": [0, 0, 0, 0, 0]},
+                }
+            }
+        },
+    }
+
+    dataset = map_ghs_dataset_payload(payload)
+    request = AssessmentRequest(
+        request_id="short-window-mod11a2",
+        analysis_start=datetime(2024, 6, 1, tzinfo=UTC),
+        analysis_end=datetime(2024, 7, 31, tzinfo=UTC),
+    )
+
+    result = ScientificAssessmentService().run_assessment(request, datasets=[dataset])
+    assert result.status in {AssessmentStatus.COMPLETED, AssessmentStatus.COMPLETED_PARTIAL}
+    assert len(result.baselines) == 1
+    assert len(result.anomalies) == 1
+    assert any("full-period baseline" in note.lower() for note in result.baselines[0].warnings)
+    assert any(np.isfinite(val) for val in result.anomalies[0].standard_zscores if val is not None)

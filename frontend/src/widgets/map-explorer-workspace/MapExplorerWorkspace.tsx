@@ -15,7 +15,7 @@ import { ExplorerTopToolbar } from '../../features/map-explorer/ui/ExplorerTopTo
 import { InspectorPanel } from '../../features/map-explorer/ui/InspectorPanel'
 import { LayerCatalogSidebar } from '../../features/map-explorer/ui/LayerCatalogSidebar'
 import { TemporalLegendBar } from '../../features/map-explorer/ui/TemporalLegendBar'
-import { useLayerCatalogQuery } from '../../shared/api/layers'
+import { resolveLayerEffectiveDate, useLayerCatalogQuery } from '../../shared/api/layers'
 import { PROJECTION_REGISTRY } from '../../shared/config/geospatial'
 import { formatCoordinatePair } from '../../shared/lib/geojson-utils'
 import {
@@ -37,8 +37,8 @@ export function MapExplorerWorkspace() {
   const basemap = useExploreStore((s) => s.basemap)
   const primaryLayerId = useExploreStore((s) => s.primaryLayerId)
   const layerStates = useExploreStore((s) => s.layerStates)
-  const syntheticPreviewEnabled = useExploreStore((s) => s.syntheticPreviewEnabled)
   const selectedDate = useExploreStore((s) => s.selectedDate)
+  const setSelectedDate = useExploreStore((s) => s.setSelectedDate)
 
   const showGraticules = useExploreStore((s) => s.showGraticules)
   const showBorders = useExploreStore((s) => s.showBorders)
@@ -82,6 +82,20 @@ export function MapExplorerWorkspace() {
   const { aois, selectedAoi, completeDraftAoi } = useAoiWorkspace()
   const selectedAoiId = selectedAoi?.properties.id ?? null
 
+  useEffect(() => {
+    if (!activeLayer || activeLayer.availabilityStatus !== 'connected') {
+      return
+    }
+    const availableDates = activeLayer.availableDates ?? []
+    if (availableDates.length === 0 || availableDates.includes(selectedDate)) {
+      return
+    }
+    const snapped = resolveLayerEffectiveDate(activeLayer, selectedDate)
+    if (snapped && snapped !== selectedDate) {
+      setSelectedDate(snapped)
+    }
+  }, [activeLayer, selectedDate, setSelectedDate])
+
   const renderState = useMemo<MapRenderState>(
     () => ({
       projection,
@@ -97,7 +111,6 @@ export function MapExplorerWorkspace() {
               maxValue: activeLayerControl.maxValue,
             }
           : null,
-      syntheticPreviewEnabled,
       showGraticules,
       showBorders,
       showLabels,
@@ -130,7 +143,6 @@ export function MapExplorerWorkspace() {
       showGraticules,
       showLabels,
       showRegionBoundaries,
-      syntheticPreviewEnabled,
       viewport,
     ],
   )
@@ -138,6 +150,18 @@ export function MapExplorerWorkspace() {
   const handleFlyTo = useCallback((center: [number, number], zoom?: number) => {
     mapViewportRef.current?.flyTo(center, zoom)
   }, [])
+
+  const handleZoomToDataExtent = useCallback(
+    (bbox: readonly [number, number, number, number]) => {
+      const [west, south, east, north] = bbox
+      const centerLon = (west + east) / 2
+      const centerLat = (south + north) / 2
+      const span = Math.max(Math.abs(east - west), Math.abs(north - south), 0.1)
+      const zoom = Math.max(1.5, Math.min(11, Math.log2(360 / span) - 0.5))
+      mapViewportRef.current?.flyTo([centerLon, centerLat], Number(zoom.toFixed(1)))
+    },
+    [],
+  )
 
   const handleResetView = useCallback(() => {
     mapViewportRef.current?.resetView()
@@ -189,7 +213,7 @@ export function MapExplorerWorkspace() {
       <ExplorerTopToolbar onFlyTo={handleFlyTo} onResetView={handleResetView} />
 
       <div className="explorer-workspace__body">
-        <LayerCatalogSidebar />
+        <LayerCatalogSidebar onZoomToBbox={handleZoomToDataExtent} />
 
         <div className="explorer-stage-wrap">
           {comparisonMode ? (
@@ -230,6 +254,20 @@ export function MapExplorerWorkspace() {
                 <span className="explorer-hud-badge">
                   {PROJECTION_REGISTRY[projection].epsgOrName}
                 </span>
+                {activeLayer && activeLayer.availabilityStatus !== 'connected' && (
+                  <span className="explorer-hud-badge is-warning">
+                    {activeLayer.unavailableReason ?? `${activeLayer.shortName}: unavailable`}
+                  </span>
+                )}
+                {activeLayer?.datasetBbox && (
+                  <button
+                    type="button"
+                    className="explorer-hud-btn"
+                    onClick={() => handleZoomToDataExtent(activeLayer.datasetBbox!)}
+                  >
+                    Zoom to data
+                  </button>
+                )}
                 {rendererStatus.warning && (
                   <span className="explorer-hud-badge is-warning">
                     {rendererStatus.warning}

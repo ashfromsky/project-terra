@@ -389,9 +389,69 @@ export interface paths {
         };
         /**
          * Get Layer Coverage
-         * @description Return temporal archive bounds and nominal data availability for a layer.
+         * @description Return temporal archive bounds and live ingested data availability for a layer.
          */
         get: operations["get_layer_coverage_api_v1_layers__layer_id__coverage_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/layers/{layer_id}/tiles/{z}/{x}/{y}.png": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Layer Tile
+         * @description Serve an XYZ RGBA PNG raster tile proxied from the active GHS raster dataset.
+         */
+        get: operations["get_layer_tile_api_v1_layers__layer_id__tiles__z___x___y__png_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/layers/{layer_id}/render.png": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Layer Render Png
+         * @description Serve a bounded RGBA PNG raster image proxied from the active GHS raster dataset.
+         */
+        get: operations["get_layer_render_png_api_v1_layers__layer_id__render_png_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/layers/{layer_id}/point": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Inspect Layer Point
+         * @description Return exact native-grid pixel inspection and QA metadata at WGS 84 (lon, lat).
+         */
+        get: operations["inspect_layer_point_api_v1_layers__layer_id__point_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1172,7 +1232,7 @@ export interface components {
              */
             renderingType: "raster" | "choropleth" | "vector" | "point";
             /** Supportedtileformats */
-            supportedTileFormats: ("geojson" | "mvt" | "tilejson" | "cog" | "zarr" | "wmts")[];
+            supportedTileFormats: ("geojson" | "mvt" | "tilejson" | "cog" | "zarr" | "wmts" | "xyz")[];
             /** Qapolicy */
             qaPolicy: string;
             /** Limitations */
@@ -1183,6 +1243,19 @@ export interface components {
             isSyntheticPreview: boolean;
             /** Previewpropertykey */
             previewPropertyKey?: ("demoLstTrend" | "demoNdvi" | "demoEvi" | "demoPrecipAnomaly") | null;
+            /** Availabledates */
+            availableDates?: string[];
+            /** Datasetbbox */
+            datasetBbox?: [
+                number,
+                number,
+                number,
+                number
+            ] | null;
+            /** Activedatasetid */
+            activeDatasetId?: string | null;
+            /** Unavailablereason */
+            unavailableReason?: string | null;
             /** Colorramp */
             colorRamp: components["schemas"]["ColorRampStopResponse"][];
             valueRange: components["schemas"]["ValueRangeResponse"];
@@ -1262,7 +1335,7 @@ export interface components {
              */
             renderingType: "raster" | "choropleth" | "vector" | "point";
             /** Supportedtileformats */
-            supportedTileFormats: ("geojson" | "mvt" | "tilejson" | "cog" | "zarr" | "wmts")[];
+            supportedTileFormats: ("geojson" | "mvt" | "tilejson" | "cog" | "zarr" | "wmts" | "xyz")[];
             /** Qapolicy */
             qaPolicy: string;
             /** Limitations */
@@ -1273,6 +1346,77 @@ export interface components {
             isSyntheticPreview: boolean;
             /** Previewpropertykey */
             previewPropertyKey?: ("demoLstTrend" | "demoNdvi" | "demoEvi" | "demoPrecipAnomaly") | null;
+            /** Availabledates */
+            availableDates?: string[];
+            /** Datasetbbox */
+            datasetBbox?: [
+                number,
+                number,
+                number,
+                number
+            ] | null;
+            /** Activedatasetid */
+            activeDatasetId?: string | null;
+            /** Unavailablereason */
+            unavailableReason?: string | null;
+        };
+        /**
+         * LayerPointInspectionResponse
+         * @description Exact native-grid pixel inspection and QA payload for a map layer coordinate.
+         */
+        LayerPointInspectionResponse: {
+            /** Layerid */
+            layerId: string;
+            /** Datasetid */
+            datasetId?: string | null;
+            /** Product */
+            product: string;
+            /** Variable */
+            variable: string;
+            /** Lon */
+            lon: number;
+            /** Lat */
+            lat: number;
+            /** Timestamp */
+            timestamp?: string | null;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "ok" | "nodata" | "outside_bounds" | "unavailable";
+            /** Value */
+            value?: number | null;
+            /** Rawvalue */
+            rawValue?: number | null;
+            /** Unit */
+            unit?: string | null;
+            /** Qavalue */
+            qaValue?: number | null;
+            /** Qapassed */
+            qaPassed?: boolean | null;
+            /** Crs */
+            crs?: string | null;
+            /** Nominalresolutionm */
+            nominalResolutionM?: number | null;
+            /** Pixelrow */
+            pixelRow?: number | null;
+            /** Pixelcol */
+            pixelCol?: number | null;
+            bbox?: components["schemas"]["RasterPointBBoxResponse"] | null;
+            /** Timeseries */
+            timeSeries?: components["schemas"]["LayerPointTimeSeriesResponse"][];
+            /** Reason */
+            reason?: string | null;
+        };
+        /**
+         * LayerPointTimeSeriesResponse
+         * @description Single timestamped sample at the inspected dataset point when available.
+         */
+        LayerPointTimeSeriesResponse: {
+            /** Timestamp */
+            timestamp: string;
+            /** Value */
+            value?: number | null;
         };
         /**
          * LegendConfigurationResponse
@@ -1321,7 +1465,7 @@ export interface components {
              * Format
              * @enum {string}
              */
-            format: "geojson" | "mvt" | "tilejson" | "cog" | "zarr" | "wmts";
+            format: "geojson" | "mvt" | "tilejson" | "cog" | "zarr" | "wmts" | "xyz";
             /** Urltemplate */
             urlTemplate: string | null;
             /**
@@ -1508,6 +1652,20 @@ export interface components {
             semantics: string;
             /** Description */
             description: string;
+        };
+        /**
+         * RasterPointBBoxResponse
+         * @description WGS 84 bounding box of the inspected raster dataset.
+         */
+        RasterPointBBoxResponse: {
+            /** Minlon */
+            minLon: number;
+            /** Minlat */
+            minLat: number;
+            /** Maxlon */
+            maxLon: number;
+            /** Maxlat */
+            maxLat: number;
         };
         /**
          * ReadinessResponse
@@ -1813,6 +1971,17 @@ export interface components {
             notes: string;
             /** Issimulatedcoverage */
             isSimulatedCoverage: boolean;
+            /** Availabledates */
+            availableDates?: string[];
+            /** Datasetbbox */
+            datasetBbox?: [
+                number,
+                number,
+                number,
+                number
+            ] | null;
+            /** Activedatasetid */
+            activeDatasetId?: string | null;
         };
         /**
          * UserResponse
@@ -2551,6 +2720,123 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["TemporalCoverageResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_layer_tile_api_v1_layers__layer_id__tiles__z___x___y__png_get: {
+        parameters: {
+            query?: {
+                timestamp?: string | null;
+                vmin?: number | null;
+                vmax?: number | null;
+                datasetId?: string | null;
+            };
+            header?: never;
+            path: {
+                layer_id: string;
+                z: number;
+                x: number;
+                y: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                    "image/png": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_layer_render_png_api_v1_layers__layer_id__render_png_get: {
+        parameters: {
+            query: {
+                bbox: string;
+                crs?: string;
+                width?: number;
+                height?: number;
+                timestamp?: string | null;
+                vmin?: number | null;
+                vmax?: number | null;
+                datasetId?: string | null;
+            };
+            header?: never;
+            path: {
+                layer_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                    "image/png": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    inspect_layer_point_api_v1_layers__layer_id__point_get: {
+        parameters: {
+            query: {
+                lon: number;
+                lat: number;
+                timestamp?: string | null;
+                datasetId?: string | null;
+            };
+            header?: never;
+            path: {
+                layer_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LayerPointInspectionResponse"];
                 };
             };
             /** @description Validation Error */

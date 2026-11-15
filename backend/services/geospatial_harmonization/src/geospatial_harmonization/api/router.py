@@ -16,6 +16,7 @@ from geospatial_harmonization.api.dependencies import (
     JobRepoDep,
     ReadersDep,
     SettingsDep,
+    StorageDep,
     StorageLifecycleDep,
     StorageMonitoringDep,
     StorageQuotaDep,
@@ -26,6 +27,7 @@ from geospatial_harmonization.api.schemas import (
     CleanupReportOut,
     CleanupRequest,
     DatasetOut,
+    DatasetPointQueryResponse,
     DatasetProvenanceOut,
     DependencyHealth,
     DiscoveredObservationOut,
@@ -42,8 +44,19 @@ from geospatial_harmonization.api.schemas import (
     StoragePolicyOut,
     StorageUsageOut,
 )
+from geospatial_harmonization.application.raster_viz import (
+    RasterAssetUnavailableError,
+    RasterVariableNotFoundError,
+    UnsupportedRasterFormatError,
+    query_dataset_point,
+    render_dataset_bbox,
+    render_dataset_tile,
+)
 from geospatial_harmonization.config.settings import Settings
-from geospatial_harmonization.domain.exceptions import ProviderDisabledError
+from geospatial_harmonization.domain.exceptions import (
+    IncompatibleDatasetError,
+    ProviderDisabledError,
+)
 from geospatial_harmonization.domain.models.harmonization import HarmonizationJob
 from geospatial_harmonization.handlers.catalog import (
     DiscoverableHandler,
@@ -236,6 +249,175 @@ async def get_dataset_provenance(
     if ds is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Dataset not found")
     return DatasetProvenanceOut.from_domain(ds)
+
+
+def _parse_bbox_param(raw_bbox: str) -> tuple[float, float, float, float]:
+    parts = [part.strip() for part in raw_bbox.split(",")]
+    if len(parts) != 4:
+        raise HTTPException(status_code=422, detail="bbox must contain 4 comma-separated floats")
+    try:
+        min_x, min_y, max_x, max_y = (float(part) for part in parts)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=422, detail="bbox coordinates must be valid numbers"
+        ) from exc
+    if min_x >= max_x or min_y >= max_y:
+        raise HTTPException(
+            status_code=422, detail="bbox min bounds must be strictly less than max bounds"
+        )
+    return (min_x, min_y, max_x, max_y)
+
+
+@v1_router.get("/datasets/{dataset_id}/tiles/{z}/{x}/{y}.png")
+async def get_dataset_tile(
+    dataset_id: UUID,
+    z: int,
+    x: int,
+    y: int,
+    datasets: DatasetRepoDep,
+    storage: StorageDep,
+    readers: ReadersDep,
+    variable: str | None = None,
+    timestamp: str | None = None,
+    colormap: str | None = None,
+    vmin: float | None = None,
+    vmax: float | None = None,
+    unit_conversion: str | None = None,
+) -> Response:
+    """Render an XYZ RGBA PNG tile from a raster dataset using nearest-neighbor sampling."""
+    if z < 0 or z > 22:
+        raise HTTPException(status_code=422, detail="Zoom z must be between 0 and 22")
+    max_index = 2**z
+    if x < 0 or x >= max_index or y < 0 or y >= max_index:
+        raise HTTPException(status_code=422, detail="Tile coordinates out of range for zoom level")
+    ds = await datasets.get_by_id(dataset_id)
+    if ds is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Dataset not found")
+    try:
+        png_bytes = await render_dataset_tile(
+            ds,
+            storage,
+            readers,
+            z=z,
+            x=x,
+            y=y,
+            variable=variable,
+            timestamp=timestamp,
+            colormap=colormap,
+            vmin=vmin,
+            vmax=vmax,
+            unit_conversion=unit_conversion,
+        )
+    except RasterAssetUnavailableError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except (
+        UnsupportedRasterFormatError,
+        RasterVariableNotFoundError,
+        IncompatibleDatasetError,
+    ) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return Response(
+        content=png_bytes,
+        media_type="image/png",
+        headers={"Cache-Control": "public, max-age=300"},
+    )
+
+
+@v1_router.get("/datasets/{dataset_id}/render.png")
+async def get_dataset_render_png(
+    dataset_id: UUID,
+    bbox: str,
+    datasets: DatasetRepoDep,
+    storage: StorageDep,
+    readers: ReadersDep,
+    crs: str = "EPSG:4326",
+    width: int = 512,
+    height: int = 512,
+    variable: str | None = None,
+    timestamp: str | None = None,
+    colormap: str | None = None,
+    vmin: float | None = None,
+    vmax: float | None = None,
+    unit_conversion: str | None = None,
+) -> Response:
+    """Render a bounded RGBA PNG raster preview using nearest-neighbor resampling."""
+    if width < 1 or width > 2048 or height < 1 or height > 2048:
+        raise HTTPException(status_code=422, detail="width and height must be between 1 and 2048")
+    parsed_bbox = _parse_bbox_param(bbox)
+    ds = await datasets.get_by_id(dataset_id)
+    if ds is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Dataset not found")
+    try:
+        png_bytes = await render_dataset_bbox(
+            ds,
+            storage,
+            readers,
+            bbox=parsed_bbox,
+            crs=crs,
+            width=width,
+            height=height,
+            variable=variable,
+            timestamp=timestamp,
+            colormap=colormap,
+            vmin=vmin,
+            vmax=vmax,
+            unit_conversion=unit_conversion,
+        )
+    except RasterAssetUnavailableError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except (
+        UnsupportedRasterFormatError,
+        RasterVariableNotFoundError,
+        IncompatibleDatasetError,
+    ) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return Response(
+        content=png_bytes,
+        media_type="image/png",
+        headers={"Cache-Control": "public, max-age=300"},
+    )
+
+
+@v1_router.get("/datasets/{dataset_id}/point", response_model=DatasetPointQueryResponse)
+async def get_dataset_point(
+    dataset_id: UUID,
+    lon: float,
+    lat: float,
+    datasets: DatasetRepoDep,
+    storage: StorageDep,
+    readers: ReadersDep,
+    variable: str | None = None,
+    timestamp: str | None = None,
+    unit_conversion: str | None = None,
+) -> DatasetPointQueryResponse:
+    """Inspect exact native raster grid pixel value and QA metadata at WGS 84 (lon, lat)."""
+    if lon < -180.0 or lon > 180.0 or lat < -90.0 or lat > 90.0:
+        raise HTTPException(status_code=422, detail="lon/lat coordinates out of WGS 84 bounds")
+    ds = await datasets.get_by_id(dataset_id)
+    if ds is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Dataset not found")
+    try:
+        payload = await query_dataset_point(
+            ds,
+            storage,
+            readers,
+            lon=lon,
+            lat=lat,
+            variable=variable,
+            timestamp=timestamp,
+            unit_conversion=unit_conversion,
+        )
+    except RasterAssetUnavailableError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except (
+        UnsupportedRasterFormatError,
+        RasterVariableNotFoundError,
+        IncompatibleDatasetError,
+    ) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return DatasetPointQueryResponse.model_validate(
+        {**payload, "dataset_id": str(payload["dataset_id"])}
+    )
 
 
 def _extract_admin_token(request: Request) -> str | None:

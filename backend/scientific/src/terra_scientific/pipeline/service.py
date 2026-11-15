@@ -17,13 +17,18 @@ from numpy.typing import NDArray
 
 from terra_scientific._version import __version__ as PACKAGE_VERSION
 from terra_scientific.anomalies.detector import detect_anomalies
-from terra_scientific.baselines.climatology import compute_climatology
+from terra_scientific.baselines.climatology import (
+    MAD_NORMAL_CONSTANT,
+    compute_climatology,
+    select_reference_mask,
+)
 from terra_scientific.cross_variable.analysis import SeriesBundle, analyze_cross_variables
 from terra_scientific.disturbances.detector import detect_disturbances
 from terra_scientific.domain.contracts import ArtifactWriterPort
 from terra_scientific.domain.enums import (
     AggregationOperator,
     AssessmentStatus,
+    BaselineType,
     DataSourceId,
     PriorityTier,
     SeasonalGrouping,
@@ -57,6 +62,7 @@ from terra_scientific.domain.models.result import (
     TemporalSeriesResult,
     TrendResult,
 )
+from terra_scientific.domain.models.temporal import ensure_utc
 from terra_scientific.methods.registry import DEFAULT_METHOD_REGISTRY
 from terra_scientific.pipeline.artifacts import JsonArtifactWriter
 from terra_scientific.quality.validator import screen_dataset_variable, screen_grid_stack
@@ -343,6 +349,60 @@ class ScientificAssessmentService:
             ):
                 eff_grouping = SeasonalGrouping.COMPOSITE_DOY_BIN
             base_cfg = request.baseline.model_copy(update={"seasonal_grouping": eff_grouping})
+
+            finite_mask = np.isfinite(pv.array)
+            finite_ts = [
+                ensure_utc(ts)
+                for ts, ok in zip(pv.temporal.timestamps, finite_mask, strict=True)
+                if ok
+            ]
+            span_years = (
+                (max(finite_ts) - min(finite_ts)).total_seconds() / (365.25 * 86400.0)
+                if len(finite_ts) >= 2
+                else 0.0
+            )
+            adapted_notes: list[str] = []
+            if pv.temporal.timestamps:
+                ref_mask, _, _, _ = select_reference_mask(
+                    pv.temporal.timestamps,
+                    base_cfg,
+                    assessment_start=request.analysis_start,
+                    assessment_end=request.analysis_end,
+                )
+                retained_valid = sum(
+                    1 for keep, ok in zip(ref_mask, finite_mask, strict=True) if keep and ok
+                )
+            else:
+                retained_valid = 0
+
+            if (
+                pv.temporal.timestamps
+                and finite_ts
+                and (
+                    retained_valid == 0
+                    or (
+                        base_cfg.baseline_type == BaselineType.FIXED_REFERENCE
+                        and span_years < base_cfg.min_years_required
+                        and retained_valid < base_cfg.min_samples_per_bin
+                    )
+                )
+            ):
+                base_cfg = base_cfg.model_copy(
+                    update={
+                        "baseline_type": BaselineType.FULL_PERIOD_EXPLICIT,
+                        "allow_explicit_full_period": True,
+                        "start": None,
+                        "end": None,
+                        "exclude_assessment_overlap": False,
+                        "min_years_required": 1,
+                        "min_samples_per_bin": 1,
+                    }
+                )
+                adapted_notes.append(
+                    f"{pv.key}: observation series spans {span_years:.2f} yr with insufficient "
+                    "non-overlapping reference samples; adapted to full-period baseline."
+                )
+
             clim = compute_climatology(
                 timestamps=pv.temporal.timestamps,
                 values=pv.array,
@@ -355,6 +415,54 @@ class ScientificAssessmentService:
                 assessment_end=request.analysis_end,
                 raise_on_insufficient=False,
             )
+
+            valid_vals = pv.array[finite_mask]
+            if valid_vals.size >= 2 and any(
+                b.sample_count >= 1
+                and (b.std is None or b.std <= 1e-12 or b.mad is None or b.mad <= 1e-12)
+                for b in clim.bins
+            ):
+                pooled_std = float(np.std(valid_vals, ddof=1))
+                med_all = float(np.median(valid_vals))
+                pooled_mad = MAD_NORMAL_CONSTANT * float(np.median(np.abs(valid_vals - med_all)))
+                if pooled_mad <= 1e-12:
+                    pooled_mad = pooled_std
+                if pooled_std > 1e-12:
+                    updated_bins = []
+                    used_pooled = False
+                    for b in clim.bins:
+                        if b.sample_count >= 1 and (
+                            b.std is None or b.std <= 1e-12 or b.mad is None or b.mad <= 1e-12
+                        ):
+                            used_pooled = True
+                            updated_bins.append(
+                                b.model_copy(
+                                    update={
+                                        "std": (
+                                            b.std
+                                            if (b.std is not None and b.std > 1e-12)
+                                            else pooled_std
+                                        ),
+                                        "mad": (
+                                            b.mad
+                                            if (b.mad is not None and b.mad > 1e-12)
+                                            else pooled_mad
+                                        ),
+                                    }
+                                )
+                            )
+                        else:
+                            updated_bins.append(b)
+                    if used_pooled:
+                        adapted_notes.append(
+                            f"{pv.key}: single-sample seasonal bin dispersion populated from "
+                            "pooled series dispersion."
+                        )
+                        clim = clim.model_copy(update={"bins": updated_bins})
+
+            if adapted_notes:
+                clim = clim.model_copy(update={"warnings": [*clim.warnings, *adapted_notes]})
+
             anom = detect_anomalies(
                 timestamps=pv.temporal.timestamps,
                 values=pv.array,

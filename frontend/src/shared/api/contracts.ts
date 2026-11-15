@@ -21,6 +21,7 @@ export type LayerMetadataResponse = components['schemas']['LayerMetadataResponse
 export type LayerDefinitionResponse = components['schemas']['LayerDefinitionResponse']
 export type LayerLegendResponse = components['schemas']['LayerLegendResponse']
 export type TemporalCoverageResponse = components['schemas']['TemporalCoverageResponse']
+export type LayerPointInspectionResponse = components['schemas']['LayerPointInspectionResponse']
 
 export type GeoJsonPolygonSchema = components['schemas']['GeoJsonPolygonSchema']
 export type GeoJsonMultiPolygonSchema = components['schemas']['GeoJsonMultiPolygonSchema']

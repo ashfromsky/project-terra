@@ -22,7 +22,6 @@ import { AuthActionBanner } from '../../shared/ui/auth-action-banner'
 import { Button } from '../../shared/ui/button'
 import { Chart } from '../../shared/ui/chart'
 import { StatusBadge, type StatusBadgeTone } from '../../shared/ui/status-badge'
-import { buildSampleMod13InlineDataset } from './sample-inline-fixture'
 
 type WorkspaceTab = 'results' | 'methods'
 
@@ -331,16 +330,15 @@ export default function AssessmentsPage() {
     return preselected ? [preselected] : []
   })
   const [ghsDatasetIdsText, setGhsDatasetIdsText] = useState('')
-  const [inlineJsonText, setInlineJsonText] = useState('')
   const [executeNow, setExecuteNow] = useState(true)
   const [formError, setFormError] = useState<string | null>(null)
-  const [usingFixtureHelper, setUsingFixtureHelper] = useState(false)
 
   const currentUserQuery = useCurrentUserQuery()
   const isAuthenticated = Boolean(currentUserQuery.data)
 
   const methodsQuery = useAssessmentMethodsQuery()
   const regionsQuery = useRegionsQuery(isAuthenticated)
+  const preparedDatasetsQuery = usePreparedDatasetsQuery(isAuthenticated)
   const assessmentsQuery = useAssessmentsQuery(isAuthenticated)
 
   const activeAssessmentId = useMemo(() => {
@@ -358,13 +356,21 @@ export default function AssessmentsPage() {
     [detailQuery.data?.result],
   )
 
-  const handleLoadSampleFixture = () => {
-    setInlineJsonText(JSON.stringify(buildSampleMod13InlineDataset(), null, 2))
-    if (!title.trim()) {
-      setTitle('MODIS NDVI Verification Assessment')
+  const syncDatesFromDatasetIds = (nextIds: string[]) => {
+    const datasets = preparedDatasetsQuery.data ?? []
+    const matched = datasets.filter((ds) => nextIds.includes(ds.datasetId))
+    const starts = matched
+      .map((ds) => ds.temporalStart?.slice(0, 10))
+      .filter((d): d is string => Boolean(d && /^\d{4}-\d{2}-\d{2}$/.test(d)))
+      .sort()
+    const ends = matched
+      .map((ds) => ds.temporalEnd?.slice(0, 10))
+      .filter((d): d is string => Boolean(d && /^\d{4}-\d{2}-\d{2}$/.test(d)))
+      .sort()
+    if (starts.length > 0 && ends.length > 0) {
+      setAnalysisStart(starts[0])
+      setAnalysisEnd(ends[ends.length - 1])
     }
-    setUsingFixtureHelper(true)
-    setFormError(null)
   }
 
   const handleCreateSubmit = async (event: FormEvent<HTMLFormElement>) => {
@@ -383,23 +389,8 @@ export default function AssessmentsPage() {
       .filter(Boolean)
     const ghsIds = Array.from(new Set([...selectedDatasetIds, ...manualIds]))
 
-    let inlineDatasets: Record<string, unknown>[] = []
-    if (inlineJsonText.trim().length > 0) {
-      try {
-        const parsed = JSON.parse(inlineJsonText) as unknown
-        if (!Array.isArray(parsed)) {
-          setFormError('Inline datasets JSON must be an array of dataset objects.')
-          return
-        }
-        inlineDatasets = parsed as Record<string, unknown>[]
-      } catch (cause) {
-        setFormError(`Invalid inline datasets JSON: ${String(cause)}`)
-        return
-      }
-    }
-
-    if (ghsIds.length === 0 && inlineDatasets.length === 0) {
-      setFormError('Supply at least one GHS dataset ID or an inline dataset JSON array.')
+    if (ghsIds.length === 0) {
+      setFormError('Select or provide at least one prepared GHS dataset ID.')
       return
     }
 
@@ -409,7 +400,7 @@ export default function AssessmentsPage() {
         regionId: regionId || null,
         executeNow,
         ghsDatasetIds: ghsIds,
-        inlineDatasets,
+        inlineDatasets: [],
         requestConfig: {
           request_id: `ui-${Date.now()}`,
           analysis_start: `${analysisStart}T00:00:00Z`,
@@ -635,11 +626,13 @@ export default function AssessmentsPage() {
               <PreparedDatasetPickerField
                 enabled={isAuthenticated}
                 selectedDatasetIds={selectedDatasetIds}
-                onToggle={(dsId) =>
-                  setSelectedDatasetIds((prev) =>
-                    prev.includes(dsId) ? prev.filter((id) => id !== dsId) : [...prev, dsId],
-                  )
-                }
+                onToggle={(dsId) => {
+                  const next = selectedDatasetIds.includes(dsId)
+                    ? selectedDatasetIds.filter((id) => id !== dsId)
+                    : [...selectedDatasetIds, dsId]
+                  setSelectedDatasetIds(next)
+                  syncDatesFromDatasetIds(next)
+                }}
               />
 
               <div className="sci-field">
@@ -654,31 +647,6 @@ export default function AssessmentsPage() {
                   onChange={(e) => setGhsDatasetIdsText(e.target.value)}
                   placeholder="Optional manual IDs"
                 />
-              </div>
-
-              <div className="sci-field">
-                <label className="sci-label" htmlFor="inline-datasets-json">
-                  Inline datasets JSON array (optional)
-                </label>
-                <textarea
-                  id="inline-datasets-json"
-                  className="sci-textarea"
-                  value={inlineJsonText}
-                  onChange={(e) => {
-                    setInlineJsonText(e.target.value)
-                    setUsingFixtureHelper(false)
-                  }}
-                  placeholder='[{"dataset_id": "...", ...}]'
-                />
-                <Button type="button" variant="secondary" onClick={handleLoadSampleFixture}>
-                  Load sample MODIS test input (user fixture)
-                </Button>
-                {usingFixtureHelper ? (
-                  <p className="sci-dim-card__note">
-                    Loaded user-editable synthetic MODIS fixture into the input box for testing
-                    Core execution when GHS is offline.
-                  </p>
-                ) : null}
               </div>
 
               <label className="sci-checkbox-row">
@@ -861,9 +829,9 @@ export default function AssessmentsPage() {
               <div className="sci-banner sci-banner--neutral">
                 <strong>No assessment selected</strong>
                 <p>
-                  Create an assessment from the left configuration rail using either GHS dataset IDs
-                  or inline JSON dataset series to view separated resilience dimensions, quality
-                  screening, uncertainty, and provenance.
+                  Create an assessment from the left configuration rail using prepared GHS dataset
+                  IDs to view separated resilience dimensions, quality screening, uncertainty, and
+                  provenance.
                 </p>
               </div>
             ) : detailQuery.isPending ? (

@@ -1,14 +1,16 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { MapLibreOverlay } from '@deck.gl/maplibre'
-import maplibregl, { type Map as MapLibreMap } from 'maplibre-gl'
+import maplibregl, { type Map as MapLibreMap, type RasterTileSource } from 'maplibre-gl'
+import type { RegionResponse } from '../../../shared/api/contracts'
+import { buildLayerTileUrlTemplate, resolveLayerEffectiveDate } from '../../../shared/api/layers'
 import type {
   CountrySelectionSummary,
   MapLayerVisibility,
   RegionOption,
   VariableOption,
 } from '../../../shared/store/ui-store'
+import type { MapLayerDefinition } from '../../../shared/types/geospatial'
 import {
-  ANOMALY_HOTSPOTS,
   CONTINENT_AND_OCEAN_LABELS,
   INITIAL_WORLD_CAMERA,
   MAJOR_COUNTRY_LABELS,
@@ -20,10 +22,8 @@ import {
   buildRegionHighlightExpression,
   buildSelectedCountryFillExpression,
   buildSelectedCountryLineExpression,
-  getThematicFillExpression,
 } from '../config/map-style'
 import type {
-  AnomalyHotspotDatum,
   ProjectedLabelPosition,
   WorldMapController,
 } from '../model/types'
@@ -34,13 +34,13 @@ export interface UseWorldMapParams {
   selectedVariable: VariableOption
   selectedRegion: RegionOption
   setSelectedRegion: (region: RegionOption) => void
-  selectedHotspotId: string
-  setSelectedHotspotId: (id: string) => void
   selectedCountry: CountrySelectionSummary | null
   setSelectedCountry: (country: CountrySelectionSummary | null) => void
   hoveredCountry: CountrySelectionSummary | null
   setHoveredCountry: (country: CountrySelectionSummary | null) => void
   layerVisibility: MapLayerVisibility
+  activeLayer: MapLayerDefinition | null
+  regions: readonly RegionResponse[]
 }
 
 export function useWorldMap({
@@ -48,13 +48,13 @@ export function useWorldMap({
   selectedVariable,
   selectedRegion,
   setSelectedRegion,
-  selectedHotspotId,
-  setSelectedHotspotId,
   selectedCountry,
   setSelectedCountry,
   hoveredCountry,
   setHoveredCountry,
   layerVisibility,
+  activeLayer,
+  regions,
 }: UseWorldMapParams): WorldMapController {
   const mapRef = useRef<MapLibreMap | null>(null)
   const deckOverlayRef = useRef<MapLibreOverlay | null>(null)
@@ -73,25 +73,25 @@ export function useWorldMap({
   } | null>(null)
 
   const initialConfigRef = useRef({
-    selectedVariable,
     selectedRegion,
     selectedCountryIso: selectedCountry?.isoA3 ?? null,
     layerVisibility,
+    activeLayer,
   })
 
   const latestSelectionRef = useRef({
     selectedCountry,
     hoveredCountry,
-    selectedHotspotId,
+    selectedRegion,
   })
 
   useEffect(() => {
     latestSelectionRef.current = {
       selectedCountry,
       hoveredCountry,
-      selectedHotspotId,
+      selectedRegion,
     }
-  }, [hoveredCountry, selectedCountry, selectedHotspotId])
+  }, [hoveredCountry, selectedCountry, selectedRegion])
 
   const updateProjectedPositions = useCallback(() => {
     const map = mapRef.current
@@ -103,18 +103,16 @@ export function useWorldMap({
     const {
       selectedCountry: currentSelectedCountry,
       hoveredCountry: currentHoveredCountry,
-      selectedHotspotId: currentHotspotId,
+      selectedRegion: currentRegion,
     } = latestSelectionRef.current
 
-    const activeHotspot =
-      ANOMALY_HOTSPOTS.find((item) => item.id === currentHotspotId) ??
-      ANOMALY_HOTSPOTS[0]
-
+    const regionPreset =
+      REGION_CAMERA_PRESETS[currentRegion] ?? INITIAL_WORLD_CAMERA
     const anchorCoords: [number, number] = currentSelectedCountry
       ? [currentSelectedCountry.centerLon, currentSelectedCountry.centerLat]
       : currentHoveredCountry
         ? [currentHoveredCountry.centerLon, currentHoveredCountry.centerLat]
-        : activeHotspot.coordinates
+        : regionPreset.center
 
     const width = container.clientWidth
     const height = container.clientHeight
@@ -152,7 +150,7 @@ export function useWorldMap({
           text: country.name,
           x: Math.round(pt.x),
           y: Math.round(pt.y),
-          visible: inBounds && rankAllowed,
+          visible: inBounds && zoom <= 3.8 && rankAllowed,
           kind: 'country',
           isoA3: country.isoA3,
           isSelected,
@@ -183,17 +181,17 @@ export function useWorldMap({
     const map = new maplibregl.Map({
       container,
       style: buildInitialMapStyle(
-        init.selectedVariable,
         init.selectedRegion,
         init.selectedCountryIso,
         init.layerVisibility,
+        init.activeLayer,
       ),
       center: preset.center,
       zoom: preset.zoom,
       minZoom: 0.5,
-      maxZoom: 6.5,
+      maxZoom: 18,
       renderWorldCopies: false,
-      attributionControl: false,
+      attributionControl: { compact: true },
       dragRotate: false,
       pitchWithRotate: false,
       touchZoomRotate: true,
@@ -244,39 +242,18 @@ export function useWorldMap({
   }, [
     hoveredCountry?.isoA3,
     selectedCountry?.isoA3,
-    selectedHotspotId,
+    selectedRegion,
     updateProjectedPositions,
   ])
 
-  const { selectHotspot } = useRegionInteraction({
+  useRegionInteraction({
     mapInstance,
     isMapReady,
     setHoveredCountry,
     selectedCountry,
     setSelectedCountry,
     setSelectedRegion,
-    setSelectedHotspotId,
   })
-
-  const handleSelectRegionAoi = useCallback(
-    (region: RegionOption) => {
-      setSelectedRegion(region)
-      const matchingHotspot = ANOMALY_HOTSPOTS.find(
-        (item) => item.regionName === region,
-      )
-      if (matchingHotspot) {
-        setSelectedHotspotId(matchingHotspot.id)
-      }
-    },
-    [setSelectedHotspotId, setSelectedRegion],
-  )
-
-  const handleSelectHotspot = useCallback(
-    (hotspot: AnomalyHotspotDatum) => {
-      selectHotspot(hotspot)
-    },
-    [selectHotspot],
-  )
 
   useEffect(() => {
     const overlay = deckOverlayRef.current
@@ -285,24 +262,14 @@ export function useWorldMap({
     }
 
     const layers = createAnalyticalOverlayLayers({
-      selectedVariable,
       selectedRegion,
-      selectedHotspotId,
+      regions,
+      activeLayer,
       visibility: layerVisibility,
-      onSelectHotspot: handleSelectHotspot,
-      onSelectRegionAoi: handleSelectRegionAoi,
     })
 
     overlay.setProps({ layers })
-  }, [
-    handleSelectHotspot,
-    handleSelectRegionAoi,
-    isMapReady,
-    layerVisibility,
-    selectedHotspotId,
-    selectedRegion,
-    selectedVariable,
-  ])
+  }, [activeLayer, isMapReady, layerVisibility, regions, selectedRegion])
 
   useEffect(() => {
     const map = mapRef.current
@@ -310,17 +277,57 @@ export function useWorldMap({
       return
     }
 
-    if (map.getLayer('country-thematic-fill')) {
-      map.setPaintProperty(
-        'country-thematic-fill',
-        'fill-color',
-        getThematicFillExpression(selectedVariable),
-      )
-      map.setLayoutProperty(
-        'country-thematic-fill',
-        'visibility',
-        layerVisibility.thematicOverlay ? 'visible' : 'none',
-      )
+    const effectiveDate = resolveLayerEffectiveDate(activeLayer, '')
+    const tileUrl =
+      activeLayer && activeLayer.availabilityStatus === 'connected'
+        ? buildLayerTileUrlTemplate(activeLayer.id, { timestamp: effectiveDate })
+        : null
+
+    if (tileUrl) {
+      const existingSource = map.getSource('terra-science-raster') as
+        | RasterTileSource
+        | undefined
+      if (existingSource) {
+        existingSource.setTiles([tileUrl])
+      } else {
+        map.addSource('terra-science-raster', {
+          type: 'raster',
+          tiles: [tileUrl],
+          tileSize: 256,
+          maxzoom: 12,
+        })
+      }
+      if (!map.getLayer('active-science-raster')) {
+        map.addLayer(
+          {
+            id: 'active-science-raster',
+            type: 'raster',
+            source: 'terra-science-raster',
+            layout: {
+              visibility: layerVisibility.thematicOverlay ? 'visible' : 'none',
+            },
+            paint: {
+              'raster-opacity': 0.82,
+              'raster-resampling': 'nearest',
+              'raster-fade-duration': 100,
+            },
+          },
+          map.getLayer('graticule-grid-lines') ? 'graticule-grid-lines' : undefined,
+        )
+      } else {
+        map.setLayoutProperty(
+          'active-science-raster',
+          'visibility',
+          layerVisibility.thematicOverlay ? 'visible' : 'none',
+        )
+      }
+    } else {
+      if (map.getLayer('active-science-raster')) {
+        map.removeLayer('active-science-raster')
+      }
+      if (map.getSource('terra-science-raster')) {
+        map.removeSource('terra-science-raster')
+      }
     }
 
     if (map.getLayer('country-region-highlight-fill')) {
@@ -361,13 +368,17 @@ export function useWorldMap({
     }
 
     const borderVis = layerVisibility.countryBorders ? 'visible' : 'none'
-    if (map.getLayer('country-borders')) {
-      map.setLayoutProperty('country-borders', 'visibility', borderVis)
-    }
-    if (map.getLayer('coastline-stroke')) {
-      map.setLayoutProperty('coastline-stroke', 'visibility', borderVis)
+    for (const borderLayerId of [
+      'country-borders',
+      'ofm-boundary-country',
+      'ofm-boundary-subnational',
+    ]) {
+      if (map.getLayer(borderLayerId)) {
+        map.setLayoutProperty(borderLayerId, 'visibility', borderVis)
+      }
     }
   }, [
+    activeLayer,
     isMapReady,
     layerVisibility,
     selectedCountry?.isoA3,
@@ -412,7 +423,6 @@ export function useWorldMap({
     const map = mapRef.current
     setSelectedCountry(null)
     setHoveredCountry(null)
-    setSelectedHotspotId('amazon')
     previousRegionRef.current = 'Global land'
     setSelectedRegion('Global land')
     if (!map) return
@@ -421,12 +431,7 @@ export function useWorldMap({
       zoom: INITIAL_WORLD_CAMERA.zoom,
       duration: 550,
     })
-  }, [
-    setHoveredCountry,
-    setSelectedCountry,
-    setSelectedHotspotId,
-    setSelectedRegion,
-  ])
+  }, [setHoveredCountry, setSelectedCountry, setSelectedRegion])
 
   const flyToRegion = useCallback(
     (region: RegionOption) => {

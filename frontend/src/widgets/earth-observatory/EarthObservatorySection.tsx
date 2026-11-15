@@ -1,5 +1,6 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router'
+import { useLayerCatalogQuery } from '../../shared/api/layers'
 import { figmaAssets } from '../../shared/config/assets'
 import { APP_ROUTES } from '../../shared/config/routes'
 import { ObservatoryFrameIcon } from '../../shared/ui/explorer-icons'
@@ -8,7 +9,7 @@ import {
   type RegionOption,
   type VariableOption,
 } from '../../shared/store/ui-store'
-import { ANOMALY_HOTSPOTS, WorldMap } from '../world-map'
+import { VARIABLE_TO_LAYER_ID, WorldMap } from '../world-map'
 
 const VARIABLE_OPTIONS: readonly VariableOption[] = [
   'Land surface temperature',
@@ -35,8 +36,13 @@ export function EarthObservatorySection() {
   const selectedRegion = useUiStore((state) => state.selectedRegion)
   const setSelectedRegion = useUiStore((state) => state.setSelectedRegion)
   const setActiveMapTool = useUiStore((state) => state.setActiveMapTool)
-  const setSelectedHotspotId = useUiStore((state) => state.setSelectedHotspotId)
   const setSelectedCountry = useUiStore((state) => state.setSelectedCountry)
+  const layersQuery = useLayerCatalogQuery()
+
+  const activeLayer = useMemo(() => {
+    const targetId = VARIABLE_TO_LAYER_ID[selectedVariable]
+    return (layersQuery.data ?? []).find((item) => item.id === targetId) ?? null
+  }, [layersQuery.data, selectedVariable])
 
   const [variableMenuOpen, setVariableMenuOpen] = useState(false)
   const [regionMenuOpen, setRegionMenuOpen] = useState(false)
@@ -93,13 +99,15 @@ export function EarthObservatorySection() {
                 className="dataset-explorer__dataset-title"
                 data-node-id="5:156"
               >
-                MODIS Terra
+                {activeLayer ? `${activeLayer.productId}.${activeLayer.productVersion}` : 'NASA Earth Observations'}
               </span>
               <span
                 className="dataset-explorer__dataset-meta"
                 data-node-id="5:157"
               >
-                MOD11C3 · Monthly · 0.05°
+                {activeLayer?.availabilityStatus === 'connected'
+                  ? `${activeLayer.nativeSpatialResolution} · Connected raster`
+                  : `${activeLayer?.nativeSpatialResolution ?? 'Satellite product'} · Unavailable`}
               </span>
               <span
                 className="dataset-explorer__dataset-check"
@@ -243,14 +251,6 @@ export function EarthObservatorySection() {
                         onClick={() => {
                           setSelectedRegion(option)
                           setSelectedCountry(null)
-                          const matchingHotspot = ANOMALY_HOTSPOTS.find(
-                            (item) => item.regionName === option,
-                          )
-                          if (matchingHotspot) {
-                            setSelectedHotspotId(matchingHotspot.id)
-                          } else {
-                            setSelectedHotspotId('amazon')
-                          }
                           setRegionMenuOpen(false)
                         }}
                       >
@@ -324,12 +324,16 @@ export function EarthObservatorySection() {
           EARTH OBSERVATORY
         </p>
         <h1 className="earth-observatory__headline" data-node-id="5:219">
-          A warming planet, in focus.
+          {activeLayer?.name ?? 'Earth observations, in focus.'}
         </h1>
 
         <div className="earth-observatory__period-pill" data-node-id="5:220">
           <p className="earth-observatory__period-text" data-node-id="5:221">
-            Jan 2001 — Dec 2025
+            {activeLayer?.availabilityStatus === 'connected' &&
+            activeLayer.availableDates &&
+            activeLayer.availableDates.length > 0
+              ? `${activeLayer.availableDates[0]} — ${activeLayer.availableDates[activeLayer.availableDates.length - 1]}`
+              : 'No ingested observations'}
           </p>
         </div>
 

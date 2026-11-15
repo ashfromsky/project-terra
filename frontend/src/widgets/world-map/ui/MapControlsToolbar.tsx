@@ -21,28 +21,18 @@ const LAYER_TOGGLE_ITEMS: ReadonlyArray<{
 }> = [
   {
     key: 'thematicOverlay',
-    label: 'Thematic choropleth field',
-    engineBadge: 'MapLibre',
-  },
-  {
-    key: 'anomalyGrid',
-    label: 'Sub-basin anomaly grid',
-    engineBadge: 'deck.gl',
+    label: 'Satellite raster overlay',
+    engineBadge: 'Backend COG',
   },
   {
     key: 'regionBoundaries',
-    label: 'Region AOI boundaries',
-    engineBadge: 'deck.gl',
-  },
-  {
-    key: 'anomalyHotspots',
-    label: 'Anomaly hotspot markers',
+    label: 'Saved AOI boundaries',
     engineBadge: 'deck.gl',
   },
   {
     key: 'countryBorders',
-    label: 'Natural Earth borders',
-    engineBadge: '1:110m',
+    label: 'Administrative borders',
+    engineBadge: 'OpenFreeMap',
   },
   {
     key: 'graticules',
@@ -231,8 +221,8 @@ export function MapControlsToolbar({
               {CARTOGRAPHIC_PROJECTION_SPEC.datasetName}
             </p>
             <p className="world-map__layer-meta">
-              {CARTOGRAPHIC_PROJECTION_SPEC.renderedProjection} · Synthetic demo
-              overlays
+              {CARTOGRAPHIC_PROJECTION_SPEC.renderedProjection} · Backend COG
+              rasters only
             </p>
           </div>
         </div>

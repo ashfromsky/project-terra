@@ -4,14 +4,13 @@ export { MapLegendCard } from './ui/MapLegendCard'
 export {
   CARTOGRAPHIC_PROJECTION_SPEC,
   THEMATIC_LAYER_METADATA,
+  VARIABLE_TO_LAYER_ID,
 } from './config/map-style'
 export {
-  ANOMALY_HOTSPOTS,
   INITIAL_WORLD_CAMERA,
   REGION_CAMERA_PRESETS,
 } from './config/cartographic-data'
 export type {
-  AnomalyHotspotDatum,
   CountryFeatureProperties,
   CountrySelectionSummary,
   MapLayerVisibility,

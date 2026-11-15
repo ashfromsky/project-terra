@@ -57,8 +57,6 @@ export interface ExploreState {
   setLayerOpacity: (layerId: string, opacity: number) => void
   setLayerValueRange: (layerId: string, minValue: number, maxValue: number) => void
   resetLayerValueRange: (layerId: string) => void
-  syntheticPreviewEnabled: boolean
-  setSyntheticPreviewEnabled: (enabled: boolean) => void
   selectedDate: string
   setSelectedDate: (date: string) => void
   dateRangeStart: string

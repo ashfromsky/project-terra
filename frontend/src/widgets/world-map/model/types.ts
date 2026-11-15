@@ -16,12 +16,6 @@ export interface CountryFeatureProperties {
   labelLat: number
   bbox: [number, number, number, number]
   terraRegion: RegionOption
-  demoLstTrend: number
-  demoLstColor: string
-  demoNdvi: number
-  demoEvi: number
-  demoPrecipAnomaly: number
-  isSyntheticDemo: boolean
 }
 
 export interface GeographicLabelAnchor {
@@ -55,42 +49,6 @@ export interface ProjectedLabelPosition {
   isHovered?: boolean
 }
 
-export interface AnomalyHotspotDatum {
-  id: string
-  title: string
-  regionName: RegionOption
-  coordinates: [number, number]
-  lstTrendLabel: string
-  ndviLabel: string
-  eviLabel: string
-  precipLabel: string
-  significanceLabel: string
-  tone: 'coral' | 'teal'
-  radiusMeters: number
-  isSyntheticDemo: true
-}
-
-export interface RegionAoiFeatureProperties {
-  id: string
-  regionName: RegionOption
-  title: string
-  subtitle: string
-  strokeColor: [number, number, number, number]
-  fillColor: [number, number, number, number]
-  isSyntheticDemo: true
-}
-
-export interface SyntheticAnomalyCellDatum {
-  id: string
-  regionName: RegionOption
-  polygon: [number, number][]
-  lstDelta: number
-  ndviScore: number
-  eviScore: number
-  precipDelta: number
-  isSyntheticDemo: true
-}
-
 export interface RegionCameraPreset {
   region: RegionOption
   center: [number, number]
@@ -108,7 +66,7 @@ export interface ThematicLayerDefinition {
   variable: VariableOption
   shortTitle: string
   unit: string
-  propertyKey: 'demoLstTrend' | 'demoNdvi' | 'demoEvi' | 'demoPrecipAnomaly'
+  layerId: string
   minLabel: string
   midLabel: string
   maxLabel: string
