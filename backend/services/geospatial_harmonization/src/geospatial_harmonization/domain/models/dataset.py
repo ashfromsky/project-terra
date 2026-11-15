@@ -30,6 +30,8 @@ class AssetReference:
     media_type: str
     checksum_sha256: str | None = None
     size_bytes: int | None = None
+    storage_key: str | None = None
+    zone: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -73,6 +75,7 @@ class SpatialMetadata:
     bounds: SpatialBounds | None = None
     grid: GridSpec | None = None
     point_count: int | None = None
+    spatial_resolution: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -84,13 +87,24 @@ class QualityMetadata:
     excluded_count: int = 0
     exclusion_reasons: tuple[str, ...] = ()
     flags_applied: tuple[str, ...] = ()
+    exclusion_breakdown: dict[str, int] = field(default_factory=dict)
+    missing_data_fraction: float | None = None
+    temporal_coverage_fraction: float | None = None
+    spatial_coverage_fraction: float | None = None
 
     def __post_init__(self) -> None:
-        frac = self.valid_observation_fraction
-        if frac is not None and not 0.0 <= frac <= 1.0:
-            raise QualityPolicyViolationError("valid_observation_fraction must be within [0, 1]")
+        for label, frac in (
+            ("valid_observation_fraction", self.valid_observation_fraction),
+            ("missing_data_fraction", self.missing_data_fraction),
+            ("temporal_coverage_fraction", self.temporal_coverage_fraction),
+            ("spatial_coverage_fraction", self.spatial_coverage_fraction),
+        ):
+            if frac is not None and not 0.0 <= frac <= 1.0:
+                raise QualityPolicyViolationError(f"{label} must be within [0, 1]")
         if self.excluded_count < 0:
             raise QualityPolicyViolationError("excluded_count cannot be negative")
+        if any(v < 0 for v in self.exclusion_breakdown.values()):
+            raise QualityPolicyViolationError("exclusion_breakdown counts cannot be negative")
 
 
 @dataclass(frozen=True, slots=True)
@@ -106,6 +120,9 @@ class ProvenanceRecord:
     source_urls: tuple[str, ...] = ()
     processing_steps: tuple[str, ...] = ()
     notes: tuple[str, ...] = ()
+    granule_id: str | None = None
+    acquisition_timestamp: datetime | None = None
+    source_metadata: dict[str, object] = field(default_factory=dict)
 
 
 @dataclass(frozen=True, slots=True)
@@ -148,6 +165,8 @@ class SpatialDataset:
     assets: tuple[AssetReference, ...]
     provenance: ProvenanceRecord
     extensions: dict[str, object] = field(default_factory=dict)
+    product_version: str | None = None
+    granule_id: str | None = None
 
     def __post_init__(self) -> None:
         if not all(v.strip() for v in (self.source_id, self.provider, self.product)):
@@ -157,3 +176,7 @@ class SpatialDataset:
         for var_name, spec in self.variables.items():
             if self.units.get(var_name, spec.units) != spec.units:
                 raise IncompatibleDatasetError(f"Unit mismatch for '{var_name}'")
+        if self.product_version is None:
+            object.__setattr__(self, "product_version", self.provenance.product_version)
+        if self.granule_id is None and self.provenance.granule_id is not None:
+            object.__setattr__(self, "granule_id", self.provenance.granule_id)
