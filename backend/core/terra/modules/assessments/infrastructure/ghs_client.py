@@ -47,7 +47,9 @@ class HttpxGhsDatasetClient:
         params: dict[str, str] | None = None,
         timeout_override: float | None = None,
     ) -> httpx.Response:
-        timeout = timeout_override if timeout_override is not None else self._timeout
+        timeout_val = timeout_override if timeout_override is not None else self._timeout
+        connect_timeout = min(timeout_val, 0.05 if timeout_val < 1.0 else 2.0)
+        timeout = httpx.Timeout(timeout_val, connect=connect_timeout)
         last_exc: httpx.HTTPError | None = None
         for attempt in range(1, _MAX_GET_ATTEMPTS + 1):
             try:
@@ -150,7 +152,8 @@ class HttpxGhsDatasetClient:
     async def publish_derived_dataset(self, payload: dict[str, object]) -> dict[str, object]:
         """Persist a derived or AOI-scoped spatial artifact in GHS."""
         try:
-            timeout_cfg = httpx.Timeout(self._timeout, connect=min(self._timeout, 2.0))
+            connect_timeout = min(self._timeout, 0.05 if self._timeout < 1.0 else 2.0)
+            timeout_cfg = httpx.Timeout(self._timeout, connect=connect_timeout)
             async with httpx.AsyncClient(
                 base_url=self._base_url,
                 timeout=timeout_cfg,

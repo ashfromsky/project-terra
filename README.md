@@ -4,82 +4,135 @@
 
 **Ecosystem Response & Resilience Intelligence**
 
-Turn Earth observation into transparent, reproducible ecosystem assessments.
+From a point on Earth to a transparent, reproducible environmental answer.
 
+[![Live demo](https://img.shields.io/badge/live_demo-api--terra.yappin.studio-159B91?style=for-the-badge&logo=googlechrome&logoColor=white)](https://api-terra.yappin.studio)
 [![License](https://img.shields.io/badge/license-Apache--2.0-159B91?style=flat-square)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.13+-3776AB?style=flat-square&logo=python&logoColor=white)](backend/core/pyproject.toml)
 [![React](https://img.shields.io/badge/react-19-61DAFB?style=flat-square&logo=react&logoColor=111111)](frontend/package.json)
 [![FastAPI](https://img.shields.io/badge/FastAPI-009688?style=flat-square&logo=fastapi&logoColor=white)](backend/core)
-[![Scientific Core](https://img.shields.io/badge/scientific__core-P0%2FP1-159B91?style=flat-square)](docs/scientific/SCIENTIFIC_CORE.md)
-[![Status](https://img.shields.io/badge/status-active__development-3193CE?style=flat-square)](#project-status)
+[![Scientific Core](https://img.shields.io/badge/scientific_core-P0%2FP1-159B91?style=flat-square)](docs/scientific/SCIENTIFIC_CORE.md)
+[![Status](https://img.shields.io/badge/status-active_development-3193CE?style=flat-square)](#project-status)
 
-[Overview](#overview) · [Screenshots](#screenshots) · [Architecture](#architecture) · [Scientific Core](#scientific-core) · [Quick Start](#quick-start) · [Docker](#docker-compose) · [Documentation](#documentation)
+[Live Demo](https://api-terra.yappin.studio) · [Overview](#overview) · [Screenshots](#screenshots) · [Architecture](#architecture) · [Scientific Core](#scientific-core) · [Quick Start](#quick-start) · [Deployment](#production-deployment) · [Documentation](#documentation)
 
 </div>
 
 ---
 
-![PROJECT TERRA Map Explorer — live NDVI raster, AOI, legend and provenance](docs/assets/screenshots/map-explorer.png)
+<img src="docs/assets/screenshots/live-map.png" alt="PROJECT TERRA live Map Explorer with NASA GIBS NDVI, AOI controls, observation date, and legend" width="100%">
+
+<p align="center"><sub>Live NASA GIBS NDVI over the whole planet, with date-aware tiles, AOI tools, legends, and a browser-native science panel. Screenshot from the deployed instance.</sub></p>
 
 ## Overview
 
-**PROJECT TERRA** is an open-source environmental analysis platform for investigating how ecosystems respond to environmental stress, change over time, and recover from disturbances.
+**PROJECT TERRA** is an open-source environmental analysis platform for investigating how ecosystems respond to environmental stress, how they change over time, and how they recover from disturbance.
 
-The platform connects a geographic **Area of Interest (AOI)** to **real NASA observations**, runs the existing **Scientific Core**, and returns an assessment with trends, anomalies, resilience dimensions, quality diagnostics, and provenance. It is designed to keep three things separate and visible:
+It connects a geographic **Area of Interest (AOI)** to **real NASA observations**, runs a transparent **Scientific Core**, and returns trends, anomalies, resilience dimensions, quality diagnostics, and provenance. Map colors are never treated as measurements.
 
-- **Observations** — real provider data with units, timestamps, QA layers, and product identifiers.
-- **Scientific analysis** — deterministic, versioned algorithms with explicit assumptions and readiness requirements.
-- **Visualization** — map previews and charts that never become the source of a quantitative result.
+Two workflows share one product:
+
+| Mode | What it does | Runtime |
+| :--- | :--- | :--- |
+| **Live environmental map** | Direct global visualization and browser-side statistics. Explore anywhere on Earth, switch layers and dates, inspect points, draw an AOI, and calculate supported metrics without server-side raster ingestion. | Browser → NASA GIBS / NASA POWER / Microsoft Planetary Computer |
+| **Quantitative assessment** | Bounded data acquisition, readiness checks, deterministic scientific methods, persisted results, and artifact provenance. | Browser → Core → GHS → `terra-worker` → `terra-scientific` |
 
 > PROJECT TERRA was initiated in the context of the NASA Space Apps Challenge 2026. It is an independent open-source project and is not an official NASA product.
 
 ---
 
-## Screenshots
+## Try it now
 
-| Map Explorer — live metric preview | Assessments — readiness diagnostics |
-| :---: | :---: |
-| ![Map Explorer with NDVI overlay](docs/assets/screenshots/map-explorer.png) | ![Pre-run adaptive data readiness](docs/assets/screenshots/assessment-readiness.png) |
+Open **[api-terra.yappin.studio](https://api-terra.yappin.studio)** — no installation required.
 
-| Assessment outputs — AOI, period, provenance | Scientific charts — time series and anomalies |
-| :---: | :---: |
-| ![Selected AOI and analysis period](docs/assets/screenshots/assessment-results.png) | ![Time series and anomaly diagnostics](docs/assets/screenshots/assessment-charts.png) |
+1. **Explore** the global map. The default view is real NASA GIBS NDVI for the selected observation date.
+2. **Switch a layer** in *Live NASA Layers*: NDVI, EVI, land surface temperature (day/night), IMERG precipitation, SMAP soil moisture, or snow cover.
+3. **Inspect a point**, or draw a rectangle/polygon AOI.
+4. Open the **Live** inspector tab to calculate NASA POWER point statistics and a MODIS NDVI AOI time series in the browser.
+5. For the full assessment path, sign in, provision data, and open **Assessments** to follow readiness, execution, results, and provenance.
 
-| Data Sources — provider readiness and ingestion |
-| :--- |
-| ![Provider readiness, ingestion, and prepared datasets](docs/assets/screenshots/data-sources.png) |
+> The live map and browser-side calculations work even when Core, GHS, PostgreSQL, R2, and the workers are stopped. The assessment workspace uses the backend stack.
 
 ---
 
-## Browser-native live environment (MVP)
+## Screenshots
 
-The primary map workflow does **not** require Core, GHS, PostgreSQL, R2, or a background worker. The browser talks directly to public providers and computes supported statistics locally in a Web Worker.
+### Live environmental map
 
-| Capability | Direct source | How it works |
+| Global NDVI · direct NASA GIBS | Browser-side NASA POWER statistics |
+| :---: | :---: |
+| ![Live NDVI map with layer catalog](docs/assets/screenshots/live-map.png) | ![NASA POWER monthly statistics, trend, and anomaly chart](docs/assets/screenshots/live-power.png) |
+
+| MODIS NDVI AOI calculations · Planetary Computer COG | Homepage · workflow entry point |
+| :---: | :---: |
+| ![MODIS NDVI AOI series calculated in the browser](docs/assets/screenshots/live-modis.png) | ![Homepage with live environmental workflow](docs/assets/screenshots/home-live.png) |
+
+### Assessment workspace
+
+| Readiness diagnostics before execution | Selected AOI, period, and provenance |
+| :---: | :---: |
+| ![Pre-run adaptive data readiness](docs/assets/screenshots/assessment-readiness.png) | ![Selected AOI and analysis period](docs/assets/screenshots/assessment-results.png) |
+
+| Time series and anomaly charts | Provider readiness and prepared datasets |
+| :---: | :---: |
+| ![Scientific charts and anomaly diagnostics](docs/assets/screenshots/assessment-charts.png) | ![Data sources, ingestion, and prepared datasets](docs/assets/screenshots/data-sources.png) |
+
+---
+
+## Browser-native live environment
+
+The live path is deliberately lightweight: the browser talks to public providers and calculates supported statistics in a **Web Worker**. Nothing is uploaded to TERRA and no source raster is persisted by the app.
+
+| Capability | Direct source | Implementation |
 | :--- | :--- | :--- |
-| Global NDVI / EVI visualization | NASA GIBS WMTS | `MODIS_Terra_L3_NDVI_16Day`, `MODIS_Terra_L3_EVI_16Day` tiles are loaded directly by MapLibre. |
-| Land surface temperature | NASA GIBS WMTS | Day and night `MODIS_Terra_Land_Surface_Temp_*` layers with date-aware tiles. |
-| Precipitation | NASA GIBS WMTS | `IMERG_Precipitation_Rate` global visualization. |
-| Soil moisture | NASA GIBS WMTS | `SMAP_L4_Analyzed_Surface_Soil_Moisture`. |
-| Snow cover | NASA GIBS WMTS | `MODIS_Terra_NDSI_Snow_Cover`. |
-| MODIS NDVI numerical AOI statistics | Microsoft Planetary Computer STAC + COG | STAC search → SAS signing → `geotiff.js` HTTP Range reads of only the AOI window → scaled NDVI statistics, time series, anomalies, Mann–Kendall and Theil–Sen. |
-| Point meteorology | NASA POWER API | Monthly point series for temperature, humidity, precipitation, radiation, and wind, parsed and analysed in the browser. |
+| Global NDVI / EVI visualization | NASA GIBS WMTS | `MODIS_Terra_L3_NDVI_16Day`, `MODIS_Terra_L3_EVI_16Day` |
+| Land surface temperature | NASA GIBS WMTS | `MODIS_Terra_Land_Surface_Temp_Day`, `..._Night` |
+| Precipitation | NASA GIBS WMTS | `IMERG_Precipitation_Rate` |
+| Soil moisture | NASA GIBS WMTS | `SMAP_L4_Analyzed_Surface_Soil_Moisture` |
+| Snow cover | NASA GIBS WMTS | `MODIS_Terra_NDSI_Snow_Cover` |
+| MODIS NDVI numerical AOI statistics | Microsoft Planetary Computer STAC + COG | STAC search → SAS signing → `geotiff.js` HTTP Range reads of the AOI window → scaled NDVI statistics, series, anomalies, Mann–Kendall, Theil–Sen |
+| Point meteorology | NASA POWER API | Monthly point series for temperature, humidity, precipitation, radiation, and wind |
 
-**Scientific boundary:** GIBS tiles are pre-rendered visualizations. They are never used as numerical NDVI, LST, precipitation, or soil-moisture values. Numerical NDVI comes from the MOD13Q1 COG asset; point meteorology comes from NASA POWER.
+```mermaid
+flowchart LR
+    subgraph Browser["Your browser"]
+        Map["MapLibre map<br/>AOI + date + legend"]
+        UI["Live inspector<br/>statistics + charts"]
+        Worker["Science Web Worker<br/>typed arrays · no DOM"]
+    end
 
-**MVP limits, stated explicitly:**
+    GIBS["NASA GIBS<br/>pre-rendered tiles"]
+    PC["Microsoft Planetary Computer<br/>STAC + MODIS COGs"]
+    POWER["NASA POWER<br/>monthly point series"]
 
-- MODIS numerical series currently reads at most 12 Terra composites for the selected period and applies no QA layer yet; fill/NoData pixels remain missing.
-- Planetary Computer SAS signing is rate-limited; transient `429` responses are retried, and unread composites are reported as missing.
-- The geotiff reader is loaded from the `esm.sh` ESM CDN at calculation time; the map and POWER path do not depend on it.
-- Standard (not seasonal) Mann–Kendall and approximate Theil–Sen confidence bounds are used client-side; p-values can be optimistic for serially correlated series.
-- No raster data is uploaded to or persisted by TERRA.
-
-```bash
-# The live map and POWER/MODIS calculations work even when Core is stopped.
-cd frontend && pnpm dev
-# Open http://localhost:5173/explore
+    Map -->|"direct XYZ / WMTS"| GIBS
+    UI -->|"STAC search + SAS"| PC
+    PC -->|"HTTP Range: AOI window only"| Worker
+    UI -->|"CORS point request"| POWER
+    POWER --> Worker
+    GIBS -. "visualization only — never numerical input" .-> Map
+    Worker --> UI
 ```
+
+### Scientific boundary
+
+NASA GIBS tiles are **pre-rendered visualization**, not measurements. They are excellent for global context and are never used as numerical NDVI, LST, precipitation, or soil-moisture input. Numerical NDVI comes from the **MOD13Q1 COG asset**; point meteorology comes from **NASA POWER**.
+
+### Implemented browser-side calculations
+
+- Descriptive statistics, percentiles, valid-pixel count, and coverage.
+- Calendar-month standardized anomalies with an in-sample baseline.
+- Mann–Kendall trend test and Theil–Sen slope with approximate confidence bounds.
+- AOI masking in MODIS sinusoidal coordinates; source scale factors and NoData are preserved.
+- Bounded concurrent COG window reads, progress reporting, cancellation, and in-memory caching.
+
+### Stated limits
+
+- MODIS numerical series reads at most **12 Terra composites** per run and does **not yet apply the VI Quality/QA layer**; fill and NoData pixels remain missing.
+- Planetary Computer SAS signing is rate-limited. Transient `429` responses are retried; unread composites are reported as missing instead of being invented.
+- The geotiff reader is loaded from the `esm.sh` ESM CDN at calculation time. The map and POWER path do not depend on it.
+- Standard (not seasonal) Mann–Kendall is used client-side; p-values can be optimistic for serially correlated monthly series.
+- No server-side raster ingestion, tiling, or storage is required for the live map.
 
 ---
 
@@ -87,17 +140,17 @@ cd frontend && pnpm dev
 
 | Capability | What it means in practice |
 | :--- | :--- |
-| **AOI-driven workflow** | Draw a polygon/rectangle or select a point AOI in Map Explorer; save it as an EPSG:4326 region and carry it into an assessment. |
-| **Real data acquisition** | Discover and ingest bounded NASA granules or point/regional meteorology through GHS. No global dataset downloads, no synthetic substitutions. |
+| **AOI-driven workflow** | Draw a polygon/rectangle or select a point AOI; save it as an EPSG:4326 region and carry it into an assessment. |
+| **Real data acquisition** | Discover and ingest bounded NASA granules or point/regional meteorology through GHS. No global downloads or synthetic substitutions. |
 | **Adaptive readiness** | Check source-specific QA, temporal coverage, baseline depth, and method requirements **before** execution. Missing gaps are reported with remediation. |
-| **Scientific Core execution** | Run only implemented P0/P1 methods, with preserved units, timestamps, missing-value masks, QA flags, and method versions. |
+| **Scientific Core execution** | Run only implemented P0/P1 methods, preserving units, timestamps, missing-value masks, QA flags, and method versions. |
 | **Truthful results** | Terminal statuses distinguish `completed`, `completed_partial`, and `insufficient_data`. Unavailable metrics are reported as unavailable, not zero. |
-| **Map metric preview** | Switch between supported environmental layers with legends, units, loading states, and explicit unavailable reasons. Preview is visualization, not assessment. |
+| **Map metric preview** | Switch layers with legends, units, loading states, and explicit unavailable reasons. Preview is visualization, not assessment. |
 | **Provenance everywhere** | Input hashes, product versions, source datasets, method versions, artifact manifests, and object-storage checksums. |
 
 ---
 
-## End-to-end workflow
+## End-to-end assessment workflow
 
 ```mermaid
 sequenceDiagram
@@ -183,33 +236,33 @@ flowchart LR
 
 | Component | Runtime | Responsibility |
 | :--- | :--- | :--- |
-| **Frontend** | React 19, Vite 8, MapLibre 5, deck.gl, TanStack Query, Zustand, ECharts 6 | Map/AOI interaction, metric previews, assessment configuration, readiness and result visualization, reports. |
+| **Frontend** | React 19, Vite 8, MapLibre 5, deck.gl, TanStack Query, Zustand, ECharts 6 | Map/AOI interaction, live environmental layers, browser-side science panels, assessment configuration, readiness and result visualization, reports. |
 | **terra-core** | FastAPI, Granian, SQLAlchemy async, Pydantic | Auth, regions, layers, data-source proxy, assessment orchestration, readiness, artifacts, comparison. |
 | **terra-scientific** | Pure Python, NumPy, Pandas, SciPy, Pydantic | Deterministic scientific methods and contracts. No HTTP, database, storage, or UI dependencies. |
 | **terra-worker** | Async queue runner | Claims queued assessments, fetches prepared GHS datasets, runs Scientific Core, persists results and artifacts. |
 | **GHS** | FastAPI, Granian, rasterio/xarray/h5py/netCDF4/Zarr/Shapely | Multi-provider discovery, bounded ingestion, QA, temporal harmonization, COG publishing, tile and zonal-statistics services. |
-| **PostgreSQL** | Optional production / Docker | Shared Core and GHS database engine with isolated databases and migrations. |
+| **PostgreSQL** | Production / Docker | Shared Core and GHS database engine with isolated databases and migrations. |
 | **Object storage** | Local filesystem or S3-compatible | Assessment artifacts and GHS raster/object lifecycle. |
 
 ### Repository layout
 
 ```text
 project-terra/
-├── frontend/                       # React 19 SPA (FSD-lite: app → pages → widgets → features → entities → shared)
-│   ├── src/entities/map/            # MapLibre/deck.gl renderers and projections
-│   ├── src/features/map-explorer/   # AOI workspace, drawing, scientific assessment launcher
-│   ├── src/pages/assessments/       # Readiness, execution, results, diagnostics
-│   └── src/shared/api/              # OpenAPI-generated typed client and adapters
+├── frontend/                         # React 19 SPA (FSD-lite)
+│   ├── src/features/live-environment/ # GIBS catalog, POWER/MODIS COG adapters, Web Worker
+│   ├── src/features/map-explorer/     # AOI workspace, drawing, scientific assessment launcher
+│   ├── src/pages/assessments/         # Readiness, execution, results, diagnostics
+│   └── src/shared/api/                # OpenAPI-generated typed client and adapters
 ├── backend/
-│   ├── core/                        # terra-core FastAPI application
-│   ├── scientific/                  # terra-scientific pure Scientific Core
-│   ├── worker/                      # terra-worker assessment queue runner
+│   ├── core/                          # terra-core FastAPI application
+│   ├── scientific/                    # terra-scientific pure Scientific Core
+│   ├── worker/                        # terra-worker assessment queue runner
 │   └── services/
-│       └── geospatial_harmonization/ # GHS service, readers, handlers, workers, migrations
-├── deploy/containerization/         # Docker Compose development and production profiles
-├── docs/                            # Architecture, ADRs, scientific specification, screenshots
-├── scripts/                         # Orchestrator, doctor, contract generation
-└── Makefile                         # Unified install/test/lint/dev commands
+│       └── geospatial_harmonization/  # GHS service, readers, handlers, workers, migrations
+├── deploy/containerization/           # Docker Compose, production Dockerfiles, deploy scripts
+├── docs/                              # Architecture, ADRs, scientific specification, screenshots
+├── scripts/                           # Orchestrator, doctor, contract generation
+└── Makefile                           # Unified install/test/lint/dev commands
 ```
 
 ---
@@ -263,10 +316,11 @@ The method registry exposes **18 catalogued methods**: **15 implemented P0/P1 me
 | **NASA LP DAAC** | `MOD13Q1.061` (NDVI/EVI), `MOD11A2.061` (LST) | Vegetation indices and land surface temperature. |
 | **NASA GES DISC** | `GPM_3IMERGHH.07`, `GPM_3IMERGHHL.07` | Half-hourly precipitation. |
 | **NASA NSIDC** | `SPL3SMP_E.006` | Soil moisture (AM/PM overpass split). |
-| **NASA LaRC POWER** | `power_daily`, `power_hourly` (MERRA-2, CERES SYN1deg) | Meteorology, precipitation, humidity, radiation. |
-| **NASA GIBS** | XYZ browse tiles | Contextual basemap/imagery only — **never quantitative**. |
+| **NASA LaRC POWER** | `power_daily`, `power_hourly` (MERRA-2, CERES SYN1deg) | Meteorology, precipitation, humidity, radiation; also the direct browser point-series endpoint. |
+| **NASA GIBS** | XYZ/WMTS browse tiles | Global visualization only — **never quantitative**. |
+| **Microsoft Planetary Computer** | MODIS STAC + Cloud Optimized GeoTIFFs | Browser-side NDVI AOI window reads (no Earthdata token in the browser). |
 
-Earthdata credentials are supplied via `EARTHDATA_TOKEN` for providers that require them. Provider readiness is visible in **Data Sources** and through `GET /api/v1/data-sources/providers`.
+Earthdata credentials are supplied via `EARTHDATA_TOKEN` for backend providers that require them. Provider readiness is visible in **Data Sources** and through `GET /api/v1/data-sources/providers`.
 
 ---
 
@@ -308,17 +362,17 @@ make dev-full
 1. Open **Explore** and sign in with the dev session or GitHub.
 2. Select an AOI or create a point AOI, choose an analysis period, and select **Provision Data & Run Assessment**.
 3. Open **Assessments** to follow readiness, job status, and the returned scientific results.
-4. Use **Data Sources** to inspect provider readiness, ingestion operations, prepared datasets, and provenance.
+4. Use **Data Sources** to inspect provider readiness, ingestion, prepared datasets, and QA metadata.
+
+For the backend-independent demo, skip sign-in: open **Live NASA Layers**, pick a layer or date, and use the **Live** inspector tab.
 
 ---
 
 ## Docker Compose
 
-Two self-contained profiles are provided under `deploy/containerization/`:
-
 | Profile | File | Services |
 | :--- | :--- | :--- |
-| Development | `compose.dev.yaml` | postgres, ghs-migration, ghs-api, ghs-worker, core, core-worker, frontend |
+| Development | `compose.dev.yaml` | postgres, ghs-api, ghs-worker, core, core-worker |
 | Production | `compose.prod.yaml` | postgres, ghs-migration, ghs-api, ghs-worker, core, core-worker |
 
 ```bash
@@ -326,15 +380,27 @@ Two self-contained profiles are provided under `deploy/containerization/`:
 cp deploy/containerization/.env.compose.example .env
 docker compose --env-file .env -f deploy/containerization/compose.dev.yaml up --build
 
-# Production backend stack
+# Production stack
 cp deploy/containerization/.env.compose.example .env.production
 docker compose --env-file .env.production -f deploy/containerization/compose.prod.yaml up -d --build
 docker compose --env-file .env.production -f deploy/containerization/compose.prod.yaml ps
 ```
 
-The production profile keeps PostgreSQL, GHS, and the workers on the internal network while exposing Core for an external tunnel/reverse proxy. The frontend is deployed independently.
+The production profile keeps PostgreSQL, GHS, and the workers on the internal network while exposing Core through a reverse proxy. The production Core image also builds the Vite SPA and serves it from the same origin at `/`; API routes remain under `/api/v1`.
 
 > A running Docker daemon is required. Compose configuration can be validated without one via `docker compose ... config --quiet`.
+
+---
+
+## Production deployment
+
+The current production instance is available at **[api-terra.yappin.studio](https://api-terra.yappin.studio)**.
+
+- The **Core image** builds `frontend/dist` in a Node stage, copies it to `/app/web`, and sets `FRONTEND_DIST_DIR=/app/web`.
+- `terra-core` serves the SPA at `/` and SPA routes such as `/explore`, while `/api/v1/*`, `/health*`, `/docs`, and `/openapi.json` keep their API behavior.
+- This removes the separate frontend host and CORS requirement for the production UI.
+- `.github/workflows/deploy.yml` syncs `deploy` to the VPS, rebuilds the Core/GHS images, runs migrations, and restarts the stack.
+- The optional Cloudflare Pages target remains available in the workflow, but its publish step requires the `CLOUDFLARE_API_TOKEN` repository secret.
 
 ---
 
@@ -369,15 +435,18 @@ make ghs-lint             # GHS Ruff + strict mypy
 make contracts            # Regenerate OpenAPI + TypeScript contracts
 ```
 
-Live NASA and PostgreSQL locking checks are available through the manual GitHub Actions workflow and the documented environment setup. A green frontend build is not evidence of a working scientific workflow; the authoritative check is a real AOI-driven assessment with traceable outputs.
+The browser-native path is additionally covered by Vitest tests for descriptive statistics, anomalies, Mann–Kendall, Theil–Sen, MODIS sinusoidal projection/AOI masking, NASA POWER parsing, and NASA GIBS registry URLs.
+
+Live NASA and PostgreSQL locking checks are available through the manual GitHub Actions workflow. A green frontend build is not evidence of a working scientific workflow; the authoritative check is a real AOI-driven assessment with traceable outputs.
 
 ---
 
 ## Scientific integrity & current limitations
 
 - **P2 methods are deferred.** TRI and causal attribution are not authoritative and are withheld from rankings.
-- **Map preview requires prepared raster data.** If no tile-capable GeoTIFF/COG exists for a metric, the UI shows an explicit unavailable reason instead of a synthetic layer.
-- **GIBS is not a measurement source.** Quantitative values come only from decoded products.
+- **Browser MODIS calculations are limited.** Up to 12 Terra composites, no QA layer yet, and partial results when the SAS endpoint rate-limits a request.
+- **Map preview requires prepared raster data** for backend assessments. If no tile-capable GeoTIFF/COG exists for a metric, the UI shows an explicit unavailable reason instead of a synthetic layer.
+- **GIBS is not a measurement source.** Quantitative values come only from decoded products or direct COG/POWER reads.
 - **Coverage matters.** Small AOIs, short periods, or missing granules can produce `completed_partial` or `insufficient_data`. The readiness diagnostics explain why.
 - **Core database.** Core supports PostgreSQL and a SQLite development fallback. Core does not currently use PostGIS spatial queries.
 - **AppEEARS/Harmony** task workflows remain incomplete; GHS discovery/ingestion supports the implemented providers.
@@ -389,13 +458,14 @@ Live NASA and PostgreSQL locking checks are available through the manual GitHub 
 
 | Area | State |
 | :--- | :--- |
+| Live environmental map | Implemented: 7 NASA GIBS layers, date control, legends, direct browser tiles |
+| Browser-side science | Implemented: NASA POWER series/statistics, MODIS NDVI COG AOI series, anomalies, Mann–Kendall, Theil–Sen |
 | Frontend workspaces | Connected to Core for auth, layers, regions, data sources, assessments, comparison, reports |
 | Core API | Implemented: auth, layers, regions, data sources, assessments, artifacts, tiles/analytics |
 | Scientific Core | 15 implemented P0/P1 methods; 3 P2 methods deferred |
 | Shared worker | Implemented: queued assessment execution, artifact persistence |
 | GHS | Implemented: provider handlers, bounded ingestion, temporal harmonization, COG/tile/zonal services |
-| Docker Compose | Development and production profiles provided; runtime requires Docker daemon |
-| Deployment | Container assets and CI workflows provided; external production target not configured |
+| Production deployment | VPS Docker stack with same-origin SPA served by Core |
 
 ---
 
@@ -403,21 +473,18 @@ Live NASA and PostgreSQL locking checks are available through the manual GitHub 
 
 | Document | Contents |
 | :--- | :--- |
-| [`docs/PROJECT_OVERVIEW.md`](docs/PROJECT_OVERVIEW.md) | Living source of truth for current implementation and gaps |
-| [`docs/architecture/SYSTEM_ARCHITECTURE.md`](docs/architecture/SYSTEM_ARCHITECTURE.md) | Target architecture and component boundaries |
-| [`docs/scientific/SCIENTIFIC_CORE.md`](docs/scientific/SCIENTIFIC_CORE.md) | Scientific methods, contracts, QA rules, P0/P1/P2 status |
-| [`docs/ENVIRONMENT_SETUP.md`](docs/ENVIRONMENT_SETUP.md) | Environment, credentials, databases, and process setup |
-| [`docs/adr/`](docs/adr) | Architecture decision records (bootstrap stack, GHS boundary) |
-| [`frontend/DESIGN.md`](frontend/DESIGN.md) | Visual language and interaction specification |
-| [`AGENTS.md`](AGENTS.md) | Engineering contract for AI agents and contributors |
+| [Project Overview](docs/PROJECT_OVERVIEW.md) | Current implementation state, runtime topology, integrations, gaps |
+| [System Architecture](docs/architecture/SYSTEM_ARCHITECTURE.md) | Target architecture and boundaries |
+| [Scientific Core](docs/scientific/SCIENTIFIC_CORE.md) | Method specifications, assumptions, and validation |
+| [GHS README](backend/services/geospatial_harmonization/README.md) | Ingestion, readers, handlers, storage, and worker operations |
+| [ADRs](docs/adr/) | Architecture decisions, including ADR-0002 for GHS isolation |
+| [Deployment Guide](deploy/containerization/README.md) | Docker Compose, environment variables, and production operations |
 
 ---
 
 ## Contributing
 
-Contributions are welcome when they preserve scientific correctness and provenance.
-
-1. Read `AGENTS.md`, `docs/PROJECT_OVERVIEW.md`, and the relevant architecture/ADR documents.
+1. Read `AGENTS.md`, the relevant architecture/ADR documents, and the current-state overview.
 2. Keep changes small and reviewable; do not change formulas, thresholds, or public contracts without an approved decision.
 3. Add deterministic tests for new behavior and run the relevant `make` targets.
 4. Never commit secrets, real user data, or environment files.
@@ -429,7 +496,7 @@ Contributions are welcome when they preserve scientific correctness and provenan
 
 PROJECT TERRA builds on the work of NASA's Earth observation community and the open-source ecosystem:
 
-**NASA MODIS · GPM IMERG · SMAP · POWER · GIBS**, and the teams behind **FastAPI**, **MapLibre**, **deck.gl**, **Apache ECharts**, **OpenFreeMap**, **NumPy**, **SciPy**, **Pandas**, **xarray**, **rasterio**, **GDAL**, and **PostgreSQL**.
+**NASA MODIS · GPM IMERG · SMAP · POWER · GIBS · Microsoft Planetary Computer**, and the teams behind **FastAPI**, **MapLibre**, **deck.gl**, **Apache ECharts**, **OpenFreeMap**, **NumPy**, **SciPy**, **Pandas**, **xarray**, **rasterio**, **GDAL**, and **PostgreSQL**.
 
 ---
 

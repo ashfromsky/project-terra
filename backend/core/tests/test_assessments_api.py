@@ -91,7 +91,14 @@ def test_assessments_require_auth_while_method_catalog_is_readable(client: TestC
 
 def test_assessment_lifecycle_execution_ownership_and_gibs_rejection() -> None:
     stub = _StubGitHub(GitHubProfile(github_id=1, github_login="user1"))
-    app = create_app(Settings(environment="test", database_url="sqlite+aiosqlite:///:memory:"))
+    app = create_app(
+        Settings(
+            _env_file=None,
+            environment="test",
+            database_url="sqlite+aiosqlite:///:memory:",
+            ghs_timeout_seconds=0.01,
+        )
+    )
     app.dependency_overrides[get_github_oauth_client] = lambda: stub
 
     with TestClient(app) as client:

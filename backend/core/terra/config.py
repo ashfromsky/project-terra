@@ -93,6 +93,9 @@ class Settings(BaseSettings):
     github_redirect_uri: str = "http://localhost:8000/api/v1/auth/github/callback"
     github_oauth_scopes: str = "read:user user:email"
     frontend_auth_redirect_url: str = "http://localhost:5173"
+    # Optional directory containing a built SPA (index.html + assets/).
+    # When set, Core serves the frontend from the same origin as the API.
+    frontend_dist_dir: str | None = None
 
     jwt_secret_key: SecretStr = SecretStr(_DEFAULT_DEV_JWT_SECRET)
     jwt_algorithm: str = "HS256"
