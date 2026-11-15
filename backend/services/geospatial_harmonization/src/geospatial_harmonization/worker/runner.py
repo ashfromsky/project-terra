@@ -6,15 +6,19 @@ import os
 import socket
 from collections.abc import Callable
 from contextlib import suppress
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
+from uuid import UUID
 
 from geospatial_harmonization.application.harmonize import HarmonizationService
+from geospatial_harmonization.domain.exceptions import classify_exception
 from geospatial_harmonization.domain.models.harmonization import HarmonizationJob
 from geospatial_harmonization.domain.ports import JobRepository
 from geospatial_harmonization.storage.lifecycle import StorageLifecycleManager
 from geospatial_harmonization.storage.quota import StorageQuotaManager
 
 logger = logging.getLogger(__name__)
+
+_MAX_RETRY_BACKOFF_SECONDS = 3600.0
 
 
 def _default_worker_id() -> str:
@@ -32,6 +36,7 @@ class WorkerRunner:
         worker_id: str | None = None,
         lease_seconds: int = 300,
         poll_interval_seconds: float = 1.0,
+        retry_backoff_seconds: float = 0.0,
         max_concurrency: int = 1,
         maintenance_interval_seconds: float = 60.0,
         quota: StorageQuotaManager | None = None,
@@ -43,6 +48,7 @@ class WorkerRunner:
         self._worker_id = worker_id or _default_worker_id()
         self._lease_seconds = lease_seconds
         self._poll_interval = poll_interval_seconds
+        self._retry_backoff = max(0.0, retry_backoff_seconds)
         self._max_concurrency = max(1, max_concurrency)
         self._maintenance_interval = max(1.0, maintenance_interval_seconds)
         self._quota = quota
@@ -79,19 +85,68 @@ class WorkerRunner:
         except Exception:
             logger.exception("Worker storage maintenance cycle failed")
 
+    def _compute_retry_at(self, attempt: int, now: datetime) -> datetime | None:
+        if self._retry_backoff <= 0.0:
+            return None
+        delay = min(self._retry_backoff * (2 ** max(0, attempt - 1)), _MAX_RETRY_BACKOFF_SECONDS)
+        return now + timedelta(seconds=delay)
+
+    async def _run_failure_cleanup(self, job_id: UUID) -> None:
+        if self._lifecycle is None:
+            return
+        try:
+            await self._lifecycle.on_job_completed(str(job_id), success=False, now=self._clock())
+        except Exception:
+            logger.warning("Cleanup failed after error on job %s", job_id)
+
     async def _execute_claimed_job(self, job: HarmonizationJob) -> None:
         try:
+            await self._jobs.update_progress(job.job_id, 10, self._clock())
             result = await self._service.execute_plan(job.plan, job_id=job.job_id)
+        except asyncio.CancelledError:
+            logger.warning(
+                "Harmonization job %s cancelled during execution",
+                job.job_id,
+                extra={
+                    "job_id": str(job.job_id),
+                    "provider": job.plan.provider,
+                    "product": job.plan.product,
+                },
+            )
+            with suppress(Exception):
+                await self._jobs.cancel(job.job_id, self._clock(), reason="Execution cancelled")
+            await self._run_failure_cleanup(job.job_id)
+            raise
         except Exception as exc:
-            logger.exception("Harmonization job %s failed", job.job_id)
-            await self._jobs.mark_failed(job.job_id, f"{type(exc).__name__}: {exc}", self._clock())
-            if self._lifecycle is not None:
-                try:
-                    await self._lifecycle.on_job_completed(
-                        str(job.job_id), success=False, now=self._clock()
-                    )
-                except Exception:
-                    logger.warning("Cleanup failed after error on job %s", job.job_id)
+            error_category, retryable = classify_exception(exc)
+            now = self._clock()
+            will_retry = retryable and job.attempt < job.max_attempts
+            next_retry_at = self._compute_retry_at(job.attempt, now) if will_retry else None
+            logger.warning(
+                "Harmonization job %s failed (%s, retryable=%s): %s",
+                job.job_id,
+                error_category,
+                will_retry,
+                type(exc).__name__,
+                extra={
+                    "job_id": str(job.job_id),
+                    "provider": job.plan.provider,
+                    "product": job.plan.product,
+                    "attempt": job.attempt,
+                    "max_attempts": job.max_attempts,
+                    "error_category": error_category,
+                    "retryable": retryable,
+                },
+            )
+            await self._jobs.mark_failed(
+                job.job_id,
+                f"{type(exc).__name__}: {exc}",
+                now,
+                retryable=retryable,
+                error_category=error_category,
+                next_retry_at=next_retry_at,
+            )
+            await self._run_failure_cleanup(job.job_id)
             return
         await self._jobs.mark_succeeded(job.job_id, result.dataset.dataset_id, self._clock())
 

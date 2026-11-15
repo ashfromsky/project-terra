@@ -14,7 +14,11 @@ import httpx
 from pydantic import BaseModel, ConfigDict, model_validator
 
 from geospatial_harmonization.config.settings import Settings, get_settings
-from geospatial_harmonization.domain.exceptions import IncompatibleDatasetError
+from geospatial_harmonization.domain.exceptions import (
+    ProviderDisabledError,
+    ProviderResponseError,
+    ProviderValidationError,
+)
 from geospatial_harmonization.domain.models.dataset import (
     QualityMetadata,
     SpatialDataset,
@@ -28,23 +32,50 @@ from geospatial_harmonization.handlers.base import (
     build_provenance,
     parse_handler_payload,
     safe_fetch_bytes,
+    validate_wgs84_bbox,
     write_raw_asset,
 )
+from geospatial_harmonization.handlers.catalog import DiscoveryResult
 
-_POWER_META: dict[str, tuple[str, str, str, VariableSemantics]] = {
-    "T2M": ("degC", "0.5x0.625", "MERRA-2", "continuous_intensive"),
-    "T2M_MAX": ("degC", "0.5x0.625", "MERRA-2", "continuous_intensive"),
-    "T2M_MIN": ("degC", "0.5x0.625", "MERRA-2", "continuous_intensive"),
-    "RH2M": ("%", "0.5x0.625", "MERRA-2", "continuous_intensive"),
-    "WS10M": ("m/s", "0.5x0.625", "MERRA-2", "continuous_intensive"),
-    "PRECTOTCORR": ("mm/day", "0.5x0.625", "MERRA-2", "continuous_extensive"),
-    "ALLSKY_SFC_SW_DWN": ("MJ/m^2/day", "1.0x1.0", "CERES SYN1deg", "continuous_intensive"),
-    "CLRSKY_SFC_SW_DWN": ("MJ/m^2/day", "1.0x1.0", "CERES SYN1deg", "continuous_intensive"),
+# tuple: (daily_unit, hourly_unit, native_res_deg, source_product, semantics)
+_POWER_META: dict[str, tuple[str, str, str, str, VariableSemantics]] = {
+    "T2M": ("degC", "degC", "0.5x0.625", "MERRA-2", "continuous_intensive"),
+    "T2M_MAX": ("degC", "degC", "0.5x0.625", "MERRA-2", "continuous_intensive"),
+    "T2M_MIN": ("degC", "degC", "0.5x0.625", "MERRA-2", "continuous_intensive"),
+    "RH2M": ("%", "%", "0.5x0.625", "MERRA-2", "continuous_intensive"),
+    "WS10M": ("m/s", "m/s", "0.5x0.625", "MERRA-2", "continuous_intensive"),
+    "PRECTOTCORR": ("mm/day", "mm/hour", "0.5x0.625", "MERRA-2", "continuous_extensive"),
+    "ALLSKY_SFC_SW_DWN": (
+        "MJ/m^2/day",
+        "MJ/hr",
+        "1.0x1.0",
+        "CERES SYN1deg",
+        "continuous_intensive",
+    ),
+    "CLRSKY_SFC_SW_DWN": (
+        "MJ/m^2/day",
+        "MJ/hr",
+        "1.0x1.0",
+        "CERES SYN1deg",
+        "continuous_intensive",
+    ),
 }
+_MIN_REGIONAL_SPAN_DEG = 2.0
 
 
 def _as_map(value: object) -> Mapping[str, object]:
     return value if isinstance(value, Mapping) else {}
+
+
+def _is_valid_power_timestamp(key: str, temporal: Literal["daily", "hourly"]) -> bool:
+    fmt = "%Y%m%d%H" if temporal == "hourly" else "%Y%m%d"
+    if len(key) != (10 if temporal == "hourly" else 8):
+        return False
+    try:
+        datetime.strptime(key, fmt)
+    except ValueError:
+        return False
+    return True
 
 
 class NASAPowerPayload(BaseModel):
@@ -75,8 +106,24 @@ class NASAPowerPayload(BaseModel):
         if self.mode == "point":
             if self.latitude is None or self.longitude is None:
                 raise ValueError("point mode requires latitude and longitude")
-        elif any(v is None for v in (self.min_lat, self.max_lat, self.min_lon, self.max_lon)):
-            raise ValueError("regional mode requires min_lat, max_lat, min_lon, and max_lon")
+            if not (-90.0 <= self.latitude <= 90.0) or not (-180.0 <= self.longitude <= 180.0):
+                raise ValueError("point latitude/longitude out of bounds")
+        else:
+            if any(v is None for v in (self.min_lat, self.max_lat, self.min_lon, self.max_lon)):
+                raise ValueError("regional mode requires min_lat, max_lat, min_lon, and max_lon")
+            min_lat = float(self.min_lat)  # type: ignore[arg-type]
+            max_lat = float(self.max_lat)  # type: ignore[arg-type]
+            min_lon = float(self.min_lon)  # type: ignore[arg-type]
+            max_lon = float(self.max_lon)  # type: ignore[arg-type]
+            if max_lat <= min_lat or max_lon <= min_lon:
+                raise ValueError("regional bbox max coordinates must exceed min coordinates")
+            if (max_lat - min_lat) < _MIN_REGIONAL_SPAN_DEG or (
+                max_lon - min_lon
+            ) < _MIN_REGIONAL_SPAN_DEG:
+                raise ValueError(
+                    "NASA POWER regional mode requires at least a 2.0 degree lat/lon span; "
+                    "use mode='point' for smaller areas"
+                )
         return self
 
 
@@ -91,9 +138,11 @@ class NASAPowerHandler:
         transport: httpx.AsyncBaseTransport | None = None,
     ) -> None:
         cfg = settings or get_settings()
+        self._settings = cfg
         self._base_url = cfg.nasa_power_base_url.rstrip("/")
         self._timeout = cfg.http_timeout_seconds
         self._max_retries = cfg.http_max_retries
+        self._backoff_seconds = cfg.http_retry_backoff_seconds
         self._raw_dir = raw_dir
         self._transport = transport
 
@@ -105,10 +154,68 @@ class NASAPowerHandler:
     def supported_products(self) -> tuple[str, ...]:
         return ("nasa_power", "power_daily", "power_hourly")
 
-    def _build_query(self, req: NASAPowerPayload) -> tuple[str, dict[str, str]]:
+    async def discover(
+        self,
+        *,
+        product: str,
+        bbox: tuple[float, float, float, float],
+        start_time: datetime,
+        end_time: datetime,
+        limit: int = 10,
+    ) -> tuple[DiscoveryResult, ...]:
+        """Validate AOI and temporal bounds against documented NASA POWER availability."""
+        del limit
+        if not self._settings.is_provider_enabled(self.provider):
+            raise ProviderDisabledError(
+                "NASA POWER provider is disabled by configuration (NASA_POWER_ENABLED=false)",
+                provider=self.provider,
+            )
+        if end_time < start_time:
+            raise ProviderValidationError(
+                "end_time cannot precede start_time", provider=self.provider
+            )
+        validate_wgs84_bbox(bbox)
+        temporal = "hourly" if product == "power_hourly" else "daily"
+        earliest_year = 2001 if temporal == "hourly" else 1981
+        if end_time.year < earliest_year:
+            raise ProviderValidationError(
+                f"NASA POWER {temporal} archive begins in {earliest_year}",
+                provider=self.provider,
+            )
+        lon_span = bbox[2] - bbox[0]
+        lat_span = bbox[3] - bbox[1]
+        query_mode = (
+            "regional"
+            if (lon_span >= _MIN_REGIONAL_SPAN_DEG and lat_span >= _MIN_REGIONAL_SPAN_DEG)
+            else "point"
+        )
+        return (
+            DiscoveryResult(
+                observation_id=f"nasa_power_{temporal}_{start_time:%Y%m%d}_{end_time:%Y%m%d}",
+                provider=self.provider,
+                product=product,
+                product_version="v2",
+                title=f"NASA POWER {temporal} continuous archive ({query_mode} query eligible)",
+                time_start=start_time,
+                time_end=end_time,
+                bbox=bbox,
+                query_mode=query_mode,
+                access_hint=f"{self._base_url}/api/temporal/{temporal}/{query_mode}",
+                metadata={
+                    "auth_required": False,
+                    "temporal": temporal,
+                    "regional_min_span_deg": _MIN_REGIONAL_SPAN_DEG,
+                },
+            ),
+        )
+
+    def _build_query(
+        self, req: NASAPowerPayload, params_override: tuple[str, ...] | None = None
+    ) -> tuple[str, dict[str, str]]:
+        chosen_params = params_override or req.parameters
         url = f"{self._base_url}/temporal/{req.temporal}/{req.mode}"
         params = {
-            "parameters": ",".join(req.parameters),
+            "parameters": ",".join(chosen_params),
             "community": req.community,
             "start": req.start_date.strftime("%Y%m%d"),
             "end": req.end_date.strftime("%Y%m%d"),
@@ -125,10 +232,9 @@ class NASAPowerHandler:
             params["longitude-max"] = str(req.max_lon)
         return url, params
 
-    async def handle_payload(self, payload: Mapping[str, object]) -> SpatialDataset:
-        """Fetch NASA POWER JSON and map MERRA-2/CERES variable specs cleanly."""
-        req = parse_handler_payload(NASAPowerPayload, payload)
-        url, params = self._build_query(req)
+    async def _fetch_power_doc(
+        self, url: str, params: dict[str, str]
+    ) -> tuple[bytes, dict[str, object], str, str]:
         host = (urlparse(self._base_url).hostname or "").lower()
         raw, final_url, media = await safe_fetch_bytes(
             url,
@@ -136,46 +242,135 @@ class NASAPowerHandler:
             params=params,
             timeout=self._timeout,
             max_retries=self._max_retries,
+            backoff_seconds=self._backoff_seconds,
             transport=self._transport,
+            require_https=True,
+            earthdata_auth=False,
         )
         try:
             doc = json.loads(raw.decode("utf-8"))
         except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-            raise IncompatibleDatasetError(f"Invalid NASA POWER JSON response: {exc}") from exc
+            raise ProviderResponseError(f"Invalid NASA POWER JSON response: {exc}") from exc
         if not isinstance(doc, Mapping):
-            raise IncompatibleDatasetError("NASA POWER response root must be a JSON object")
+            raise ProviderResponseError("NASA POWER response root must be a JSON object")
+        return raw, dict(doc), final_url, media
+
+    async def handle_payload(self, payload: Mapping[str, object]) -> SpatialDataset:
+        """Fetch NASA POWER JSON publicly (no Earthdata auth), validate values, and harmonize."""
+        if not self._settings.is_provider_enabled(self.provider):
+            raise ProviderDisabledError(
+                "NASA POWER provider is disabled by configuration (NASA_POWER_ENABLED=false)",
+                provider=self.provider,
+            )
+        req = parse_handler_payload(NASAPowerPayload, payload)
+
+        param_batches = (
+            tuple((p,) for p in req.parameters)
+            if req.mode == "regional" and len(req.parameters) > 1
+            else (req.parameters,)
+        )
+
+        docs: list[dict[str, object]] = []
+        raw_blobs: list[bytes] = []
+        source_urls: list[str] = []
+        last_media = "application/json"
+        for batch in param_batches:
+            url, params = self._build_query(req, params_override=batch)
+            raw_part, doc_part, final_url, media = await self._fetch_power_doc(url, params)
+            raw_blobs.append(raw_part)
+            docs.append(doc_part)
+            source_urls.append(final_url)
+            if media:
+                last_media = media
+
+        merged_doc = _merge_power_docs(docs) if len(docs) > 1 else docs[0]
+        raw_payload = (
+            raw_blobs[0]
+            if len(raw_blobs) == 1
+            else json.dumps(merged_doc, separators=(",", ":")).encode("utf-8")
+        )
 
         base_dir = self._raw_dir or Path(tempfile.mkdtemp(prefix="ghs_power_"))
-        fname = f"power_{req.mode}_{req.start_date:%Y%m%d}_{req.end_date:%Y%m%d}.json"
-        _, asset = write_raw_asset(base_dir, fname, raw, "json", media or "application/json")
+        fname = (
+            f"power_{req.mode}_{req.temporal}_{req.start_date:%Y%m%d}_{req.end_date:%Y%m%d}.json"
+        )
+        _, asset = write_raw_asset(base_dir, fname, raw_payload, "json", last_media)
 
-        header = _as_map(doc.get("header"))
+        header = _as_map(merged_doc.get("header"))
         raw_fill = header.get("fill_value")
         fill_val = float(raw_fill) if isinstance(raw_fill, (int, float)) else -999.0
-        param_meta = _as_map(doc.get("parameters"))
-        raw_feats = doc.get("features")
-        features_raw: list[object] = raw_feats if isinstance(raw_feats, list) else [doc]
+        param_meta = _as_map(merged_doc.get("parameters"))
+        raw_feats = merged_doc.get("features")
+        features_raw: list[object] = raw_feats if isinstance(raw_feats, list) else [merged_doc]
+        if req.mode == "regional" and isinstance(raw_feats, list) and not raw_feats:
+            raise ProviderResponseError("NASA POWER regional response contained zero features")
 
-        total_obs, excluded = 0, 0
+        total_obs = 0
+        fill_count = 0
+        null_count = 0
+        invalid_ts_count = 0
+        sample_coords: list[list[float]] = []
+
         for feat in features_raw:
-            props = _as_map(_as_map(feat).get("properties"))
+            fmap = _as_map(feat)
+            geom = _as_map(fmap.get("geometry"))
+            coords = geom.get("coordinates")
+            if (
+                isinstance(coords, list)
+                and len(coords) >= 2
+                and all(isinstance(c, (int, float)) for c in coords[:2])
+            ):
+                sample_coords.append([float(c) for c in coords])
+            props = _as_map(fmap.get("properties"))
             param_map = _as_map(props.get("parameter"))
             for series in param_map.values():
-                if isinstance(series, Mapping):
-                    for val in series.values():
-                        total_obs += 1
-                        if isinstance(val, (int, float)) and math.isclose(float(val), fill_val):
-                            excluded += 1
+                if not isinstance(series, Mapping):
+                    continue
+                for ts_key, val in series.items():
+                    total_obs += 1
+                    if not _is_valid_power_timestamp(str(ts_key), req.temporal):
+                        invalid_ts_count += 1
+                    elif val is None:
+                        null_count += 1
+                    elif isinstance(val, (int, float)):
+                        fval = float(val)
+                        if not math.isfinite(fval) or math.isclose(fval, fill_val):
+                            fill_count += 1
+                    else:
+                        null_count += 1
+
+        excluded = fill_count + null_count + invalid_ts_count
+        exclusion_breakdown = {
+            name: count
+            for name, count in (
+                ("fill_nodata", fill_count),
+                ("missing_null", null_count),
+                ("invalid_timestamp", invalid_ts_count),
+            )
+            if count > 0
+        }
 
         variables: dict[str, VariableSpec] = {}
         dims = ("time",) if req.mode == "point" else ("point", "time")
+        resolutions_seen: set[str] = set()
         for p_name in req.parameters:
-            default_unit, native_res, src_prod, semantics = _POWER_META.get(
-                p_name, ("1", "unknown", "NASA POWER", "continuous_intensive")
+            daily_unit, hourly_unit, native_res, src_prod, semantics = _POWER_META.get(
+                p_name, ("1", "1", "unknown", "NASA POWER", "continuous_intensive")
             )
+            if native_res != "unknown":
+                resolutions_seen.add(f"{native_res} deg {src_prod}")
+            default_unit = hourly_unit if req.temporal == "hourly" else daily_unit
             api_info = _as_map(param_meta.get(p_name))
             raw_unit = api_info.get("units")
-            unit = raw_unit if isinstance(raw_unit, str) else default_unit
+            unit = raw_unit if isinstance(raw_unit, str) and raw_unit.strip() else default_unit
+            attrs: dict[str, object] = {
+                "native_resolution_deg": native_res,
+                "source_product": src_prod,
+                "temporal_resolution": req.temporal,
+            }
+            if p_name == "PRECTOTCORR" and req.temporal == "hourly":
+                attrs["supports_rate_to_depth"] = True
+                attrs["interval_duration_hours"] = 1.0
             variables[p_name] = VariableSpec(
                 name=p_name,
                 units=unit,
@@ -183,7 +378,7 @@ class NASAPowerHandler:
                 dimensions=dims,
                 semantics=semantics,
                 nodata=fill_val,
-                attributes={"native_resolution_deg": native_res, "source_product": src_prod},
+                attributes=attrs,
             )
 
         t_start = datetime(
@@ -193,6 +388,7 @@ class NASAPowerHandler:
             req.end_date.year, req.end_date.month, req.end_date.day, tzinfo=UTC
         ) + timedelta(days=1)
         valid_frac = (total_obs - excluded) / total_obs if total_obs > 0 else None
+        missing_frac = excluded / total_obs if total_obs > 0 else None
         bounds = (
             None
             if req.mode == "point"
@@ -208,24 +404,103 @@ class NASAPowerHandler:
             crs="EPSG:4326",
             bounds=bounds,
             point_count=1 if req.mode == "point" else len(features_raw),
+            spatial_resolution="; ".join(sorted(resolutions_seen)) or "0.5x0.625 deg MERRA-2",
         )
         api_ver = str(_as_map(header.get("api")).get("version", "v2"))
+        source_id = (
+            f"nasa_power_{req.mode}_{req.temporal}_{req.start_date:%Y%m%d}_{req.end_date:%Y%m%d}"
+        )
+        cadence = "1h" if req.temporal == "hourly" else "daily"
+        prov = build_provenance(
+            self.provider,
+            req.product,
+            api_ver,
+            source_urls[0],
+            granule_id=source_id,
+            source_metadata={
+                "community": req.community,
+                "temporal": req.temporal,
+                "header": dict(header),
+                "sources": header.get("sources"),
+                "batched_requests": len(source_urls),
+            },
+        )
+        if len(source_urls) > 1:
+            prov = build_provenance(
+                self.provider,
+                req.product,
+                api_ver,
+                source_urls[0],
+                granule_id=source_id,
+                source_metadata={**prov.source_metadata, "all_source_urls": source_urls},
+            )
+
         return SpatialDataset(
             dataset_id=uuid4(),
-            source_id=f"nasa_power_{req.mode}_{req.start_date:%Y%m%d}_{req.end_date:%Y%m%d}",
+            source_id=source_id,
             provider=self.provider,
             product=req.product,
+            product_version=api_ver,
+            granule_id=source_id,
             variables=variables,
             units={k: v.units for k, v in variables.items()},
             spatial_metadata=spatial,
-            temporal_metadata=TemporalSpec(t_start, t_end, req.temporal, "interval"),
+            temporal_metadata=TemporalSpec(t_start, t_end, cadence, "interval"),
             quality_metadata=QualityMetadata(
-                qa_policy="nasa_power_fill_exclusion",
+                qa_policy="nasa_power_fill_and_null_exclusion",
                 valid_observation_fraction=valid_frac,
+                missing_data_fraction=missing_frac,
                 excluded_count=excluded,
-                exclusion_reasons=(f"fill_value == {fill_val}",) if excluded else (),
+                exclusion_reasons=tuple(sorted(exclusion_breakdown)),
+                exclusion_breakdown=exclusion_breakdown,
             ),
             assets=(asset,),
-            provenance=build_provenance(self.provider, req.product, api_ver, final_url),
-            extensions={"point_count": spatial.point_count, "mode": req.mode},
+            provenance=prov,
+            extensions={
+                "point_count": spatial.point_count,
+                "mode": req.mode,
+                "temporal": req.temporal,
+                "coordinates_preview": sample_coords[:5],
+            },
         )
+
+
+def _merge_power_docs(docs: list[dict[str, object]]) -> dict[str, object]:
+    """Merge single-parameter NASA POWER regional GeoJSON responses by point coordinate."""
+    base = dict(docs[0])
+    merged_params: dict[str, object] = dict(_as_map(base.get("parameters")))
+    feat_by_coord: dict[tuple[float, ...], dict[str, object]] = {}
+
+    for doc in docs:
+        merged_params.update(_as_map(doc.get("parameters")))
+        raw_feats = doc.get("features")
+        if not isinstance(raw_feats, list):
+            continue
+        for idx, raw_feat in enumerate(raw_feats):
+            fmap = dict(_as_map(raw_feat))
+            geom = _as_map(fmap.get("geometry"))
+            coords = geom.get("coordinates")
+            coord_key = (
+                tuple(round(float(c), 6) for c in coords[:2])
+                if isinstance(coords, list) and len(coords) >= 2
+                else (float(idx),)
+            )
+            props = dict(_as_map(fmap.get("properties")))
+            param_series = dict(_as_map(props.get("parameter")))
+            existing = feat_by_coord.get(coord_key)
+            if existing is None:
+                feat_by_coord[coord_key] = {
+                    "type": fmap.get("type", "Feature"),
+                    "geometry": dict(geom),
+                    "properties": {**props, "parameter": param_series},
+                }
+            else:
+                ex_props = existing["properties"]
+                assert isinstance(ex_props, dict)
+                ex_param = ex_props["parameter"]
+                assert isinstance(ex_param, dict)
+                ex_param.update(param_series)
+
+    base["parameters"] = merged_params
+    base["features"] = list(feat_by_coord.values())
+    return base

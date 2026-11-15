@@ -82,6 +82,7 @@ async def build_worker_runtime(
         jobs=SqlAlchemyJobRepository(sessions),
         lease_seconds=cfg.worker_lease_seconds,
         poll_interval_seconds=cfg.worker_poll_interval_seconds,
+        retry_backoff_seconds=cfg.http_retry_backoff_seconds,
         max_concurrency=cfg.ghs_storage_max_worker_concurrency,
         maintenance_interval_seconds=maint_interval,
         quota=quota,

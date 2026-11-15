@@ -71,6 +71,8 @@ class GhsHarmonizationJobModel(GhsBase):
     __table_args__ = (
         Index("ix_ghs_jobs_status_created_at", "status", "created_at"),
         Index("ix_ghs_jobs_status_lease_expires_at", "status", "lease_expires_at"),
+        Index("ix_ghs_jobs_status_next_retry_at", "status", "next_retry_at"),
+        Index("ix_ghs_jobs_idempotency_key", "idempotency_key"),
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
@@ -86,6 +88,10 @@ class GhsHarmonizationJobModel(GhsBase):
     )
     dataset_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    error_category: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    next_retry_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    progress_pct: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    idempotency_key: Mapped[str | None] = mapped_column(String(64), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 

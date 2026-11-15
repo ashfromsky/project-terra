@@ -16,8 +16,14 @@ from geospatial_harmonization.config.settings import Settings, get_settings
 from geospatial_harmonization.domain.exceptions import (
     DomainError,
     ObjectTooLargeError,
+    ProviderAuthenticationError,
+    ProviderAuthorizationError,
+    ProviderDisabledError,
+    ProviderIngestionError,
+    ProviderResponseError,
     StorageBudgetExceededError,
     StorageImmutabilityError,
+    TransientTransferError,
 )
 from geospatial_harmonization.handlers import build_default_handler_registry
 from geospatial_harmonization.infrastructure.database import (
@@ -80,6 +86,28 @@ async def _handle_storage_immutability(_request: Request, exc: Exception) -> JSO
     return JSONResponse(
         status_code=status.HTTP_409_CONFLICT,
         content={"detail": str(exc), "error_type": type(exc).__name__},
+    )
+
+
+async def _handle_provider_ingestion_error(_request: Request, exc: Exception) -> JSONResponse:
+    assert isinstance(exc, ProviderIngestionError)
+    if isinstance(exc, (ProviderDisabledError, TransientTransferError)):
+        http_status = status.HTTP_503_SERVICE_UNAVAILABLE
+    elif isinstance(
+        exc,
+        (ProviderAuthenticationError, ProviderAuthorizationError, ProviderResponseError),
+    ):
+        http_status = status.HTTP_502_BAD_GATEWAY
+    else:
+        http_status = status.HTTP_422_UNPROCESSABLE_CONTENT
+    return JSONResponse(
+        status_code=http_status,
+        content={
+            "detail": str(exc),
+            "error_type": type(exc).__name__,
+            "error_category": exc.error_category,
+            "retryable": exc.retryable,
+        },
     )
 
 
@@ -168,6 +196,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.add_exception_handler(StorageBudgetExceededError, _handle_budget_exceeded)
     app.add_exception_handler(ObjectTooLargeError, _handle_object_too_large)
     app.add_exception_handler(StorageImmutabilityError, _handle_storage_immutability)
+    app.add_exception_handler(ProviderIngestionError, _handle_provider_ingestion_error)
     app.add_exception_handler(DomainError, _handle_domain_error)
     app.include_router(health_router)
     app.include_router(health_router, prefix=cfg.api_v1_prefix)
