@@ -150,9 +150,10 @@ class HttpxGhsDatasetClient:
     async def publish_derived_dataset(self, payload: dict[str, object]) -> dict[str, object]:
         """Persist a derived or AOI-scoped spatial artifact in GHS."""
         try:
+            timeout_cfg = httpx.Timeout(self._timeout, connect=min(self._timeout, 2.0))
             async with httpx.AsyncClient(
                 base_url=self._base_url,
-                timeout=self._timeout,
+                timeout=timeout_cfg,
                 transport=self._transport,
             ) as client:
                 response = await client.post("/api/v1/datasets/derived", json=payload)
