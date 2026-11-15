@@ -51,6 +51,9 @@ def build_async_engine(database_url: str, *, echo: bool = False) -> AsyncEngine:
         kwargs["connect_args"] = {"timeout": 30.0}
     else:
         kwargs["pool_pre_ping"] = True
+        kwargs["pool_size"] = 2
+        kwargs["max_overflow"] = 1
+        kwargs["pool_recycle"] = 300
     engine = create_async_engine(database_url, **kwargs)
     if is_sqlite:
 
