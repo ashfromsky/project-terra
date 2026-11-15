@@ -1,11 +1,14 @@
 """Harmonization plan, resampling policy, transformation, and job domain models."""
 
-from dataclasses import dataclass, field
+import hashlib
+import json
+from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from typing import Literal
 from uuid import UUID
 
 from geospatial_harmonization.domain.exceptions import (
+    ErrorCategory,
     IncompatibleDatasetError,
     InvalidGridSpecError,
     InvalidTemporalSpecError,
@@ -140,6 +143,22 @@ class HarmonizationPlan:
         if self.target_grid is not None:
             self.target_grid.resolved()
 
+    def compute_idempotency_key(self) -> str:
+        """Compute deterministic SHA-256 key over plan inputs (excluding random plan_id)."""
+        payload = {
+            "provider": self.provider.strip().lower(),
+            "product": self.product.strip().lower(),
+            "request_payload": dict(self.request_payload),
+            "target_grid": asdict(self.target_grid) if self.target_grid is not None else None,
+            "target_temporal": (
+                asdict(self.target_temporal) if self.target_temporal is not None else None
+            ),
+            "variables": list(self.variables),
+            "output_format": self.output_format,
+        }
+        canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str)
+        return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
 
 @dataclass(frozen=True, slots=True)
 class HarmonizationJob:
@@ -156,6 +175,10 @@ class HarmonizationJob:
     lease_expires_at: datetime | None = None
     dataset_id: UUID | None = None
     error_message: str | None = None
+    error_category: ErrorCategory | None = None
+    next_retry_at: datetime | None = None
+    progress_pct: int = 0
+    idempotency_key: str | None = None
 
     def __post_init__(self) -> None:
         require_tz_aware(self.created_at, "created_at")
@@ -164,8 +187,12 @@ class HarmonizationJob:
             raise InvalidTemporalSpecError("updated_at cannot precede created_at")
         if self.lease_expires_at is not None:
             require_tz_aware(self.lease_expires_at, "lease_expires_at")
+        if self.next_retry_at is not None:
+            require_tz_aware(self.next_retry_at, "next_retry_at")
         if self.attempt < 0 or self.max_attempts < 1:
             raise IncompatibleDatasetError("attempt must be >= 0 and max_attempts >= 1")
+        if not 0 <= self.progress_pct <= 100:
+            raise IncompatibleDatasetError("progress_pct must lie within [0, 100]")
 
 
 @dataclass(frozen=True, slots=True)

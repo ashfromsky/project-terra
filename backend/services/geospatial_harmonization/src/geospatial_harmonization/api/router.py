@@ -21,15 +21,21 @@ from geospatial_harmonization.api.dependencies import (
     StorageQuotaDep,
 )
 from geospatial_harmonization.api.schemas import (
+    CancelJobRequest,
     CapabilitiesOut,
     CleanupReportOut,
     CleanupRequest,
     DatasetOut,
+    DatasetProvenanceOut,
     DependencyHealth,
+    DiscoveredObservationOut,
+    DiscoverRequest,
+    DiscoverResponse,
     HarmonizeRequest,
     HealthResponse,
     JobOut,
     ProcessingResultOut,
+    ProviderStatusOut,
     ReadinessResponse,
     ReconciliationReportOut,
     StorageHealthOut,
@@ -37,7 +43,12 @@ from geospatial_harmonization.api.schemas import (
     StorageUsageOut,
 )
 from geospatial_harmonization.config.settings import Settings
+from geospatial_harmonization.domain.exceptions import ProviderDisabledError
 from geospatial_harmonization.domain.models.harmonization import HarmonizationJob
+from geospatial_harmonization.handlers.catalog import (
+    DiscoverableHandler,
+    build_provider_status_snapshots,
+)
 from geospatial_harmonization.infrastructure.database import check_database_health
 
 health_router = APIRouter(tags=["health"])
@@ -69,23 +80,78 @@ async def ready(
 
 
 @v1_router.get("/capabilities", response_model=CapabilitiesOut)
-async def list_capabilities(handlers: HandlersDep, readers: ReadersDep) -> CapabilitiesOut:
-    """List supported providers, products, and format decoders."""
+async def list_capabilities(
+    settings: SettingsDep, handlers: HandlersDep, readers: ReadersDep
+) -> CapabilitiesOut:
+    """List supported providers, products, format decoders, and runtime readiness."""
+    caps = handlers.list_capabilities()
+    providers = tuple(
+        ProviderStatusOut.from_snapshot(snap)
+        for snap in build_provider_status_snapshots(settings, caps)
+    )
     return CapabilitiesOut(
-        handlers=handlers.list_capabilities(),
+        handlers=caps,
         formats=readers.registered_formats(),
+        providers=providers,
+    )
+
+
+@v1_router.get("/providers", response_model=list[ProviderStatusOut])
+async def list_providers(settings: SettingsDep, handlers: HandlersDep) -> list[ProviderStatusOut]:
+    """Inspect configured providers, supported products/variables, and health without secrets."""
+    snapshots = build_provider_status_snapshots(settings, handlers.list_capabilities())
+    return [ProviderStatusOut.from_snapshot(snap) for snap in snapshots]
+
+
+@v1_router.post("/discover", response_model=DiscoverResponse)
+async def discover_observations(
+    body: DiscoverRequest,
+    handlers: HandlersDep,
+) -> DiscoverResponse:
+    """Discover available provider observations or query eligibility for an AOI and period."""
+    handler = handlers.get(body.provider, body.product)
+    if not isinstance(handler, DiscoverableHandler):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=f"Provider '{body.provider}' does not support observation discovery",
+        )
+    observations = await handler.discover(
+        product=body.product,
+        bbox=body.bbox,
+        start_time=body.start_time,
+        end_time=body.end_time,
+        limit=body.limit,
+    )
+    return DiscoverResponse(
+        provider=body.provider,
+        product=body.product,
+        count=len(observations),
+        observations=tuple(DiscoveredObservationOut.from_domain(obs) for obs in observations),
     )
 
 
 @v1_router.post("/jobs", response_model=JobOut, status_code=status.HTTP_202_ACCEPTED)
 async def submit_job(
     body: HarmonizeRequest,
+    settings: SettingsDep,
     handlers: HandlersDep,
     jobs: JobRepoDep,
 ) -> JobOut:
-    """Validate and enqueue an asynchronous harmonization job."""
+    """Validate and enqueue an asynchronous harmonization job with idempotency support."""
     plan = body.to_plan()
     handlers.get(plan.provider, plan.product)
+    if not settings.is_provider_enabled(plan.provider):
+        raise ProviderDisabledError(
+            f"Provider '{plan.provider}' is disabled by configuration",
+            provider=plan.provider,
+        )
+    idem_key = (
+        body.idempotency_key.strip() if body.idempotency_key else plan.compute_idempotency_key()
+    )
+    if not body.allow_duplicate:
+        existing = await jobs.get_by_idempotency_key(idem_key)
+        if existing is not None and existing.status in ("pending", "running", "succeeded"):
+            return JobOut.from_domain(existing)
     now = datetime.now(UTC)
     job = HarmonizationJob(
         job_id=uuid4(),
@@ -94,6 +160,7 @@ async def submit_job(
         created_at=now,
         updated_at=now,
         max_attempts=body.max_attempts,
+        idempotency_key=idem_key,
     )
     await jobs.create(job)
     return JobOut.from_domain(job)
@@ -106,6 +173,28 @@ async def get_job(job_id: UUID, jobs: JobRepoDep) -> JobOut:
     if job is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job not found")
     return JobOut.from_domain(job)
+
+
+@v1_router.post("/jobs/{job_id}/cancel", response_model=JobOut)
+async def cancel_job(
+    job_id: UUID,
+    jobs: JobRepoDep,
+    body: CancelJobRequest | None = None,
+) -> JobOut:
+    """Cancel a pending or running harmonization job if not yet succeeded or failed."""
+    existing = await jobs.get_by_id(job_id)
+    if existing is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job not found")
+    if existing.status in ("succeeded", "failed"):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Cannot cancel job '{job_id}' in terminal status '{existing.status}'",
+        )
+    reason = body.reason if body is not None else "Cancelled by request"
+    cancelled = await jobs.cancel(job_id, datetime.now(UTC), reason=reason)
+    if cancelled is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job not found")
+    return JobOut.from_domain(cancelled)
 
 
 @v1_router.post("/harmonize", response_model=ProcessingResultOut)
@@ -136,6 +225,17 @@ async def get_dataset(dataset_id: UUID, datasets: DatasetRepoDep) -> DatasetOut:
     if ds is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Dataset not found")
     return DatasetOut.from_domain(ds)
+
+
+@v1_router.get("/datasets/{dataset_id}/provenance", response_model=DatasetProvenanceOut)
+async def get_dataset_provenance(
+    dataset_id: UUID, datasets: DatasetRepoDep
+) -> DatasetProvenanceOut:
+    """Retrieve dataset lineage, scientific quality metrics, and redacted asset references."""
+    ds = await datasets.get_by_id(dataset_id)
+    if ds is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Dataset not found")
+    return DatasetProvenanceOut.from_domain(ds)
 
 
 def _extract_admin_token(request: Request) -> str | None:

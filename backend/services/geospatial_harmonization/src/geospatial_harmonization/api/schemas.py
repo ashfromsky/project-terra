@@ -2,12 +2,14 @@
 
 from dataclasses import asdict
 from datetime import datetime
+from pathlib import Path
 from typing import Literal
 from uuid import UUID, uuid4
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from geospatial_harmonization.domain.models.dataset import SpatialDataset
+from geospatial_harmonization.domain.exceptions import ErrorCategory
+from geospatial_harmonization.domain.models.dataset import AssetReference, SpatialDataset
 from geospatial_harmonization.domain.models.grid import (
     AffineMatrix,
     GridAlignmentPolicy,
@@ -36,6 +38,11 @@ from geospatial_harmonization.domain.models.temporal import (
     TemporalAggregationKind,
     TemporalSemantics,
     TemporalSpec,
+)
+from geospatial_harmonization.handlers.catalog import (
+    DiscoveryResult,
+    ProviderHealthState,
+    ProviderStatusSnapshot,
 )
 
 
@@ -150,6 +157,8 @@ class HarmonizeRequest(BaseModel):
     variables: tuple[str, ...] = ()
     output_format: OutputFormat = "geotiff"
     max_attempts: int = Field(default=3, ge=1, le=10)
+    idempotency_key: str | None = Field(default=None, min_length=1, max_length=64)
+    allow_duplicate: bool = False
 
     def to_plan(self) -> HarmonizationPlan:
         return HarmonizationPlan(
@@ -165,6 +174,12 @@ class HarmonizeRequest(BaseModel):
         )
 
 
+class CancelJobRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    reason: str = Field(default="Cancelled by request", min_length=1, max_length=256)
+
+
 class JobOut(BaseModel):
     job_id: UUID
     status: JobStatus
@@ -174,6 +189,10 @@ class JobOut(BaseModel):
     max_attempts: int
     dataset_id: UUID | None = None
     error_message: str | None = None
+    error_category: ErrorCategory | None = None
+    next_retry_at: datetime | None = None
+    progress_pct: int = 0
+    idempotency_key: str | None = None
     locked_by: str | None = None
     lease_expires_at: datetime | None = None
     created_at: datetime
@@ -190,6 +209,10 @@ class JobOut(BaseModel):
             max_attempts=job.max_attempts,
             dataset_id=job.dataset_id,
             error_message=job.error_message,
+            error_category=job.error_category,
+            next_retry_at=job.next_retry_at,
+            progress_pct=job.progress_pct,
+            idempotency_key=job.idempotency_key,
             locked_by=job.locked_by,
             lease_expires_at=job.lease_expires_at,
             created_at=job.created_at,
@@ -197,13 +220,53 @@ class JobOut(BaseModel):
         )
 
 
+def _sanitize_asset_uri(uri: str | None) -> str | None:
+    if uri is None:
+        return None
+    if uri.startswith(("file://", "s3://", "/")):
+        return None
+    return uri
+
+
+def _sanitize_source_url(url: str) -> str:
+    if url.startswith("file://"):
+        name = Path(url.removeprefix("file://")).name or "local-asset"
+        return f"local://{name}"
+    return url
+
+
+def _sanitize_provenance_dict(provenance_raw: object) -> dict[str, object]:
+    if not isinstance(provenance_raw, dict):
+        return {}
+    clean = dict(provenance_raw)
+    raw_urls = clean.get("source_urls")
+    if isinstance(raw_urls, list):
+        clean["source_urls"] = [_sanitize_source_url(str(u)) for u in raw_urls]
+    return clean
+
+
 class AssetOut(BaseModel):
     asset_id: str
-    uri: str
+    uri: str | None = None
+    storage_key: str | None = None
+    zone: str | None = None
     data_format: str
     media_type: str
     checksum_sha256: str | None = None
     size_bytes: int | None = None
+
+    @classmethod
+    def from_domain(cls, asset: AssetReference) -> "AssetOut":
+        return cls(
+            asset_id=asset.asset_id,
+            uri=_sanitize_asset_uri(asset.uri),
+            storage_key=asset.storage_key,
+            zone=asset.zone,
+            data_format=asset.data_format,
+            media_type=asset.media_type,
+            checksum_sha256=asset.checksum_sha256,
+            size_bytes=asset.size_bytes,
+        )
 
 
 class QualityOut(BaseModel):
@@ -231,6 +294,8 @@ class DatasetOut(BaseModel):
     source_id: str
     provider: str
     product: str
+    product_version: str | None = None
+    granule_id: str | None = None
     units: dict[str, str]
     variables: dict[str, object]
     spatial_metadata: dict[str, object]
@@ -245,7 +310,40 @@ class DatasetOut(BaseModel):
         from geospatial_harmonization.infrastructure.database.codec import encode_dataset
 
         raw = encode_dataset(dataset)
+        raw["assets"] = [AssetOut.from_domain(a).model_dump() for a in dataset.assets]
+        raw["provenance"] = _sanitize_provenance_dict(raw.get("provenance"))
         return cls.model_validate(raw)
+
+
+class DatasetProvenanceOut(BaseModel):
+    dataset_id: UUID
+    source_id: str
+    granule_id: str | None = None
+    provider: str
+    product: str
+    product_version: str | None = None
+    spatial_metadata: dict[str, object]
+    temporal_metadata: dict[str, object]
+    quality_metadata: dict[str, object]
+    provenance: dict[str, object]
+    assets: tuple[AssetOut, ...]
+
+    @classmethod
+    def from_domain(cls, dataset: SpatialDataset) -> "DatasetProvenanceOut":
+        ds_out = DatasetOut.from_domain(dataset)
+        return cls(
+            dataset_id=ds_out.dataset_id,
+            source_id=ds_out.source_id,
+            granule_id=ds_out.granule_id,
+            provider=ds_out.provider,
+            product=ds_out.product,
+            product_version=ds_out.product_version,
+            spatial_metadata=ds_out.spatial_metadata,
+            temporal_metadata=ds_out.temporal_metadata,
+            quality_metadata=ds_out.quality_metadata,
+            provenance=ds_out.provenance,
+            assets=ds_out.assets,
+        )
 
 
 class ProcessingResultOut(BaseModel):
@@ -258,17 +356,7 @@ class ProcessingResultOut(BaseModel):
 
     @classmethod
     def from_domain(cls, result: ProcessingResult) -> "ProcessingResultOut":
-        assets = tuple(
-            AssetOut(
-                asset_id=a.asset_id,
-                uri=a.uri,
-                data_format=a.data_format,
-                media_type=a.media_type,
-                checksum_sha256=a.checksum_sha256,
-                size_bytes=a.size_bytes,
-            )
-            for a in result.output_assets
-        )
+        assets = tuple(AssetOut.from_domain(a) for a in result.output_assets)
         return cls(
             job_id=result.job_id,
             dataset=DatasetOut.from_domain(result.dataset),
@@ -279,9 +367,104 @@ class ProcessingResultOut(BaseModel):
         )
 
 
+class VariableInfoOut(BaseModel):
+    name: str
+    units: str
+    semantics: str
+    description: str
+
+
+class ProductInfoOut(BaseModel):
+    product: str
+    version: str
+    title: str
+    spatial_resolution: str
+    temporal_resolution: str
+    crs: str
+    source_format: str
+    variables: tuple[VariableInfoOut, ...]
+
+
+class ProviderStatusOut(BaseModel):
+    provider: str
+    title: str
+    enabled: bool
+    auth_required: bool
+    auth_configured: bool
+    auth_mechanism: str
+    status: ProviderHealthState
+    supports_discovery: bool
+    registered_products: tuple[str, ...]
+    products: tuple[ProductInfoOut, ...]
+
+    @classmethod
+    def from_snapshot(cls, snap: ProviderStatusSnapshot) -> "ProviderStatusOut":
+        return cls.model_validate(asdict(snap))
+
+
 class CapabilitiesOut(BaseModel):
     handlers: dict[str, tuple[str, ...]]
     formats: tuple[str, ...]
+    providers: tuple[ProviderStatusOut, ...] = ()
+
+
+class DiscoverRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    provider: str = Field(min_length=1)
+    product: str = Field(min_length=1)
+    bbox: tuple[float, float, float, float]
+    start_time: datetime
+    end_time: datetime
+    limit: int = Field(default=10, ge=1, le=50)
+
+    @model_validator(mode="after")
+    def _validate_window_and_bbox(self) -> "DiscoverRequest":
+        min_lon, min_lat, max_lon, max_lat = self.bbox
+        if not (-180.0 <= min_lon < max_lon <= 180.0):
+            raise ValueError("bbox longitudes must satisfy -180 <= min_lon < max_lon <= 180")
+        if not (-90.0 <= min_lat < max_lat <= 90.0):
+            raise ValueError("bbox latitudes must satisfy -90 <= min_lat < max_lat <= 90")
+        if self.end_time < self.start_time:
+            raise ValueError("end_time cannot precede start_time")
+        return self
+
+
+class DiscoveredObservationOut(BaseModel):
+    observation_id: str
+    provider: str
+    product: str
+    product_version: str
+    title: str
+    time_start: datetime | None = None
+    time_end: datetime | None = None
+    bbox: tuple[float, float, float, float] | None = None
+    query_mode: str | None = None
+    access_hint: str | None = None
+    metadata: dict[str, object] = Field(default_factory=dict)
+
+    @classmethod
+    def from_domain(cls, item: DiscoveryResult) -> "DiscoveredObservationOut":
+        return cls(
+            observation_id=item.observation_id,
+            provider=item.provider,
+            product=item.product,
+            product_version=item.product_version,
+            title=item.title,
+            time_start=item.time_start,
+            time_end=item.time_end,
+            bbox=item.bbox,
+            query_mode=item.query_mode,
+            access_hint=item.access_hint,
+            metadata=dict(item.metadata or {}),
+        )
+
+
+class DiscoverResponse(BaseModel):
+    provider: str
+    product: str
+    count: int
+    observations: tuple[DiscoveredObservationOut, ...]
 
 
 class ZoneUsageSummaryOut(BaseModel):
