@@ -1,0 +1,20 @@
+# Core & Worker container build ignore rules
+**/__pycache__
+**/*.pyc
+**/*.pyo
+**/*.pyd
+**/.venv
+**/.pytest_cache
+**/.ruff_cache
+**/.mypy_cache
+**/.git
+**/.data
+**/*.db
+**/*.sqlite*
+**/.env*
+**/dist
+**/node_modules
+deploy/
+docs/
+frontend/
+scripts/
