@@ -380,6 +380,90 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/assessments/methods": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Scientific Methods
+         * @description List cataloged P0/P1 implemented methods and explicitly deferred P2 methods.
+         */
+        get: operations["list_scientific_methods_api_v1_assessments_methods_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/assessments": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Assessments
+         * @description List scientific assessments owned by the authenticated user.
+         */
+        get: operations["list_assessments_api_v1_assessments_get"];
+        put?: never;
+        /**
+         * Create Assessment
+         * @description Create and optionally execute a reproducible Scientific Assessment.
+         */
+        post: operations["create_assessment_api_v1_assessments_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/assessments/{assessment_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Assessment
+         * @description Get a single Scientific Assessment and its full results.
+         */
+        get: operations["get_assessment_api_v1_assessments__assessment_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/assessments/{assessment_id}/execute": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Execute Assessment
+         * @description Execute a queued or failed Scientific Assessment on demand.
+         */
+        post: operations["execute_assessment_api_v1_assessments__assessment_id__execute_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -434,6 +518,100 @@ export interface components {
             isoA3?: string | null;
         };
         /**
+         * AssessmentDetailResponse
+         * @description Detailed representation including full Scientific Core output payload and artifacts.
+         */
+        AssessmentDetailResponse: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Ownerid
+             * Format: uuid
+             */
+            ownerId: string;
+            /** Regionid */
+            regionId: string | null;
+            /** Title */
+            title: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "queued" | "running" | "completed" | "completed_partial" | "insufficient_data" | "failed";
+            /** Ghsdatasetids */
+            ghsDatasetIds: string[];
+            /** Errormessage */
+            errorMessage: string | null;
+            /**
+             * Createdat
+             * Format: date-time
+             */
+            createdAt: string;
+            /**
+             * Updatedat
+             * Format: date-time
+             */
+            updatedAt: string;
+            /** Completedat */
+            completedAt: string | null;
+            /** Requestconfig */
+            requestConfig: {
+                [key: string]: unknown;
+            };
+            /** Result */
+            result: {
+                [key: string]: unknown;
+            } | null;
+            /** Artifactpaths */
+            artifactPaths: {
+                [key: string]: string;
+            };
+        };
+        /**
+         * AssessmentSummaryResponse
+         * @description Summary representation of a persisted Scientific Assessment.
+         */
+        AssessmentSummaryResponse: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Ownerid
+             * Format: uuid
+             */
+            ownerId: string;
+            /** Regionid */
+            regionId: string | null;
+            /** Title */
+            title: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "queued" | "running" | "completed" | "completed_partial" | "insufficient_data" | "failed";
+            /** Ghsdatasetids */
+            ghsDatasetIds: string[];
+            /** Errormessage */
+            errorMessage: string | null;
+            /**
+             * Createdat
+             * Format: date-time
+             */
+            createdAt: string;
+            /**
+             * Updatedat
+             * Format: date-time
+             */
+            updatedAt: string;
+            /** Completedat */
+            completedAt: string | null;
+        };
+        /**
          * AuthCallbackResponse
          * @description Session payload returned after successful GitHub OAuth callback.
          */
@@ -480,6 +658,31 @@ export interface components {
             ];
             /** Label */
             label?: string | null;
+        };
+        /**
+         * CreateAssessmentRequest
+         * @description Request payload creating and optionally executing a Scientific Assessment.
+         */
+        CreateAssessmentRequest: {
+            /** Title */
+            title: string;
+            /** Regionid */
+            regionId?: string | null;
+            /**
+             * Executenow
+             * @default true
+             */
+            executeNow: boolean;
+            /** Requestconfig */
+            requestConfig: {
+                [key: string]: unknown;
+            };
+            /** Ghsdatasetids */
+            ghsDatasetIds?: string[];
+            /** Inlinedatasets */
+            inlineDatasets?: {
+                [key: string]: unknown;
+            }[];
         };
         /**
          * DependencyHealth
@@ -802,6 +1005,30 @@ export interface components {
             requiresBackendAuthorization: boolean;
             /** Isconnected */
             isConnected: boolean;
+        };
+        /**
+         * MethodCatalogItemResponse
+         * @description Catalog metadata describing an implemented (P0/P1) or deferred (P2) scientific method.
+         */
+        MethodCatalogItemResponse: {
+            /** Methodid */
+            methodId: string;
+            /** Version */
+            version: string;
+            /** Name */
+            name: string;
+            /** Priority */
+            priority: string;
+            /** Implemented */
+            implemented: boolean;
+            /** Formulasummary */
+            formulaSummary: string;
+            /** Assumptions */
+            assumptions: string[];
+            /** Limitations */
+            limitations: string[];
+            /** Reference */
+            reference: string;
         };
         /**
          * ReadinessResponse
@@ -1711,6 +1938,141 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["TemporalCoverageResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_scientific_methods_api_v1_assessments_methods_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MethodCatalogItemResponse"][];
+                };
+            };
+        };
+    };
+    list_assessments_api_v1_assessments_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AssessmentSummaryResponse"][];
+                };
+            };
+        };
+    };
+    create_assessment_api_v1_assessments_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateAssessmentRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AssessmentDetailResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_assessment_api_v1_assessments__assessment_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                assessment_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AssessmentDetailResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    execute_assessment_api_v1_assessments__assessment_id__execute_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                assessment_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AssessmentDetailResponse"];
                 };
             };
             /** @description Validation Error */
