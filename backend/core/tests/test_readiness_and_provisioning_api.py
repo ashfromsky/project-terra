@@ -482,8 +482,9 @@ def test_build_readiness_request_supports_all_ui_baseline_modes() -> None:
     """Every baseline mode exposed by the UI must produce a valid Scientific Core request."""
     from datetime import UTC, datetime
 
-    from terra.modules.data_sources.application.provisioner import build_readiness_request
     from terra_scientific.domain.enums import BaselineType
+
+    from terra.modules.data_sources.application.provisioner import build_readiness_request
 
     analysis_start = datetime(2024, 1, 1, tzinfo=UTC)
     analysis_end = datetime(2024, 12, 31, 23, 59, 59, tzinfo=UTC)

@@ -93,8 +93,6 @@ def test_codec_replaces_non_finite_floats_with_null() -> None:
 
     from geospatial_harmonization.infrastructure.database.codec import _finite_json
 
-    encoded = _finite_json(
-        {"a": float("nan"), "b": [float("inf"), 1.0], "c": {"d": float("-inf")}}
-    )
+    encoded = _finite_json({"a": float("nan"), "b": [float("inf"), 1.0], "c": {"d": float("-inf")}})
     assert encoded == {"a": None, "b": [None, 1.0], "c": {"d": None}}
     json.dumps(encoded, allow_nan=False)
