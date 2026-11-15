@@ -896,6 +896,186 @@
           }
         }
       }
+    },
+    "/api/v1/assessments/methods": {
+      "get": {
+        "tags": [
+          "assessments"
+        ],
+        "summary": "List Scientific Methods",
+        "description": "List cataloged P0/P1 implemented methods and explicitly deferred P2 methods.",
+        "operationId": "list_scientific_methods_api_v1_assessments_methods_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/MethodCatalogItemResponse"
+                  },
+                  "type": "array",
+                  "title": "Response List Scientific Methods Api V1 Assessments Methods Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/assessments": {
+      "get": {
+        "tags": [
+          "assessments"
+        ],
+        "summary": "List Assessments",
+        "description": "List scientific assessments owned by the authenticated user.",
+        "operationId": "list_assessments_api_v1_assessments_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/AssessmentSummaryResponse"
+                  },
+                  "type": "array",
+                  "title": "Response List Assessments Api V1 Assessments Get"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "assessments"
+        ],
+        "summary": "Create Assessment",
+        "description": "Create and optionally execute a reproducible Scientific Assessment.",
+        "operationId": "create_assessment_api_v1_assessments_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateAssessmentRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AssessmentDetailResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/assessments/{assessment_id}": {
+      "get": {
+        "tags": [
+          "assessments"
+        ],
+        "summary": "Get Assessment",
+        "description": "Get a single Scientific Assessment and its full results.",
+        "operationId": "get_assessment_api_v1_assessments__assessment_id__get",
+        "parameters": [
+          {
+            "name": "assessment_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Assessment Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AssessmentDetailResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/assessments/{assessment_id}/execute": {
+      "post": {
+        "tags": [
+          "assessments"
+        ],
+        "summary": "Execute Assessment",
+        "description": "Execute a queued or failed Scientific Assessment on demand.",
+        "operationId": "execute_assessment_api_v1_assessments__assessment_id__execute_post",
+        "parameters": [
+          {
+            "name": "assessment_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Assessment Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AssessmentDetailResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -1004,6 +1184,227 @@
         "title": "AoiPropertiesResponse",
         "description": "GeoJSON Feature properties matching frontend AoiFeature contract."
       },
+      "AssessmentDetailResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "ownerId": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Ownerid"
+          },
+          "regionId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Regionid"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "queued",
+              "running",
+              "completed",
+              "completed_partial",
+              "insufficient_data",
+              "failed"
+            ],
+            "title": "Status"
+          },
+          "ghsDatasetIds": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Ghsdatasetids"
+          },
+          "errorMessage": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Errormessage"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Createdat"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updatedat"
+          },
+          "completedAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Completedat"
+          },
+          "requestConfig": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Requestconfig"
+          },
+          "result": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Result"
+          },
+          "artifactPaths": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Artifactpaths"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "ownerId",
+          "regionId",
+          "title",
+          "status",
+          "ghsDatasetIds",
+          "errorMessage",
+          "createdAt",
+          "updatedAt",
+          "completedAt",
+          "requestConfig",
+          "result",
+          "artifactPaths"
+        ],
+        "title": "AssessmentDetailResponse",
+        "description": "Detailed representation including full Scientific Core output payload and artifacts."
+      },
+      "AssessmentSummaryResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "ownerId": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Ownerid"
+          },
+          "regionId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Regionid"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "queued",
+              "running",
+              "completed",
+              "completed_partial",
+              "insufficient_data",
+              "failed"
+            ],
+            "title": "Status"
+          },
+          "ghsDatasetIds": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Ghsdatasetids"
+          },
+          "errorMessage": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Errormessage"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Createdat"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updatedat"
+          },
+          "completedAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Completedat"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "ownerId",
+          "regionId",
+          "title",
+          "status",
+          "ghsDatasetIds",
+          "errorMessage",
+          "createdAt",
+          "updatedAt",
+          "completedAt"
+        ],
+        "title": "AssessmentSummaryResponse",
+        "description": "Summary representation of a persisted Scientific Assessment."
+      },
       "AuthCallbackResponse": {
         "properties": {
           "accessToken": {
@@ -1107,6 +1508,60 @@
         ],
         "title": "ColorRampStopResponse",
         "description": "Single stop in a layer color ramp."
+      },
+      "CreateAssessmentRequest": {
+        "properties": {
+          "title": {
+            "type": "string",
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Title"
+          },
+          "regionId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Regionid"
+          },
+          "executeNow": {
+            "type": "boolean",
+            "title": "Executenow",
+            "default": true
+          },
+          "requestConfig": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Requestconfig"
+          },
+          "ghsDatasetIds": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Ghsdatasetids"
+          },
+          "inlineDatasets": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Inlinedatasets"
+          }
+        },
+        "type": "object",
+        "required": [
+          "title",
+          "requestConfig"
+        ],
+        "title": "CreateAssessmentRequest",
+        "description": "Request payload creating and optionally executing a Scientific Assessment."
       },
       "DependencyHealth": {
         "properties": {
@@ -1904,6 +2359,66 @@
         ],
         "title": "MapTileSourceResponse",
         "description": "Tile or raster source descriptor."
+      },
+      "MethodCatalogItemResponse": {
+        "properties": {
+          "methodId": {
+            "type": "string",
+            "title": "Methodid"
+          },
+          "version": {
+            "type": "string",
+            "title": "Version"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "priority": {
+            "type": "string",
+            "title": "Priority"
+          },
+          "implemented": {
+            "type": "boolean",
+            "title": "Implemented"
+          },
+          "formulaSummary": {
+            "type": "string",
+            "title": "Formulasummary"
+          },
+          "assumptions": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Assumptions"
+          },
+          "limitations": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Limitations"
+          },
+          "reference": {
+            "type": "string",
+            "title": "Reference"
+          }
+        },
+        "type": "object",
+        "required": [
+          "methodId",
+          "version",
+          "name",
+          "priority",
+          "implemented",
+          "formulaSummary",
+          "assumptions",
+          "limitations",
+          "reference"
+        ],
+        "title": "MethodCatalogItemResponse",
+        "description": "Catalog metadata describing an implemented (P0/P1) or deferred (P2) scientific method."
       },
       "ReadinessResponse": {
         "properties": {
