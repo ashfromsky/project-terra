@@ -113,3 +113,62 @@ def test_quality_validator_checks_insufficient_data_crs_and_geotiff_assets(tmp_p
 
     with pytest.raises(QualityPolicyViolationError, match="min_valid_fraction"):
         QualityPolicy(min_valid_fraction=1.2)
+
+
+def test_unified_dataset_contract_codec_roundtrip_and_coverage_bounds() -> None:
+    from geospatial_harmonization.infrastructure.database.codec import (
+        decode_dataset,
+        encode_dataset,
+    )
+
+    now = datetime(2026, 8, 1, tzinfo=UTC)
+    spec = dm.VariableSpec("NDVI", "1", "int16", ("y", "x"), "continuous_intensive", nodata=-3000)
+    asset = dm.AssetReference(
+        "a1",
+        "file:///tmp/raw/a1.hdf",
+        "hdf4",
+        "application/x-hdf",
+        checksum_sha256="abc",
+        size_bytes=10,
+        storage_key="raw/modis/a1.hdf",
+        zone="raw",
+    )
+    ds = dm.SpatialDataset(
+        uuid4(),
+        "abc",
+        "modis",
+        "MOD13Q1.061",
+        {"NDVI": spec},
+        {"NDVI": "1"},
+        dm.SpatialMetadata("raster", "EPSG:4326", spatial_resolution="250 m"),
+        TemporalSpec(now, now, "16daily", "instantaneous", acquisition_timestamp=now),
+        dm.QualityMetadata(
+            "modis_qa",
+            valid_observation_fraction=0.8,
+            missing_data_fraction=0.2,
+            excluded_count=2,
+            exclusion_breakdown={"cloudy": 2},
+        ),
+        (asset,),
+        dm.ProvenanceRecord(
+            "modis",
+            "MOD13Q1.061",
+            "061",
+            now,
+            "0.1.0",
+            granule_id="MOD13Q1.A2026213.hdf",
+            acquisition_timestamp=now,
+            source_metadata={"cmr": {"id": "G1"}},
+        ),
+    )
+    encoded = encode_dataset(ds)
+    decoded = decode_dataset(encoded)
+    assert decoded.granule_id == "MOD13Q1.A2026213.hdf"
+    assert decoded.product_version == "061"
+    assert decoded.spatial_metadata.spatial_resolution == "250 m"
+    assert decoded.quality_metadata.exclusion_breakdown == {"cloudy": 2}
+    assert decoded.assets[0].storage_key == "raw/modis/a1.hdf"
+    assert decoded.assets[0].zone == "raw"
+
+    with pytest.raises(QualityPolicyViolationError):
+        dm.QualityMetadata("bad", missing_data_fraction=1.5)

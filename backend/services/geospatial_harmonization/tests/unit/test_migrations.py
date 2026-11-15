@@ -21,6 +21,9 @@ def test_alembic_upgrade_downgrade_cycle(tmp_path: Path) -> None:
             row[0]
             for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
         }
+        job_columns = {
+            row[1] for row in conn.execute("PRAGMA table_info(ghs_harmonization_jobs)").fetchall()
+        }
     expected_tables = {
         "ghs_alembic_version",
         "ghs_datasets",
@@ -33,6 +36,16 @@ def test_alembic_upgrade_downgrade_cycle(tmp_path: Path) -> None:
         "ghs_storage_audit_events",
     }
     assert expected_tables <= tables
+    assert {"error_category", "next_retry_at", "progress_pct", "idempotency_key"} <= job_columns
+
+    command.downgrade(cfg, "0002_storage_ledger_and_lifecycle")
+    with sqlite3.connect(db_path) as conn:
+        downgraded_cols = {
+            row[1] for row in conn.execute("PRAGMA table_info(ghs_harmonization_jobs)").fetchall()
+        }
+    assert not (
+        {"error_category", "next_retry_at", "progress_pct", "idempotency_key"} & downgraded_cols
+    )
 
     command.downgrade(cfg, "base")
     with sqlite3.connect(db_path) as conn:
@@ -44,3 +57,8 @@ def test_alembic_upgrade_downgrade_cycle(tmp_path: Path) -> None:
     assert "ghs_alembic_version" in remaining
 
     command.upgrade(cfg, "head")
+    with sqlite3.connect(db_path) as conn:
+        reupgraded_cols = {
+            row[1] for row in conn.execute("PRAGMA table_info(ghs_harmonization_jobs)").fetchall()
+        }
+    assert {"error_category", "next_retry_at", "progress_pct", "idempotency_key"} <= reupgraded_cols
