@@ -3,6 +3,7 @@ import { Link, NavLink, useLocation, useSearchParams } from 'react-router'
 import {
   buildGitHubLoginUrl,
   useCurrentUserQuery,
+  useDevSessionLoginMutation,
   useLogoutMutation,
 } from '../../shared/api/auth'
 import { useSystemInfoQuery } from '../../shared/api/system'
@@ -36,6 +37,17 @@ export function TopNavigation() {
 
   const user = userQuery.data ?? null
   const oauthConfigured = systemInfoQuery.data?.githubOauthConfigured ?? false
+  const devAuthEnabled = systemInfoQuery.data?.devAuthEnabled ?? false
+  const devLoginMutation = useDevSessionLoginMutation()
+
+  const handleDevSignIn = () => {
+    devLoginMutation.mutate(undefined, {
+      onSuccess: () => {
+        setAccountMenuPath(null)
+        setMobileNavOpen(false)
+      },
+    })
+  }
   const apiOffline = systemInfoQuery.isError || (userQuery.isError && !user)
   const authError = searchParams.get('authError')
 
@@ -214,6 +226,24 @@ export function TopNavigation() {
                   </a>
                 )}
 
+                {!user && devAuthEnabled && !apiOffline && (
+                  <button
+                    type="button"
+                    className="workspace-nav__dropdown-cta"
+                    role="menuitem"
+                    disabled={devLoginMutation.isPending}
+                    onClick={handleDevSignIn}
+                  >
+                    {devLoginMutation.isPending ? 'Starting dev session…' : 'Start Dev Session'}
+                  </button>
+                )}
+
+                {devLoginMutation.isError && (
+                  <p className="workspace-nav__dropdown-error" role="alert">
+                    Failed to start dev session.
+                  </p>
+                )}
+
                 <Link
                   to={APP_ROUTES.home}
                   className="workspace-nav__dropdown-item"
@@ -312,14 +342,28 @@ export function TopNavigation() {
                   {logoutMutation.isPending ? 'Signing out…' : 'Sign out'}
                 </button>
               </div>
-            ) : oauthConfigured && !apiOffline ? (
-              <a
-                href={githubLoginUrl}
-                className="mobile-nav-drawer__auth-link"
-                onClick={() => setMobileNavOpen(false)}
-              >
-                Sign in with GitHub
-              </a>
+            ) : !apiOffline && (oauthConfigured || devAuthEnabled) ? (
+              <div className="mobile-nav-drawer__user-row">
+                {oauthConfigured && (
+                  <a
+                    href={githubLoginUrl}
+                    className="mobile-nav-drawer__auth-link"
+                    onClick={() => setMobileNavOpen(false)}
+                  >
+                    Sign in with GitHub
+                  </a>
+                )}
+                {devAuthEnabled && (
+                  <button
+                    type="button"
+                    className="mobile-nav-drawer__auth-btn"
+                    disabled={devLoginMutation.isPending}
+                    onClick={handleDevSignIn}
+                  >
+                    {devLoginMutation.isPending ? 'Starting dev session…' : 'Start Dev Session'}
+                  </button>
+                )}
+              </div>
             ) : (
               <span className="mobile-nav-drawer__auth-note">
                 {apiOffline ? 'Core API offline' : 'GitHub OAuth not configured'}

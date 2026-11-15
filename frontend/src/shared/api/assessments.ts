@@ -1,15 +1,19 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { apiFetchClient, ApiError, unwrapApiResponse } from './client'
 import type {
+  AssessmentComparisonResponse,
   AssessmentDetailResponse,
   AssessmentSummaryResponse,
+  CompareAssessmentsRequest,
   CreateAssessmentRequest,
   MethodCatalogItemResponse,
 } from './contracts'
 
 export type {
+  AssessmentComparisonResponse,
   AssessmentDetailResponse,
   AssessmentSummaryResponse,
+  CompareAssessmentsRequest,
   CreateAssessmentRequest,
   MethodCatalogItemResponse,
 }
@@ -127,13 +131,73 @@ export interface ParsedProvenanceRecord {
   packageVersions: Record<string, string>
 }
 
+export interface ParsedTemporalSeries {
+  datasetId: string
+  variableName: string
+  units: string
+  cadence: string
+  aggregationOperator: string
+  timestamps: string[]
+  values: (number | null)[]
+  coverageFractions: (number | null)[]
+  interpolatedIndices: number[]
+  warnings: string[]
+}
+
+export interface ParsedBaselineClimatology {
+  datasetId: string
+  variableName: string
+  units: string
+  baselineType: string
+  binMeans: (number | null)[]
+  binStds: (number | null)[]
+  binCounts: number[]
+  warnings: string[]
+}
+
+export interface ParsedPersistentRun {
+  startTimestamp: string
+  endTimestamp: string
+  durationSteps: number
+  peakZscore: number
+  severity: string
+}
+
+export interface ParsedAnomalySeries {
+  datasetId: string
+  variableName: string
+  units: string
+  timestamps: string[]
+  rawAnomalies: (number | null)[]
+  standardZscores: (number | null)[]
+  robustZscores: (number | null)[]
+  persistentRuns: ParsedPersistentRun[]
+  warnings: string[]
+}
+
+export interface ParsedCrossVariableResult {
+  xVariable: string
+  yVariable: string
+  pearsonR: number | null
+  spearmanRho: number | null
+  lagSteps: number
+  pValue: number | null
+  sampleCount: number
+  caveat: string
+  warnings: string[]
+}
+
 export interface ParsedScientificResult {
   assessmentId: string
   status: string
   stages: ParsedStageReport[]
   qualityReports: ParsedQualityReport[]
+  temporalSeries: ParsedTemporalSeries[]
+  baselines: ParsedBaselineClimatology[]
+  anomalies: ParsedAnomalySeries[]
   trends: ParsedTrendSummary[]
   recoveries: ParsedRecoveryEvent[]
+  crossVariable: ParsedCrossVariableResult[]
   resilience: ParsedResilienceSummary[]
   uncertainty: ParsedUncertaintySummary | null
   provenance: ParsedProvenanceRecord | null
@@ -245,6 +309,102 @@ export function parseScientificAssessmentResult(
       }
     })
     .filter((item): item is ParsedQualityReport => item !== null)
+
+  const temporalSeries = asArray(root.temporal_series ?? root.temporalSeries)
+    .map((item): ParsedTemporalSeries | null => {
+      const ts = asRecord(item)
+      if (!ts) return null
+      return {
+        datasetId: asString(ts.dataset_id ?? ts.datasetId),
+        variableName: asString(ts.variable_name ?? ts.variableName),
+        units: asString(ts.units),
+        cadence: asString(ts.cadence),
+        aggregationOperator: asString(ts.aggregation_operator ?? ts.aggregationOperator),
+        timestamps: asStringList(ts.timestamps),
+        values: asArray(ts.values).map((v) => asNumber(v)),
+        coverageFractions: asArray(ts.coverage_fractions ?? ts.coverageFractions).map((v) =>
+          asNumber(v),
+        ),
+        interpolatedIndices: asArray(ts.interpolated_indices ?? ts.interpolatedIndices)
+          .map((v) => asNumber(v))
+          .filter((v): v is number => v !== null),
+        warnings: asStringList(ts.warnings),
+      }
+    })
+    .filter((item): item is ParsedTemporalSeries => item !== null)
+
+  const baselines = asArray(root.baselines)
+    .map((item): ParsedBaselineClimatology | null => {
+      const bl = asRecord(item)
+      if (!bl) return null
+      return {
+        datasetId: asString(bl.dataset_id ?? bl.datasetId),
+        variableName: asString(bl.variable_name ?? bl.variableName),
+        units: asString(bl.units),
+        baselineType: asString(bl.baseline_type ?? bl.baselineType),
+        binMeans: asArray(bl.bin_means ?? bl.binMeans).map((v) => asNumber(v)),
+        binStds: asArray(bl.bin_stds ?? bl.binStds).map((v) => asNumber(v)),
+        binCounts: asArray(bl.bin_counts ?? bl.binCounts)
+          .map((v) => asNumber(v))
+          .filter((v): v is number => v !== null),
+        warnings: asStringList(bl.warnings),
+      }
+    })
+    .filter((item): item is ParsedBaselineClimatology => item !== null)
+
+  const anomalies = asArray(root.anomalies)
+    .map((item): ParsedAnomalySeries | null => {
+      const an = asRecord(item)
+      if (!an) return null
+      const runs = asArray(an.persistent_runs ?? an.persistentRuns)
+        .map((r): ParsedPersistentRun | null => {
+          const rec = asRecord(r)
+          if (!rec) return null
+          return {
+            startTimestamp: asString(rec.start_timestamp ?? rec.startTimestamp),
+            endTimestamp: asString(rec.end_timestamp ?? rec.endTimestamp),
+            durationSteps: asNumber(rec.duration_steps ?? rec.durationSteps) ?? 0,
+            peakZscore: asNumber(rec.peak_zscore ?? rec.peakZscore) ?? 0,
+            severity: asString(rec.severity),
+          }
+        })
+        .filter((r): r is ParsedPersistentRun => r !== null)
+      return {
+        datasetId: asString(an.dataset_id ?? an.datasetId),
+        variableName: asString(an.variable_name ?? an.variableName),
+        units: asString(an.units),
+        timestamps: asStringList(an.timestamps),
+        rawAnomalies: asArray(an.raw_anomalies ?? an.rawAnomalies).map((v) => asNumber(v)),
+        standardZscores: asArray(an.standard_zscores ?? an.standardZscores).map((v) =>
+          asNumber(v),
+        ),
+        robustZscores: asArray(an.robust_zscores ?? an.robustZscores).map((v) => asNumber(v)),
+        persistentRuns: runs,
+        warnings: asStringList(an.warnings),
+      }
+    })
+    .filter((item): item is ParsedAnomalySeries => item !== null)
+
+  const crossVariable = asArray(root.cross_variable ?? root.crossVariable)
+    .map((item): ParsedCrossVariableResult | null => {
+      const cv = asRecord(item)
+      if (!cv) return null
+      return {
+        xVariable: asString(cv.x_variable ?? cv.xVariable),
+        yVariable: asString(cv.y_variable ?? cv.yVariable),
+        pearsonR: asNumber(cv.pearson_r ?? cv.pearsonR),
+        spearmanRho: asNumber(cv.spearman_rho ?? cv.spearmanRho),
+        lagSteps: asNumber(cv.lag_steps ?? cv.lagSteps) ?? 0,
+        pValue: asNumber(cv.p_value ?? cv.pValue),
+        sampleCount: asNumber(cv.sample_count ?? cv.sampleCount) ?? 0,
+        caveat: asString(
+          cv.caveat,
+          'Statistical association only; correlation does not establish causation.',
+        ),
+        warnings: asStringList(cv.warnings),
+      }
+    })
+    .filter((item): item is ParsedCrossVariableResult => item !== null)
 
   const trends = asArray(root.trends)
     .map((item): ParsedTrendSummary | null => {
@@ -362,8 +522,12 @@ export function parseScientificAssessmentResult(
     status: asString(root.status),
     stages,
     qualityReports,
+    temporalSeries,
+    baselines,
+    anomalies,
     trends,
     recoveries,
+    crossVariable,
     resilience,
     uncertainty,
     provenance,
@@ -505,5 +669,23 @@ export function useExecuteAssessmentMutation() {
       queryClient.setQueryData(assessmentDetailQueryKey(detail.id), detail)
       void queryClient.invalidateQueries({ queryKey: ASSESSMENTS_LIST_QUERY_KEY })
     },
+  })
+}
+
+export async function compareAssessments(
+  body: CompareAssessmentsRequest,
+): Promise<AssessmentComparisonResponse> {
+  try {
+    const result = await apiFetchClient.POST('/api/v1/assessments/compare', { body })
+    return unwrapApiResponse(result, 'POST /api/v1/assessments/compare')
+  } catch (cause) {
+    if (cause instanceof ApiError) throw cause
+    throw new ApiError(0, `Network error calling POST /api/v1/assessments/compare: ${String(cause)}`)
+  }
+}
+
+export function useCompareAssessmentsMutation() {
+  return useMutation({
+    mutationFn: compareAssessments,
   })
 }
