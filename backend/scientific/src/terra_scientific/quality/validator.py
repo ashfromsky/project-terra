@@ -168,6 +168,10 @@ def screen_dataset_variable(
             f"Dataset '{dataset.dataset_id}' has no 1D observation series for '{variable_name}'."
         )
     _, vals, qa_np = series.to_numpy()
+    pqi_arr: NDArray[np.float64] | None = None
+    if dataset.source_id == DataSourceId.GPM_IMERG and "pqi_milli" in qa_np:
+        raw_pqi = qa_np["pqi_milli"]
+        pqi_arr = np.where(raw_pqi == -999999, np.nan, raw_pqi.astype(np.float64) / 1000.0)
     effective_overpass = (
         overpass_mode
         if overpass_mode is not None
@@ -184,6 +188,7 @@ def screen_dataset_variable(
         overpass_mode=effective_overpass,
         allow_imerg_early_late=allow_imerg_early_late,
         run_type=dataset.run_type,
+        pqi_array=pqi_arr,
     )
 
 

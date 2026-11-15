@@ -469,6 +469,8 @@ class S3ObjectStore:
         prefix: str = "",
         endpoint_url: str | None = None,
         region_name: str = "us-east-1",
+        aws_access_key_id: str | None = None,
+        aws_secret_access_key: str | None = None,
         client: S3ClientProtocol | None = None,
         temp_dirs: tuple[Path, ...] = (),
         multipart_threshold_bytes: int = _MULTIPART_MIN_PART_SIZE,
@@ -478,11 +480,18 @@ class S3ObjectStore:
         self._bucket = bucket.strip()
         clean_prefix = prefix.strip("/")
         self._prefix = normalize_object_key(clean_prefix) if clean_prefix else ""
-        self._client: S3ClientProtocol = (
-            client
-            if client is not None
-            else boto3.client("s3", endpoint_url=endpoint_url, region_name=region_name)
-        )
+        if client is not None:
+            self._client = client
+        else:
+            client_kwargs: dict[str, Any] = {
+                "endpoint_url": endpoint_url,
+                "region_name": region_name,
+            }
+            if aws_access_key_id:
+                client_kwargs["aws_access_key_id"] = aws_access_key_id
+            if aws_secret_access_key:
+                client_kwargs["aws_secret_access_key"] = aws_secret_access_key
+            self._client = boto3.client("s3", **client_kwargs)
         self._temp_dirs = tuple(d.resolve() for d in temp_dirs)
         self._multipart_threshold = max(1, multipart_threshold_bytes)
 
@@ -805,5 +814,7 @@ def build_storage_port(settings: Settings) -> StoragePort:
         settings.s3_bucket,
         endpoint_url=settings.s3_endpoint_url,
         region_name=settings.s3_region,
+        aws_access_key_id=settings.effective_s3_access_key_id(),
+        aws_secret_access_key=settings.effective_s3_secret_access_key(),
         temp_dirs=temp_dirs,
     )

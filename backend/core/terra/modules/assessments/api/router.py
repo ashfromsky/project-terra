@@ -6,10 +6,13 @@ from fastapi import APIRouter, HTTPException, status
 
 from terra.modules.assessments.api.dependencies import AssessmentServiceDep
 from terra.modules.assessments.api.schemas import (
+    AssessmentComparisonResponse,
     AssessmentDetailResponse,
     AssessmentSummaryResponse,
+    CompareAssessmentsRequest,
     CreateAssessmentRequest,
     MethodCatalogItemResponse,
+    VariableComparisonSummary,
 )
 from terra.modules.assessments.domain.exceptions import (
     AssessmentAccessDeniedError,
@@ -101,3 +104,32 @@ async def execute_assessment(
     except AssessmentDomainError as exc:
         raise _translate_domain_error(exc) from exc
     return AssessmentDetailResponse.from_domain_detail(assessment)
+
+
+@router.post("/compare", response_model=AssessmentComparisonResponse)
+async def compare_assessments(
+    body: CompareAssessmentsRequest,
+    user: CurrentUserDep,
+    service: AssessmentServiceDep,
+) -> AssessmentComparisonResponse:
+    """Compare two completed Scientific Assessments owned by the current user."""
+    try:
+        bundle = await service.compare_assessments(
+            user.id,
+            body.primary_assessment_id,
+            body.comparison_assessment_id,
+        )
+    except AssessmentDomainError as exc:
+        raise _translate_domain_error(exc) from exc
+    return AssessmentComparisonResponse(
+        primary=AssessmentDetailResponse.from_domain_detail(bundle.primary),
+        comparison=AssessmentDetailResponse.from_domain_detail(bundle.comparison),
+        shared_variables=bundle.shared_variables,
+        primary_only_variables=bundle.primary_only_variables,
+        comparison_only_variables=bundle.comparison_only_variables,
+        variable_comparisons=[
+            VariableComparisonSummary.model_validate(item) for item in bundle.variable_comparisons
+        ],
+        compatibility_warnings=bundle.compatibility_warnings,
+        methodology_notes=bundle.methodology_notes,
+    )

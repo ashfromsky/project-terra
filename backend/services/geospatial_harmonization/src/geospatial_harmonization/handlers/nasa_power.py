@@ -30,6 +30,7 @@ from geospatial_harmonization.domain.models.grid import SpatialBounds
 from geospatial_harmonization.domain.models.temporal import TemporalSpec
 from geospatial_harmonization.handlers.base import (
     build_provenance,
+    build_time_series_extension,
     parse_handler_payload,
     safe_fetch_bytes,
     validate_wgs84_bbox,
@@ -67,29 +68,35 @@ def _as_map(value: object) -> Mapping[str, object]:
     return value if isinstance(value, Mapping) else {}
 
 
-def _is_valid_power_timestamp(key: str, temporal: Literal["daily", "hourly"]) -> bool:
+def _parse_power_timestamp(key: str, temporal: Literal["daily", "hourly"]) -> datetime | None:
     fmt = "%Y%m%d%H" if temporal == "hourly" else "%Y%m%d"
     if len(key) != (10 if temporal == "hourly" else 8):
-        return False
+        return None
     try:
-        datetime.strptime(key, fmt)
+        return datetime.strptime(key, fmt).replace(tzinfo=UTC)
     except ValueError:
-        return False
-    return True
+        return None
+
+
+def _is_valid_power_timestamp(key: str, temporal: Literal["daily", "hourly"]) -> bool:
+    return _parse_power_timestamp(key, temporal) is not None
 
 
 class NASAPowerPayload(BaseModel):
-    """Validated query parameters for NASA POWER point or regional retrieval."""
+    """Validated query parameters for NASA POWER point, regional, or auto retrieval."""
 
     model_config = ConfigDict(extra="forbid")
 
     product: str = "nasa_power"
-    mode: Literal["point", "regional"] = "point"
+    mode: Literal["point", "regional", "auto"] = "point"
     temporal: Literal["daily", "hourly"] = "daily"
     community: str = "AG"
     parameters: tuple[str, ...]
-    start_date: date
-    end_date: date
+    start_date: date | None = None
+    end_date: date | None = None
+    start_time: datetime | None = None
+    end_time: datetime | None = None
+    bbox: tuple[float, float, float, float] | None = None
     latitude: float | None = None
     longitude: float | None = None
     min_lat: float | None = None
@@ -101,14 +108,72 @@ class NASAPowerPayload(BaseModel):
     def _validate_request(self) -> "NASAPowerPayload":
         if not self.parameters:
             raise ValueError("parameters must be non-empty")
+
+        if self.start_date is None and self.start_time is not None:
+            dt0 = (
+                self.start_time.replace(tzinfo=UTC)
+                if self.start_time.tzinfo is None
+                else self.start_time.astimezone(UTC)
+            )
+            self.start_date = dt0.date()
+        if self.end_date is None and self.end_time is not None:
+            dt1 = (
+                self.end_time.replace(tzinfo=UTC)
+                if self.end_time.tzinfo is None
+                else self.end_time.astimezone(UTC)
+            )
+            self.end_date = dt1.date()
+        if self.start_date is None or self.end_date is None:
+            raise ValueError("start_date and end_date (or start_time and end_time) are required")
         if self.end_date < self.start_date:
             raise ValueError("end_date cannot precede start_date")
+
+        if self.bbox is not None:
+            validate_wgs84_bbox(self.bbox)
+
+        if self.mode == "auto":
+            if self.bbox is not None:
+                min_lon, min_lat, max_lon, max_lat = self.bbox
+                if (max_lon - min_lon) >= _MIN_REGIONAL_SPAN_DEG and (
+                    max_lat - min_lat
+                ) >= _MIN_REGIONAL_SPAN_DEG:
+                    self.mode = "regional"
+                    self.min_lon = min_lon if self.min_lon is None else self.min_lon
+                    self.min_lat = min_lat if self.min_lat is None else self.min_lat
+                    self.max_lon = max_lon if self.max_lon is None else self.max_lon
+                    self.max_lat = max_lat if self.max_lat is None else self.max_lat
+                else:
+                    self.mode = "point"
+                    if self.longitude is None:
+                        self.longitude = (min_lon + max_lon) / 2.0
+                    if self.latitude is None:
+                        self.latitude = (min_lat + max_lat) / 2.0
+            elif self.latitude is not None and self.longitude is not None:
+                self.mode = "point"
+            elif all(
+                v is not None for v in (self.min_lat, self.max_lat, self.min_lon, self.max_lon)
+            ):
+                self.mode = "regional"
+            else:
+                raise ValueError("auto mode requires bbox, point coordinates, or regional bounds")
+
         if self.mode == "point":
+            if self.bbox is not None and (self.latitude is None or self.longitude is None):
+                self.longitude = (self.bbox[0] + self.bbox[2]) / 2.0
+                self.latitude = (self.bbox[1] + self.bbox[3]) / 2.0
             if self.latitude is None or self.longitude is None:
                 raise ValueError("point mode requires latitude and longitude")
             if not (-90.0 <= self.latitude <= 90.0) or not (-180.0 <= self.longitude <= 180.0):
                 raise ValueError("point latitude/longitude out of bounds")
         else:
+            if self.bbox is not None and any(
+                v is None for v in (self.min_lat, self.max_lat, self.min_lon, self.max_lon)
+            ):
+                min_lon, min_lat, max_lon, max_lat = self.bbox
+                self.min_lon = min_lon if self.min_lon is None else self.min_lon
+                self.min_lat = min_lat if self.min_lat is None else self.min_lat
+                self.max_lon = max_lon if self.max_lon is None else self.max_lon
+                self.max_lat = max_lat if self.max_lat is None else self.max_lat
             if any(v is None for v in (self.min_lat, self.max_lat, self.min_lon, self.max_lon)):
                 raise ValueError("regional mode requires min_lat, max_lat, min_lon, and max_lon")
             min_lat = float(self.min_lat)  # type: ignore[arg-type]
@@ -212,13 +277,16 @@ class NASAPowerHandler:
     def _build_query(
         self, req: NASAPowerPayload, params_override: tuple[str, ...] | None = None
     ) -> tuple[str, dict[str, str]]:
+        start_d = req.start_date
+        end_d = req.end_date
+        assert start_d is not None and end_d is not None
         chosen_params = params_override or req.parameters
         url = f"{self._base_url}/temporal/{req.temporal}/{req.mode}"
         params = {
             "parameters": ",".join(chosen_params),
             "community": req.community,
-            "start": req.start_date.strftime("%Y%m%d"),
-            "end": req.end_date.strftime("%Y%m%d"),
+            "start": start_d.strftime("%Y%m%d"),
+            "end": end_d.strftime("%Y%m%d"),
             "format": "JSON",
             "time-standard": "UTC",
         }
@@ -290,10 +358,12 @@ class NASAPowerHandler:
             else json.dumps(merged_doc, separators=(",", ":")).encode("utf-8")
         )
 
+        start_d = req.start_date
+        end_d = req.end_date
+        assert start_d is not None and end_d is not None
+
         base_dir = self._raw_dir or Path(tempfile.mkdtemp(prefix="ghs_power_"))
-        fname = (
-            f"power_{req.mode}_{req.temporal}_{req.start_date:%Y%m%d}_{req.end_date:%Y%m%d}.json"
-        )
+        fname = f"power_{req.mode}_{req.temporal}_{start_d:%Y%m%d}_{end_d:%Y%m%d}.json"
         _, asset = write_raw_asset(base_dir, fname, raw_payload, "json", last_media)
 
         header = _as_map(merged_doc.get("header"))
@@ -310,6 +380,8 @@ class NASAPowerHandler:
         null_count = 0
         invalid_ts_count = 0
         sample_coords: list[list[float]] = []
+        param_ts_buckets: dict[str, dict[str, list[float]]] = {p: {} for p in req.parameters}
+        param_ts_keys: dict[str, dict[str, datetime]] = {p: {} for p in req.parameters}
 
         for feat in features_raw:
             fmap = _as_map(feat)
@@ -323,19 +395,27 @@ class NASAPowerHandler:
                 sample_coords.append([float(c) for c in coords])
             props = _as_map(fmap.get("properties"))
             param_map = _as_map(props.get("parameter"))
-            for series in param_map.values():
+            for p_raw, series in param_map.items():
                 if not isinstance(series, Mapping):
                     continue
+                p_key = str(p_raw)
                 for ts_key, val in series.items():
+                    ts_str = str(ts_key)
                     total_obs += 1
-                    if not _is_valid_power_timestamp(str(ts_key), req.temporal):
+                    parsed_dt = _parse_power_timestamp(ts_str, req.temporal)
+                    if parsed_dt is None:
                         invalid_ts_count += 1
-                    elif val is None:
+                        continue
+                    if p_key in param_ts_keys:
+                        param_ts_keys[p_key][ts_str] = parsed_dt
+                    if val is None:
                         null_count += 1
                     elif isinstance(val, (int, float)):
                         fval = float(val)
                         if not math.isfinite(fval) or math.isclose(fval, fill_val):
                             fill_count += 1
+                        elif p_key in param_ts_buckets:
+                            param_ts_buckets[p_key].setdefault(ts_str, []).append(fval)
                     else:
                         null_count += 1
 
@@ -381,22 +461,22 @@ class NASAPowerHandler:
                 attributes=attrs,
             )
 
-        t_start = datetime(
-            req.start_date.year, req.start_date.month, req.start_date.day, tzinfo=UTC
-        )
-        t_end = datetime(
-            req.end_date.year, req.end_date.month, req.end_date.day, tzinfo=UTC
-        ) + timedelta(days=1)
+        t_start = datetime(start_d.year, start_d.month, start_d.day, tzinfo=UTC)
+        t_end = datetime(end_d.year, end_d.month, end_d.day, tzinfo=UTC) + timedelta(days=1)
         valid_frac = (total_obs - excluded) / total_obs if total_obs > 0 else None
         missing_frac = excluded / total_obs if total_obs > 0 else None
         bounds = (
-            None
-            if req.mode == "point"
-            else SpatialBounds(
-                float(req.min_lon or 0.0),
-                float(req.min_lat or 0.0),
-                float(req.max_lon or 0.0),
-                float(req.max_lat or 0.0),
+            SpatialBounds(*req.bbox)
+            if req.bbox is not None
+            else (
+                None
+                if req.mode == "point"
+                else SpatialBounds(
+                    float(req.min_lon or 0.0),
+                    float(req.min_lat or 0.0),
+                    float(req.max_lon or 0.0),
+                    float(req.max_lat or 0.0),
+                )
             )
         )
         spatial = SpatialMetadata(
@@ -407,10 +487,40 @@ class NASAPowerHandler:
             spatial_resolution="; ".join(sorted(resolutions_seen)) or "0.5x0.625 deg MERRA-2",
         )
         api_ver = str(_as_map(header.get("api")).get("version", "v2"))
-        source_id = (
-            f"nasa_power_{req.mode}_{req.temporal}_{req.start_date:%Y%m%d}_{req.end_date:%Y%m%d}"
-        )
+        source_id = f"nasa_power_{req.mode}_{req.temporal}_{start_d:%Y%m%d}_{end_d:%Y%m%d}"
         cadence = "1h" if req.temporal == "hourly" else "daily"
+
+        time_series_ext: dict[str, object] = {}
+        total_feat_count = max(1, len(features_raw))
+        max_ts_count = 0
+        max_valid_ts = 0
+        for p_name, var_spec in variables.items():
+            ts_dt_map = param_ts_keys.get(p_name, {})
+            if not ts_dt_map:
+                continue
+            ordered_items = sorted(ts_dt_map.items(), key=lambda pair: pair[1])
+            ts_dts = [dt for _, dt in ordered_items]
+            vals: list[float | None] = []
+            valid_counts: list[int] = []
+            total_counts: list[int] = []
+            for ts_str, _ in ordered_items:
+                bucket = param_ts_buckets[p_name].get(ts_str, [])
+                if bucket:
+                    vals.append(sum(bucket) / len(bucket))
+                    valid_counts.append(len(bucket))
+                else:
+                    vals.append(None)
+                    valid_counts.append(0)
+                total_counts.append(total_feat_count)
+            max_ts_count = max(max_ts_count, len(ts_dts))
+            max_valid_ts = max(max_valid_ts, sum(1 for v in vals if v is not None))
+            time_series_ext[p_name] = build_time_series_extension(
+                timestamps=ts_dts,
+                values=vals,
+                units=var_spec.units,
+                valid_pixel_counts=valid_counts,
+                total_pixel_counts=total_counts,
+            )
         prov = build_provenance(
             self.provider,
             req.product,
@@ -461,6 +571,18 @@ class NASAPowerHandler:
                 "mode": req.mode,
                 "temporal": req.temporal,
                 "coordinates_preview": sample_coords[:5],
+                "time_series": time_series_ext,
+                "ingestion_summary": {
+                    "mode": req.mode,
+                    "temporal": req.temporal,
+                    "parameters": list(req.parameters),
+                    "requested_count": 1,
+                    "succeeded_count": 1,
+                    "failed_count": 0,
+                    "partial_failures": [],
+                    "valid_timestamps": max_valid_ts,
+                    "total_timestamps": max_ts_count,
+                },
             },
         )
 

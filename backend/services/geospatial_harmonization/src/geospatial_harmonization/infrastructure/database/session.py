@@ -1,5 +1,6 @@
 """Async SQLAlchemy engine, session factory, and connectivity health check."""
 
+import contextlib
 from pathlib import Path
 from typing import Protocol
 
@@ -43,6 +44,10 @@ def build_async_engine(database_url: str, *, echo: bool = False) -> AsyncEngine:
     is_sqlite = is_sqlite_url(database_url)
     kwargs: dict[str, object] = {"echo": echo}
     if is_sqlite:
+        db_path = sqlite_file_path(database_url)
+        if db_path is not None and not str(db_path).startswith("/nonexistent"):
+            with contextlib.suppress(OSError):
+                db_path.parent.mkdir(parents=True, exist_ok=True)
         kwargs["connect_args"] = {"timeout": 30.0}
     else:
         kwargs["pool_pre_ping"] = True

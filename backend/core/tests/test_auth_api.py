@@ -152,3 +152,49 @@ def test_github_login_redirect_roundtrip_and_safe_return_to() -> None:
         )
         assert denied_resp.status_code == 302
         assert denied_resp.headers["location"] == "http://localhost:5173?authError=access_denied"
+
+
+def test_dev_session_enabled_only_in_development_and_sets_cookie() -> None:
+    dev_app = create_app(
+        Settings(
+            _env_file=None,
+            environment="development",
+            database_url="sqlite+aiosqlite:///:memory:",
+        )
+    )
+    with TestClient(dev_app) as dev_client:
+        sys_info = dev_client.get("/api/v1/system/info")
+        assert sys_info.status_code == 200
+        assert sys_info.json()["devAuthEnabled"] is True
+
+        resp = dev_client.post("/api/v1/auth/dev-session")
+        assert resp.status_code == 200
+        payload = resp.json()
+        assert payload["user"]["githubLogin"] == "terra-dev-researcher"
+        assert payload["accessToken"]
+
+        me = dev_client.get("/api/v1/auth/me")
+        assert me.status_code == 200
+        assert me.json()["githubLogin"] == "terra-dev-researcher"
+
+    for blocked_env in ("test", "production"):
+        extra = (
+            {"jwt_secret_key": "production-secret-at-least-thirty-two-bytes-long"}
+            if blocked_env == "production"
+            else {}
+        )
+        blocked_app = create_app(
+            Settings(
+                _env_file=None,
+                environment=blocked_env,
+                database_url="sqlite+aiosqlite:///:memory:",
+                **extra,
+            )
+        )
+        with TestClient(blocked_app) as blocked_client:
+            sys_info = blocked_client.get("/api/v1/system/info")
+            assert sys_info.status_code == 200
+            assert sys_info.json()["devAuthEnabled"] is False
+
+            blocked_resp = blocked_client.post("/api/v1/auth/dev-session")
+            assert blocked_resp.status_code == 403

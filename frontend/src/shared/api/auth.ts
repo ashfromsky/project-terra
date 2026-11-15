@@ -1,10 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { apiFetchClient, ApiError, buildApiUrl, extractErrorDetail, unwrapApiResponse } from './client'
-import type { LogoutResponse, UserResponse } from './contracts'
+import type { AuthCallbackResponse, LogoutResponse, UserResponse } from './contracts'
 import { ASSESSMENTS_LIST_QUERY_KEY } from './assessments'
 import { REGIONS_QUERY_KEY } from './regions'
 
-export type { LogoutResponse, UserResponse }
+export type { AuthCallbackResponse, LogoutResponse, UserResponse }
 
 export const AUTH_ME_QUERY_KEY = ['auth', 'me'] as const
 
@@ -59,6 +59,29 @@ export function useCurrentUserQuery() {
   })
 }
 
+export async function loginDevSession(): Promise<AuthCallbackResponse> {
+  try {
+    const result = await apiFetchClient.POST('/api/v1/auth/dev-session')
+    return unwrapApiResponse(result, 'POST /api/v1/auth/dev-session')
+  } catch (cause) {
+    if (cause instanceof ApiError) throw cause
+    throw new ApiError(0, `Network error calling POST /api/v1/auth/dev-session: ${String(cause)}`)
+  }
+}
+
+export function useDevSessionLoginMutation() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: loginDevSession,
+    onSuccess: (session) => {
+      queryClient.setQueryData(AUTH_ME_QUERY_KEY, session.user)
+      void queryClient.invalidateQueries({ queryKey: REGIONS_QUERY_KEY })
+      void queryClient.invalidateQueries({ queryKey: ASSESSMENTS_LIST_QUERY_KEY })
+      void queryClient.invalidateQueries({ queryKey: ['data-sources'] })
+    },
+  })
+}
+
 export function useLogoutMutation() {
   const queryClient = useQueryClient()
   return useMutation({
@@ -68,6 +91,7 @@ export function useLogoutMutation() {
       queryClient.removeQueries({ queryKey: REGIONS_QUERY_KEY })
       queryClient.removeQueries({ queryKey: ASSESSMENTS_LIST_QUERY_KEY })
       queryClient.removeQueries({ queryKey: ['assessments', 'detail'] })
+      queryClient.removeQueries({ queryKey: ['data-sources'] })
     },
   })
 }

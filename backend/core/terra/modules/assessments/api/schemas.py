@@ -112,3 +112,52 @@ class AssessmentDetailResponse(AssessmentSummaryResponse):
             else None,
             artifact_paths=dict(assessment.artifact_paths),
         )
+
+
+class CompareAssessmentsRequest(CamelModel):
+    """Request payload selecting two completed user assessments for comparison."""
+
+    primary_assessment_id: UUID
+    comparison_assessment_id: UUID
+
+
+class VariableComparisonSummary(CamelModel):
+    """Variable-level trend, resilience, and series mean deltas between two runs."""
+
+    variable_name: str
+    primary_sens_slope: float | None = None
+    comparison_sens_slope: float | None = None
+    sens_slope_delta: float | None = None
+    slope_unit: str | None = None
+    primary_direction: str | None = None
+    comparison_direction: str | None = None
+    primary_p_value: float | None = None
+    comparison_p_value: float | None = None
+    primary_resistance: float | None = None
+    comparison_resistance: float | None = None
+    resistance_delta: float | None = None
+    primary_recovery: float | None = None
+    comparison_recovery: float | None = None
+    recovery_delta: float | None = None
+    primary_stability: float | None = None
+    comparison_stability: float | None = None
+    stability_delta: float | None = None
+    primary_sensitivity: float | None = None
+    comparison_sensitivity: float | None = None
+    sensitivity_delta: float | None = None
+    primary_mean_value: float | None = None
+    comparison_mean_value: float | None = None
+    mean_value_delta: float | None = None
+
+
+class AssessmentComparisonResponse(CamelModel):
+    """Side-by-side scientific comparison payload between two assessments."""
+
+    primary: AssessmentDetailResponse
+    comparison: AssessmentDetailResponse
+    shared_variables: list[str]
+    primary_only_variables: list[str]
+    comparison_only_variables: list[str]
+    variable_comparisons: list[VariableComparisonSummary]
+    compatibility_warnings: list[str]
+    methodology_notes: list[str]

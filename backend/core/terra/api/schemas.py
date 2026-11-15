@@ -48,3 +48,4 @@ class SystemInfoResponse(CamelModel):
     auth_provider: str
     default_crs: str
     github_oauth_configured: bool
+    dev_auth_enabled: bool = False

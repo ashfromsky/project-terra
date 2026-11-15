@@ -91,12 +91,45 @@ def _resolve_temporal_semantics(raw: Any) -> TemporalSemantics:
     return mapping.get(value, TemporalSemantics.INTERVAL)
 
 
+_CANONICAL_ALIAS_MAP: dict[str, str] = {
+    "250m 16 days NDVI": "NDVI",
+    "250m_16_days_NDVI": "NDVI",
+    "NDVI": "NDVI",
+    "250m 16 days EVI": "EVI",
+    "250m_16_days_EVI": "EVI",
+    "EVI": "EVI",
+    "Grid/precipitation": "precipitation",
+    "precipitationCal": "precipitation",
+    "precipitation": "precipitation",
+    "Soil_Moisture_Retrieval_Data_AM/soil_moisture": "soil_moisture",
+    "soil_moisture": "soil_moisture",
+    "Soil_Moisture_Retrieval_Data_PM/soil_moisture_pm": "soil_moisture_pm",
+    "soil_moisture_pm": "soil_moisture_pm",
+}
+
+
+def _resolve_catalog_var(
+    name: str,
+    catalog_spec: SourceProductSpec | None,
+) -> VariableMetadata | None:
+    if catalog_spec is None:
+        return None
+    direct = catalog_spec.variables.get(name)
+    if direct is not None:
+        return direct
+    canonical = _CANONICAL_ALIAS_MAP.get(name, name)
+    for candidate, target in _CANONICAL_ALIAS_MAP.items():
+        if target == canonical and candidate in catalog_spec.variables:
+            return catalog_spec.variables[candidate]
+    return catalog_spec.variables.get(canonical)
+
+
 def _map_variable_spec(
     name: str,
     raw_spec: Mapping[str, Any],
     catalog_spec: SourceProductSpec | None,
 ) -> VariableMetadata:
-    catalog_var = catalog_spec.variables.get(name) if catalog_spec else None
+    catalog_var = _resolve_catalog_var(name, catalog_spec)
     scale_factor = float(
         raw_spec.get("scale_factor", catalog_var.scale_factor if catalog_var else 1.0)
     )
@@ -188,10 +221,18 @@ def map_ghs_dataset_payload(payload: Mapping[str, Any]) -> ScientificDataset:
     mapped_vars: dict[str, VariableMetadata] = {}
     for var_name, raw_var in raw_variables.items():
         if isinstance(raw_var, Mapping):
-            mapped_vars[var_name] = _map_variable_spec(var_name, raw_var, catalog_spec)
+            mapped = _map_variable_spec(var_name, raw_var, catalog_spec)
+            mapped_vars[var_name] = mapped
+            canonical_alias = _CANONICAL_ALIAS_MAP.get(var_name)
+            if canonical_alias and canonical_alias not in mapped_vars:
+                mapped_vars[canonical_alias] = mapped.model_copy(update={"name": canonical_alias})
 
     if not mapped_vars and catalog_spec is not None:
         mapped_vars = dict(catalog_spec.variables)
+        for cat_name, cat_var in list(mapped_vars.items()):
+            canonical_alias = _CANONICAL_ALIAS_MAP.get(cat_name)
+            if canonical_alias and canonical_alias not in mapped_vars:
+                mapped_vars[canonical_alias] = cat_var.model_copy(update={"name": canonical_alias})
 
     now_utc = datetime.now(UTC)
     t_start = _parse_datetime(temporal_raw.get("start"), default=now_utc)
@@ -267,23 +308,53 @@ def map_ghs_dataset_payload(payload: Mapping[str, Any]) -> ScientificDataset:
         for var_name, ts_payload in raw_ts_map.items():
             if not isinstance(ts_payload, Mapping):
                 continue
-            var_meta = mapped_vars.get(var_name)
+            canonical_alias = _CANONICAL_ALIAS_MAP.get(var_name)
+            var_meta = (
+                mapped_vars.get(var_name)
+                or (mapped_vars.get(canonical_alias) if canonical_alias else None)
+                or _resolve_catalog_var(var_name, catalog_spec)
+            )
+            if var_meta is None and var_name == "accumulated_depth_mm":
+                var_meta = VariableMetadata(
+                    name="accumulated_depth_mm",
+                    canonical_name="precipitation_depth",
+                    units=str(ts_payload.get("units") or "mm"),
+                    semantic_kind=VariableSemanticKind.CONTINUOUS_EXTENSIVE,
+                    is_scaled=True,
+                )
             if var_meta is None:
                 continue
+            if "is_scaled" in ts_payload:
+                var_meta = var_meta.model_copy(update={"is_scaled": bool(ts_payload["is_scaled"])})
+                if var_name in mapped_vars:
+                    mapped_vars[var_name] = var_meta
             ts_dates = [_parse_datetime(x) for x in ts_payload.get("timestamps", [])]
             vals = [None if v is None else float(v) for v in ts_payload.get("values", [])]
             qa_raw = dict(ts_payload.get("qa_layers") or {})
-            qa_layers = {
-                str(k): [None if q is None else int(q) for q in q_vals]
-                for k, q_vals in qa_raw.items()
-            }
-            embedded_series[var_name] = ObservationSeries(
+            qa_layers: dict[str, list[int | None]] = {}
+            for k, q_vals in qa_raw.items():
+                key = str(k)
+                if not isinstance(q_vals, list):
+                    continue
+                if key == "precipitationQualityIndex":
+                    qa_layers["pqi_milli"] = [
+                        None if q is None else round(float(q) * 1000) for q in q_vals
+                    ]
+                else:
+                    qa_layers[key] = [None if q is None else round(float(q)) for q in q_vals]
+            series_obj = ObservationSeries(
                 timestamps=ts_dates,
                 values=vals,
                 qa_layers=qa_layers,
                 overpass_tags=ts_payload.get("overpass_tags"),
                 metadata=var_meta,
             )
+            embedded_series[var_name] = series_obj
+            if canonical_alias and canonical_alias not in embedded_series:
+                alias_meta = var_meta.model_copy(update={"name": canonical_alias})
+                embedded_series[canonical_alias] = series_obj.model_copy(
+                    update={"metadata": alias_meta}
+                )
 
     granule_raw = payload.get("granule_id")
     granule_ids = (str(granule_raw),) if granule_raw else ()

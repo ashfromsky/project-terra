@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { ApiError, apiFetchClient, extractErrorDetail, unwrapApiResponse } from '../client'
-import { buildGitHubLoginUrl } from '../auth'
+import { buildGitHubLoginUrl, loginDevSession } from '../auth'
 import {
+  compareAssessments,
   createAssessment,
   executeAssessment,
   fetchAssessmentDetail,
@@ -9,6 +10,12 @@ import {
   fetchAssessments,
   parseScientificAssessmentResult,
 } from '../assessments'
+import {
+  discoverObservations,
+  fetchPreparedDatasets,
+  fetchProviders,
+  startIngestion,
+} from '../data-sources'
 import type { RegionResponse } from '../contracts'
 import { regionResponseToAoiFeature, toRegionGeometryInput } from '../regions'
 import { normalizeAoiGeometry } from '../../lib/geojson-utils'
@@ -534,6 +541,305 @@ describe('assessments API adapters and result parser', () => {
     await expect(fetchAssessmentDetail('a-1')).rejects.toMatchObject({
       name: 'ApiError',
       status: 0,
+    })
+  })
+
+  it('parses temporalSeries, baselines, anomalies, and crossVariable from scientific results', () => {
+    const parsed = parseScientificAssessmentResult({
+      assessment_id: 'assess-ts-01',
+      status: 'completed',
+      temporal_series: [
+        {
+          dataset_id: 'ds-1',
+          variable_name: 'NDVI',
+          units: 'index',
+          cadence: 'monthly',
+          aggregation_operator: 'mean',
+          timestamps: ['2024-01-01T00:00:00Z', '2024-02-01T00:00:00Z'],
+          values: [0.62, 0.58],
+          coverage_fractions: [1.0, 0.92],
+          interpolated_indices: [1],
+          warnings: [],
+        },
+      ],
+      baselines: [
+        {
+          dataset_id: 'ds-1',
+          variable_name: 'NDVI',
+          units: 'index',
+          baseline_type: 'monthly_climatology',
+          bin_means: [0.64, 0.61],
+          bin_stds: [0.05, 0.04],
+          bin_counts: [5, 5],
+          warnings: [],
+        },
+      ],
+      anomalies: [
+        {
+          dataset_id: 'ds-1',
+          variable_name: 'NDVI',
+          units: 'index',
+          timestamps: ['2024-01-01T00:00:00Z', '2024-02-01T00:00:00Z'],
+          raw_anomalies: [-0.02, -0.03],
+          standard_zscores: [-0.4, -0.75],
+          robust_zscores: [-0.35, -0.8],
+          persistent_runs: [
+            {
+              start_timestamp: '2024-02-01T00:00:00Z',
+              end_timestamp: '2024-02-01T00:00:00Z',
+              duration_steps: 1,
+              peak_zscore: -0.75,
+              severity: 'moderate',
+            },
+          ],
+          warnings: [],
+        },
+      ],
+      cross_variable: [
+        {
+          x_variable: 'PRECIP',
+          y_variable: 'NDVI',
+          pearson_r: 0.71,
+          spearman_rho: 0.68,
+          lag_steps: 1,
+          p_value: 0.012,
+          sample_count: 24,
+          caveat: 'Observational correlation only.',
+          warnings: [],
+        },
+      ],
+    })
+
+    expect(parsed).not.toBeNull()
+    expect(parsed?.temporalSeries[0]).toMatchObject({
+      datasetId: 'ds-1',
+      variableName: 'NDVI',
+      cadence: 'monthly',
+      values: [0.62, 0.58],
+      interpolatedIndices: [1],
+    })
+    expect(parsed?.baselines[0]).toMatchObject({
+      baselineType: 'monthly_climatology',
+      binMeans: [0.64, 0.61],
+      binCounts: [5, 5],
+    })
+    expect(parsed?.anomalies[0]).toMatchObject({
+      standardZscores: [-0.4, -0.75],
+      robustZscores: [-0.35, -0.8],
+    })
+    expect(parsed?.anomalies[0]?.persistentRuns[0]?.severity).toBe('moderate')
+    expect(parsed?.crossVariable[0]).toMatchObject({
+      xVariable: 'PRECIP',
+      yVariable: 'NDVI',
+      pearsonR: 0.71,
+      lagSteps: 1,
+      sampleCount: 24,
+    })
+  })
+
+  it('calls dev-session auth, data-sources discovery/ingestion/datasets, and comparison endpoints', async () => {
+    const getSpy = vi.spyOn(apiFetchClient, 'GET')
+    const postSpy = vi.spyOn(apiFetchClient, 'POST')
+
+    postSpy.mockResolvedValueOnce({
+      data: {
+        accessToken: 'dev-jwt-token',
+        tokenType: 'bearer',
+        user: {
+          id: 'u-dev',
+          githubId: 0,
+          githubLogin: 'terra-dev',
+          displayName: 'Local Developer',
+          avatarUrl: null,
+          email: null,
+          createdAt: '2026-11-15T10:00:00Z',
+          updatedAt: '2026-11-15T10:00:00Z',
+        },
+      },
+      response: new Response(null, { status: 200 }),
+    } as never)
+    const session = await loginDevSession()
+    expect(session.user.githubLogin).toBe('terra-dev')
+    expect(postSpy).toHaveBeenCalledWith('/api/v1/auth/dev-session')
+
+    getSpy.mockResolvedValueOnce({
+      data: [
+        {
+          provider: 'nasa_power',
+          title: 'NASA POWER',
+          enabled: true,
+          authRequired: false,
+          authConfigured: true,
+          authMechanism: 'public',
+          status: 'ready',
+          supportsDiscovery: true,
+          registeredProducts: ['POWER_DAILY'],
+          products: [],
+        },
+      ],
+      response: new Response(null, { status: 200 }),
+    } as never)
+    const providers = await fetchProviders()
+    expect(providers[0]?.provider).toBe('nasa_power')
+    expect(getSpy).toHaveBeenCalledWith('/api/v1/data-sources/providers')
+
+    postSpy.mockResolvedValueOnce({
+      data: {
+        provider: 'nasa_power',
+        product: 'POWER_DAILY',
+        count: 1,
+        bbox: [24.0, 48.0, 25.0, 49.0],
+        observations: [
+          {
+            observationId: 'g-1',
+            provider: 'nasa_power',
+            product: 'POWER_DAILY',
+            productVersion: '9.0',
+            title: 'NASA POWER window',
+            timeStart: '2024-01-01T00:00:00Z',
+            timeEnd: '2024-01-31T23:59:59Z',
+            bbox: [24.0, 48.0, 25.0, 49.0],
+            queryMode: 'point',
+            accessHint: 'public',
+          },
+        ],
+      },
+      response: new Response(null, { status: 200 }),
+    } as never)
+    const discovery = await discoverObservations({
+      provider: 'nasa_power',
+      product: 'POWER_DAILY',
+      startTime: '2024-01-01T00:00:00Z',
+      endTime: '2024-01-31T23:59:59Z',
+      limit: 20,
+    })
+    expect(discovery.count).toBe(1)
+    expect(postSpy).toHaveBeenCalledWith('/api/v1/data-sources/discover', {
+      body: {
+        provider: 'nasa_power',
+        product: 'POWER_DAILY',
+        startTime: '2024-01-01T00:00:00Z',
+        endTime: '2024-01-31T23:59:59Z',
+        limit: 20,
+      },
+    })
+
+    postSpy.mockResolvedValueOnce({
+      data: {
+        id: 'op-1',
+        regionId: null,
+        ghsJobId: 'job-1',
+        provider: 'nasa_power',
+        product: 'POWER_DAILY',
+        status: 'pending',
+        progressPct: 0,
+        datasetId: null,
+        errorMessage: null,
+        errorCategory: null,
+        requestSummary: {},
+        datasetSummary: null,
+        createdAt: '2026-11-15T10:00:00Z',
+        updatedAt: '2026-11-15T10:00:00Z',
+        completedAt: null,
+      },
+      response: new Response(null, { status: 202 }),
+    } as never)
+    const operation = await startIngestion({
+      provider: 'nasa_power',
+      product: 'POWER_DAILY',
+      startTime: '2024-01-01T00:00:00Z',
+      endTime: '2024-01-31T23:59:59Z',
+      maxGranules: 24,
+      executeNow: false,
+    })
+    expect(operation.ghsJobId).toBe('job-1')
+    expect(postSpy).toHaveBeenCalledWith('/api/v1/data-sources/ingestions', {
+      body: {
+        provider: 'nasa_power',
+        product: 'POWER_DAILY',
+        startTime: '2024-01-01T00:00:00Z',
+        endTime: '2024-01-31T23:59:59Z',
+        maxGranules: 24,
+        executeNow: false,
+      },
+    })
+
+    getSpy.mockResolvedValueOnce({
+      data: [
+        {
+          datasetId: 'ds-99',
+          sourceId: 'src-power-99',
+          provider: 'nasa_power',
+          product: 'POWER_DAILY',
+          variables: ['T2M'],
+          temporalStart: '2024-01-01T00:00:00Z',
+          temporalEnd: '2024-01-31T23:59:59Z',
+          temporalCadence: 'daily',
+          observationCount: 31,
+          validFraction: 1,
+          warnings: [],
+          timeSeriesPreviews: [],
+        },
+      ],
+      response: new Response(null, { status: 200 }),
+    } as never)
+    const datasets = await fetchPreparedDatasets()
+    expect(datasets[0]?.datasetId).toBe('ds-99')
+    expect(getSpy).toHaveBeenCalledWith('/api/v1/data-sources/datasets', {
+      params: { query: undefined },
+    })
+
+    postSpy.mockResolvedValueOnce({
+      data: {
+        primary: {
+          id: 'a-1',
+          ownerId: 'u-1',
+          regionId: null,
+          title: 'A',
+          status: 'completed',
+          ghsDatasetIds: ['ds-1'],
+          errorMessage: null,
+          createdAt: '2026-11-15T10:00:00Z',
+          updatedAt: '2026-11-15T10:00:00Z',
+          completedAt: '2026-11-15T10:01:00Z',
+          requestConfig: {},
+          result: {},
+          artifactPaths: {},
+        },
+        comparison: {
+          id: 'a-2',
+          ownerId: 'u-1',
+          regionId: null,
+          title: 'B',
+          status: 'completed',
+          ghsDatasetIds: ['ds-2'],
+          errorMessage: null,
+          createdAt: '2026-11-15T10:00:00Z',
+          updatedAt: '2026-11-15T10:00:00Z',
+          completedAt: '2026-11-15T10:01:00Z',
+          requestConfig: {},
+          result: {},
+          artifactPaths: {},
+        },
+        sharedVariables: ['NDVI'],
+        primaryOnlyVariables: [],
+        comparisonOnlyVariables: [],
+        variableComparisons: [],
+        compatibilityWarnings: [],
+        methodologyNotes: ['Composite TRI remains disabled'],
+      },
+      response: new Response(null, { status: 200 }),
+    } as never)
+    const comparison = await compareAssessments({
+      primaryAssessmentId: 'a-1',
+      comparisonAssessmentId: 'a-2',
+    })
+    expect(comparison.sharedVariables).toEqual(['NDVI'])
+    expect(postSpy).toHaveBeenCalledWith('/api/v1/assessments/compare', {
+      body: {
+        primaryAssessmentId: 'a-1',
+        comparisonAssessmentId: 'a-2',
+      },
     })
   })
 })

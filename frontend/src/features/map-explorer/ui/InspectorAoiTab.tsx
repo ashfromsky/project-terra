@@ -1,7 +1,13 @@
 import { useRef, useState } from 'react'
-import { buildGitHubLoginUrl, useCurrentUserQuery } from '../../../shared/api/auth'
+import { Link } from 'react-router'
+import {
+  buildGitHubLoginUrl,
+  useCurrentUserQuery,
+  useDevSessionLoginMutation,
+} from '../../../shared/api/auth'
 import { useRegionStatisticsQuery } from '../../../shared/api/regions'
 import { useSystemInfoQuery } from '../../../shared/api/system'
+import { APP_ROUTES } from '../../../shared/config/routes'
 import {
   exportAoiGeoJsonFile,
   formatCoordinatePair,
@@ -22,6 +28,20 @@ const ROLE_OPTIONS: readonly AoiRole[] = ['regionA', 'regionB', 'primary']
 
 function roleLabel(role: AoiRole): string {
   return role === 'regionA' ? 'Region A' : role === 'regionB' ? 'Region B' : 'Primary'
+}
+
+function DevSessionQuickButton() {
+  const devLoginMutation = useDevSessionLoginMutation()
+  return (
+    <button
+      type="button"
+      className="explorer-action-btn explorer-action-btn--primary"
+      disabled={devLoginMutation.isPending}
+      onClick={() => devLoginMutation.mutate()}
+    >
+      {devLoginMutation.isPending ? 'Starting dev session…' : 'Start Dev Session'}
+    </button>
+  )
 }
 
 interface AoiCardProps {
@@ -201,6 +221,9 @@ export function InspectorAoiTab() {
               Sign in with GitHub to save regions
             </a>
           )}
+          {systemInfoQuery.data?.devAuthEnabled && !systemInfoQuery.isError && (
+            <DevSessionQuickButton />
+          )}
         </div>
       )}
 
@@ -364,6 +387,20 @@ export function InspectorAoiTab() {
                   <div className="explorer-status-banner is-unavailable">
                     <strong>Zonal environmental metrics ({statisticsQuery.data.observationStatus})</strong>
                     <p>{statisticsQuery.data.message}</p>
+                  </div>
+                  <div className="explorer-aoi-footer">
+                    <Link
+                      to={`${APP_ROUTES.dataSources}?regionId=${encodeURIComponent(selectedAoi.properties.id)}`}
+                      className="explorer-action-btn explorer-action-btn--primary"
+                    >
+                      Ingest Satellite Data
+                    </Link>
+                    <Link
+                      to={`${APP_ROUTES.assessments}?regionId=${encodeURIComponent(selectedAoi.properties.id)}`}
+                      className="explorer-action-btn"
+                    >
+                      Run Scientific Assessment
+                    </Link>
                   </div>
                 </>
               ) : null}
