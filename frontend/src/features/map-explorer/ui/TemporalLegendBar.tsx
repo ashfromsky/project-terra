@@ -292,16 +292,28 @@ export function TemporalLegendBar() {
               <div className="explorer-legend-pane__title-wrap">
                 <span className="explorer-legend-pane__title">{activeLayer.legend.title}</span>
                 <span className="explorer-legend-pane__unit">({activeLayer.legend.unit})</span>
-                {activeLayer.availabilityStatus === 'connected' ? (
-                  <span className="explorer-status-pill is-connected">
-                    Connected Raster · Nearest
+                {activeLayer.availabilityStatus === 'connected' ||
+                (activeLayer.availabilityStatus === 'preview' && activeLayer.tileSource.isConnected) ? (
+                  <span
+                    className={`explorer-status-pill ${
+                      activeLayer.availabilityStatus === 'preview' ? 'is-preview' : 'is-connected'
+                    }`}
+                  >
+                    {activeLayer.availabilityStatus === 'preview'
+                      ? 'AOI Preview · Nearest'
+                      : 'Connected Raster · Nearest'}
                   </span>
                 ) : (
                   <span
-                    className="explorer-status-pill is-unavailable"
+                    className={`explorer-status-pill ${
+                      activeLayer.availabilityStatus === 'planned' ? 'is-planned' : 'is-unavailable'
+                    }`}
                     title={activeLayer.unavailableReason ?? undefined}
                   >
-                    {activeLayer.unavailableReason ?? 'Unavailable · Not ingested'}
+                    {activeLayer.unavailableReason ??
+                      (activeLayer.availabilityStatus === 'planned'
+                        ? 'Planned · Not yet ingested'
+                        : 'Unavailable · Not ingested')}
                   </span>
                 )}
               </div>

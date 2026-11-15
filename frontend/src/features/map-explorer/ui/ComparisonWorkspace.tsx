@@ -282,10 +282,24 @@ export function ComparisonWorkspace() {
                 </span>
                 <span
                   className={`explorer-status-pill ${
-                    leftLayer.availabilityStatus === 'connected' ? 'is-connected' : 'is-unavailable'
+                    leftLayer.availabilityStatus === 'connected'
+                      ? 'is-connected'
+                      : leftLayer.availabilityStatus === 'preview' &&
+                          leftLayer.tileSource.isConnected
+                        ? 'is-preview'
+                        : leftLayer.availabilityStatus === 'planned'
+                          ? 'is-planned'
+                          : 'is-unavailable'
                   }`}
                 >
-                  {leftLayer.availabilityStatus === 'connected' ? 'Connected' : 'Unavailable'}
+                  {leftLayer.availabilityStatus === 'connected'
+                    ? 'Connected'
+                    : leftLayer.availabilityStatus === 'preview' &&
+                        leftLayer.tileSource.isConnected
+                      ? 'AOI Preview'
+                      : leftLayer.availabilityStatus === 'planned'
+                        ? 'Planned'
+                        : 'Unavailable'}
                 </span>
                 <div
                   className="explorer-legend-gradient"
@@ -384,10 +398,22 @@ export function ComparisonWorkspace() {
                   className={`explorer-status-pill ${
                     rightLayer.availabilityStatus === 'connected'
                       ? 'is-connected'
-                      : 'is-unavailable'
+                      : rightLayer.availabilityStatus === 'preview' &&
+                          rightLayer.tileSource.isConnected
+                        ? 'is-preview'
+                        : rightLayer.availabilityStatus === 'planned'
+                          ? 'is-planned'
+                          : 'is-unavailable'
                   }`}
                 >
-                  {rightLayer.availabilityStatus === 'connected' ? 'Connected' : 'Unavailable'}
+                  {rightLayer.availabilityStatus === 'connected'
+                    ? 'Connected'
+                    : rightLayer.availabilityStatus === 'preview' &&
+                        rightLayer.tileSource.isConnected
+                      ? 'AOI Preview'
+                      : rightLayer.availabilityStatus === 'planned'
+                        ? 'Planned'
+                        : 'Unavailable'}
                 </span>
                 <div
                   className="explorer-legend-gradient"
