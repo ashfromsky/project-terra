@@ -639,10 +639,11 @@ class ScientificAssessmentService:
             if pv.anomaly is None:
                 continue
             raw_anom = [None if v is None else float(v) for v in pv.anomaly.raw_anomalies]
-            rob_z = pv.anomaly.robust_zscores
+            use_robust = request.anomaly.use_robust_default
+            primary_z = pv.anomaly.robust_zscores if use_robust else pv.anomaly.standard_zscores
+            fallback_z = pv.anomaly.standard_zscores if use_robust else pv.anomaly.robust_zscores
             z_series = [
-                r if r is not None else s
-                for r, s in zip(rob_z, pv.anomaly.standard_zscores, strict=True)
+                p if p is not None else f for p, f in zip(primary_z, fallback_z, strict=True)
             ]
             dist = detect_disturbances(
                 pv.temporal.timestamps,
@@ -656,48 +657,76 @@ class ScientificAssessmentService:
 
             pv_rec: list[RecoveryEventResult] = []
             neg_runs = [
-                r for r in dist.candidate_disturbance_runs if r.polarity == "negative_anomaly"
+                r
+                for r in dist.candidate_disturbance_runs
+                if r.polarity == "negative_anomaly"
+                and r.peak_zscore < 0.0
+                and (
+                    request.disturbance.negative_z_threshold >= 0.0
+                    or r.peak_zscore <= request.disturbance.negative_z_threshold
+                )
             ]
             ts_index = {ts: idx for idx, ts in enumerate(pv.temporal.timestamps)}
-            for run in neg_runs:
-                s_idx = ts_index.get(run.start_timestamp)
-                if s_idx is not None:
-                    ev_rec = analyze_post_event_recovery(
-                        pv.temporal.timestamps,
-                        raw_anom,
-                        event_start_idx=s_idx,
-                        config=request.recovery,
-                        dataset_id=pv.dataset.dataset_id,
-                        variable_name=pv.variable_name,
-                        unit_label=pv.var_meta.units,
-                        is_deseasonalized=True,
-                    )
-                    pv_rec.append(ev_rec)
-                    recoveries.append(ev_rec)
+            indexed_neg_runs = sorted(
+                [
+                    (ts_index[r.start_timestamp], r)
+                    for r in neg_runs
+                    if r.start_timestamp in ts_index
+                ],
+                key=lambda item: item[0],
+            )
+            eligible_neg_runs = [r for _, r in indexed_neg_runs]
+            for pos, (s_idx, _run) in enumerate(indexed_neg_runs):
+                next_idx = indexed_neg_runs[pos + 1][0] if pos + 1 < len(indexed_neg_runs) else None
+                ev_rec = analyze_post_event_recovery(
+                    pv.temporal.timestamps,
+                    raw_anom,
+                    event_start_idx=s_idx,
+                    next_event_idx=next_idx,
+                    config=request.recovery,
+                    dataset_id=pv.dataset.dataset_id,
+                    variable_name=pv.variable_name,
+                    unit_label=pv.var_meta.units,
+                    is_deseasonalized=True,
+                )
+                pv_rec.append(ev_rec)
+                recoveries.append(ev_rec)
 
             sens_slope: float | None = None
             sens_driver: str | None = None
-            if (
-                cross_var is not None
-                and cross_var.pairwise
-                and cross_var.pairwise[0].response_variable == pv.key
-            ):
-                top_pair = max(
-                    cross_var.pairwise,
-                    key=lambda pair: abs(pair.pearson_r or 0.0),
-                )
-                sens_slope = top_pair.pearson_r
-                sens_driver = top_pair.driver_variable
+            sens_unit = f"{pv.var_meta.units}/driver"
+            if cross_var is not None and cross_var.pairwise:
+                candidate_pairs = [
+                    pair
+                    for pair in cross_var.pairwise
+                    if pair.response_variable == pv.key
+                    and pair.ols_slope is not None
+                    and np.isfinite(pair.ols_slope)
+                ]
+                if candidate_pairs:
+                    top_pair = max(
+                        candidate_pairs,
+                        key=lambda pair: abs(pair.pearson_r or 0.0),
+                    )
+                    if top_pair.ols_slope is not None:
+                        sens_slope = float(top_pair.ols_slope)
+                        sens_driver = top_pair.driver_variable
+                        if top_pair.slope_unit:
+                            sens_unit = top_pair.slope_unit
 
             if request.resilience.compute_dimensions:
                 res_dim = compute_resilience_dimensions(
                     dataset_id=pv.dataset.dataset_id,
                     variable_name=pv.variable_name,
                     deseasonalized_residuals=raw_anom,
+                    standardized_residuals=z_series,
                     zscores=z_series,
+                    timestamps=pv.temporal.timestamps,
+                    disturbance_runs=eligible_neg_runs,
                     recovery_events=pv_rec,
                     sensitivity_slope=sens_slope,
                     sensitivity_driver=sens_driver,
+                    sensitivity_unit=sens_unit,
                 )
                 resilience_list.append(res_dim)
 

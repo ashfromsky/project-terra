@@ -1,6 +1,7 @@
 """End-to-end integration tests for ScientificAssessmentService full pipeline."""
 
 from datetime import UTC, datetime, timedelta
+from itertools import pairwise
 from pathlib import Path
 
 import numpy as np
@@ -296,3 +297,157 @@ def test_pipeline_supports_partial_dataset_availability_without_crashing() -> No
     assert res.status == AssessmentStatus.COMPLETED_PARTIAL
     assert any(st.status == StageStatus.PARTIAL for st in res.stages)
     assert len(res.trends) >= 1
+
+
+def test_pipeline_resilience_dimensions_ols_stability_and_bounded_recovery() -> None:
+    rng = np.random.default_rng(42)
+    timestamps: list[datetime] = []
+    ndvi_vals: list[float | None] = []
+    precip_vals: list[float | None] = []
+
+    for year in range(2018, 2025):
+        for month in range(1, 13):
+            ts = datetime(year, month, 1, tzinfo=UTC)
+            timestamps.append(ts)
+            season = 0.15 * float(np.sin(2.0 * np.pi * (month - 1) / 12.0))
+            precip = (
+                80.0
+                + 25.0 * float(np.cos(2.0 * np.pi * (month - 1) / 12.0))
+                + float(rng.normal(0.0, 5.0))
+            )
+            # Two distinct drought shocks separated cleanly in 2022 and 2023.
+            shock = 0.0
+            if year == 2022 and month in {4, 5, 6}:
+                shock = -0.25 if month == 5 else -0.18
+            elif year == 2023 and month in {2, 3, 4}:
+                shock = -0.35 if month == 3 else -0.22
+            val = 0.55 + season + 0.002 * (precip - 80.0) + float(rng.normal(0.0, 0.012)) + shock
+            ndvi_vals.append(val)
+            precip_vals.append(precip)
+
+    ndvi_meta = VariableMetadata(
+        name="NDVI",
+        canonical_name="ndvi",
+        units="dimensionless",
+        semantic_kind=VariableSemanticKind.CONTINUOUS_INTENSIVE,
+        valid_range=(-0.2, 1.0),
+    )
+    precip_meta = VariableMetadata(
+        name="precip",
+        canonical_name="precipitation",
+        units="mm/month",
+        semantic_kind=VariableSemanticKind.CONTINUOUS_INTENSIVE,
+    )
+    precip_scaled_meta = VariableMetadata(
+        name="precip",
+        canonical_name="precipitation",
+        units="um/month",
+        semantic_kind=VariableSemanticKind.CONTINUOUS_INTENSIVE,
+    )
+
+    ndvi_ds = ScientificDataset(
+        dataset_id="mod13-test",
+        source_id=DataSourceId.MODIS_MOD13Q1,
+        product="MOD13Q1.061",
+        product_version="061",
+        provider="nasa_earthdata",
+        spatial_support=SpatialSupport(crs=MODIS_SINUSOIDAL_WKT, nominal_resolution_m=250.0),
+        temporal_metadata=TemporalMetadata(
+            cadence=TemporalCadence.MONTHLY,
+            semantics=TemporalSemantics.COMPOSITE,
+            composite_days=16,
+            start=timestamps[0],
+            end=timestamps[-1],
+        ),
+        variables={"NDVI": ndvi_meta},
+        series={
+            "NDVI": ObservationSeries(timestamps=timestamps, values=ndvi_vals, metadata=ndvi_meta)
+        },
+    )
+    precip_ds = ScientificDataset(
+        dataset_id="gpm-test",
+        source_id=DataSourceId.GPM_IMERG,
+        product="GPM_3IMERGM.07",
+        product_version="07",
+        provider="nasa_earthdata",
+        spatial_support=SpatialSupport(crs="EPSG:4326", nominal_resolution_m=10000.0),
+        temporal_metadata=TemporalMetadata(
+            cadence=TemporalCadence.MONTHLY,
+            semantics=TemporalSemantics.INTERVAL,
+            start=timestamps[0],
+            end=timestamps[-1],
+        ),
+        variables={"precip": precip_meta},
+        series={
+            "precip": ObservationSeries(
+                timestamps=timestamps, values=precip_vals, metadata=precip_meta
+            )
+        },
+    )
+    precip_scaled_ds = ScientificDataset(
+        dataset_id="gpm-test-scaled",
+        source_id=DataSourceId.GPM_IMERG,
+        product="GPM_3IMERGM.07",
+        product_version="07",
+        provider="nasa_earthdata",
+        spatial_support=SpatialSupport(crs="EPSG:4326", nominal_resolution_m=10000.0),
+        temporal_metadata=TemporalMetadata(
+            cadence=TemporalCadence.MONTHLY,
+            semantics=TemporalSemantics.INTERVAL,
+            start=timestamps[0],
+            end=timestamps[-1],
+        ),
+        variables={"precip": precip_scaled_meta},
+        series={
+            "precip": ObservationSeries(
+                timestamps=timestamps,
+                values=[v * 1000.0 if v is not None else None for v in precip_vals],
+                metadata=precip_scaled_meta,
+            )
+        },
+    )
+
+    req = AssessmentRequest(
+        request_id="req-res-check",
+        analysis_start=datetime(2021, 1, 1, tzinfo=UTC),
+        analysis_end=datetime(2024, 12, 31, tzinfo=UTC),
+        target_cadence=TemporalCadence.MONTHLY,
+        baseline=BaselineConfig(
+            baseline_type=BaselineType.FIXED_REFERENCE,
+            start=datetime(2018, 1, 1, tzinfo=UTC),
+            end=datetime(2020, 12, 31, tzinfo=UTC),
+            min_years_required=3,
+            min_samples_per_bin=3,
+        ),
+    )
+
+    res_mm = ScientificAssessmentService().run_assessment(req, datasets=[ndvi_ds, precip_ds])
+    res_um = ScientificAssessmentService().run_assessment(req, datasets=[ndvi_ds, precip_scaled_ds])
+
+    ndvi_res = next(r for r in res_mm.resilience if r.variable_name == "NDVI")
+    precip_res_mm = next(r for r in res_mm.resilience if r.variable_name == "precip")
+    precip_res_um = next(r for r in res_um.resilience if r.variable_name == "precip")
+
+    # 1. Resistance tracked per negative event without mixing positive shocks.
+    ndvi_recoveries = [rec for rec in res_mm.recoveries if rec.variable_name == "NDVI"]
+    assert ndvi_res.resistance.available is True
+    assert len(ndvi_res.resistance.event_values) >= 2
+    assert len(ndvi_res.resistance.event_values) == len(ndvi_recoveries)
+
+    # 2. Recovery events do not overlap into subsequent disturbances.
+    for prev_rec, next_rec in pairwise(ndvi_recoveries):
+        assert prev_rec.observation_end < next_rec.event_start
+
+    # 3. Stability is invariant when physical units of precipitation scale by 1000x.
+    assert precip_res_mm.stability.available is True
+    assert precip_res_um.stability.available is True
+    stab_mm = precip_res_mm.stability.value or 0.0
+    stab_um = precip_res_um.stability.value or 0.0
+    assert abs(stab_mm - stab_um) < 1e-9
+
+    # 4. Sensitivity equals OLS slope (not Pearson r) and preserves physical units.
+    assert res_mm.cross_variable is not None
+    top_pair = res_mm.cross_variable.pairwise[0]
+    assert ndvi_res.sensitivity.value == top_pair.ols_slope
+    assert abs((ndvi_res.sensitivity.value or 0.0) - (top_pair.pearson_r or 0.0)) > 0.05
+    assert ndvi_res.sensitivity.unit == "dimensionless/mm/month"

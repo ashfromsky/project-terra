@@ -6,7 +6,7 @@ TERRA is an open-source environmental analysis platform designed to investigate 
 
 The project aims to transform Earth observation data into interpretable environmental insights through remote sensing, time-series analysis, and ecosystem resilience assessment.
 
-> Project status: Early development. Scientific methodologies and analytical capabilities are under active development.
+> Project status: Active development. Core API (`auth`, `layers`, `regions`, `assessments`), P0/P1 Scientific Core (`terra-scientific`), Core Worker (`terra-worker`), isolated Geospatial Harmonization Service (`GHS`, ADR-0002), React/Vite frontend flows (`/explore`, `/assessments`, `/data-sources`), and offline GitHub Actions CI are implemented. Remaining UI pages (`/overview`, `/comparative-analysis`, `/reports`), full GHS temporal/transport wiring into Core, P2 scientific methods (`composite_tri`, `critical_slowing_down`, `causal_attribution`), and external production deployment remain in progress or deferred.
 
 ## Overview
 
@@ -73,27 +73,33 @@ The availability, temporal coverage, spatial resolution, and quality of each dat
 
 ### Data and Scientific Computing
 
-Planned components include:
+Implemented in `backend/scientific/` (`terra-scientific`) and `backend/services/geospatial_harmonization/`:
 
-- PostgreSQL
-- PostGIS
-- DuckDB
-- NumPy
-- SciPy
-- Xarray
-- Rasterio
-- GeoPandas
-- PyArrow
+- NumPy, SciPy, Pandas, Pydantic (pure Scientific Core `terra-scientific`, zero HTTP/DB dependencies)
+- Xarray, Rasterio, GeoPandas, h5py, netCDF4, Zarr, Shapely (inside isolated `geospatial_harmonization` service per ADR-0002)
+- SQLAlchemy async (`aiosqlite` development fallback; `asyncpg`/PostgreSQL supported in config)
 
-### Development
+Planned / Target infrastructure (not currently wired in runtime):
 
-- pnpm
-- uv
-- Git
-- pytest
-- Vitest
-- Ruff
-- ESLint
+- PostGIS spatial queries in Core
+- DuckDB analytical engine
+- TiTiler dynamic COG/Zarr tile service
+- Caddy reverse proxy and PgBouncer connection pooling
+
+### Development & CI
+
+- pnpm, uv, Vitest, pytest, Ruff, mypy (strict on Scientific Core, Worker, GHS), ESLint, TypeScript
+- GitHub Actions workflows in `.github/workflows/`:
+  - `ci.yml`: Offline lint, strict mypy, unit/integration tests (`backend-core`, `scientific-core`, `worker`, `ghs-offline`, `frontend-and-contracts`), `make dev-check`, OpenAPI contract synchronization verification (`make contracts`), Vite production build (`frontend/dist` artifact), and GHS container image build verification (`cd-artifact-readiness`).
+  - `optional-live-and-postgres.yml`: Manual `workflow_dispatch` workflow for GHS PostgreSQL `FOR UPDATE SKIP LOCKED` integration tests and optional `EARTHDATA_TOKEN`-gated live NASA smoke tests.
+
+#### Deployment Readiness
+
+No external hosting provider, container registry target, or deployment credentials are configured in the repository yet. To enable automated deployment beyond the CI artifact stage (`terra-frontend-dist` and local `terra-ghs:ci` Docker build check):
+
+1. Add a container registry destination (e.g., GHCR) and Dockerfiles for `backend/core`, `backend/worker`, and `frontend` static serving alongside `backend/services/geospatial_harmonization/Dockerfile`.
+2. Provision production PostgreSQL/PostGIS, S3-compatible object storage, and configured secrets (`GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, `JWT_SECRET_KEY`, `DATABASE_URL`, `GHS_DATABASE_URL`, `EARTHDATA_TOKEN`).
+3. Add a deployment job scoped to protected environment approvals in GitHub Actions referencing those configured secrets.
 
 Run locally from the repository root via `Makefile` (requires Node.js 20+ with `pnpm`, `uv`, and Python 3.13+):
 
@@ -101,7 +107,7 @@ Run locally from the repository root via `Makefile` (requires Node.js 20+ with `
 - **Main development environment:** `make dev` — regenerates contracts, then starts `backend/core` (`http://127.0.0.1:8000`, `/health`, `/health/ready`) and Vite (`http://localhost:5173`).
 - **GHS-only environment:** `make dev-ghs` — starts the isolated Geospatial Harmonization Service API (`http://127.0.0.1:8080`, `/health`, `/ready`) and `WorkerRunner` as separate processes sharing the same GHS configuration, database, and storage. Run components individually with `make ghs-api-dev`, `make ghs-worker-dev`, and `make ghs-migrate`.
 - **Complete local environment:** `make dev-full` — regenerates contracts and starts all four independent processes (`CORE`, `FRONTEND`, `GHS`, `GHS-WORKER`). Starting all four processes does not imply Core ↔ GHS integration; GHS remains isolated per ADR-0002.
-- **Standalone & utility targets:** `make backend-dev`, `make contracts`, `make test` (Core + Frontend), `make ghs-test`, `make dev-check` (orchestrator tests), `make lint`, `make ghs-lint`, `make frontend-typecheck`.
+- **Standalone & utility targets:** `make backend-dev`, `make worker-dev`, `make contracts`, `make test` (Core + Scientific + Worker + Frontend), `make ghs-test`, `make dev-check` (orchestrator tests), `make lint`, `make ghs-lint`, `make frontend-typecheck`, `make frontend-build`.
 
 #### Environment & Process Supervision
 
@@ -136,19 +142,16 @@ TERRA aims to follow several principles:
 
 ## Project Status
 
-TERRA is currently in its initial development stage.
-
-Planned development stages:
+TERRA is in active development with Core API (`auth`, `layers`, `regions`, `assessments`), `terra-scientific` v1.1.0, `terra-worker`, GHS (isolated geospatial ingestion service), and frontend integration for `/assessments` and `/data-sources` implemented. Several scientific methods, GHS temporal/transport paths, and analytical frontend pages remain partial or deferred:
 
 - [x] Repository and development environment initialization.
-- [x] Frontend and backend foundation.
-- [ ] Environmental data ingestion.
-- [ ] Geospatial data processing.
-- [ ] Time-series analysis.
-- [ ] Ecosystem resistance and recovery metrics.
-- [ ] Integrated resilience assessment model.
-- [ ] Interactive geospatial visualization.
-- [ ] Scientific reporting and uncertainty analysis.
+- [x] Frontend and backend Core API foundation (`auth`, `layers`, `regions`, `assessments`).
+- [x] Offline Scientific Core time-series pipeline (`terra-scientific`: climatology, disturbance detection, OLS cross-variable regression, consecutive-step recovery, and Resistance/Stability/Sensitivity resilience dimensions).
+- [x] GHS raster ingestion, harmonization, and `terra-worker` job execution.
+- [ ] GHS temporal aggregation wiring into `HarmonizationService.execute_plan`, AppEEARS/Harmony providers, and unified Core→GHS time-series transport (`extensions.time_series`).
+- [ ] P2 scientific methods (spatial trend mapping, regime shifts, counterfactual assessment) and calibrated composite TRI benchmarks.
+- [ ] Live Core API integration for analytical pages still using synthetic/placeholder views (`/overview`, `/comparative-analysis`, `/reports`).
+- [ ] Production deployment environment, container registry, and hosting secrets configuration.
 
 ## Open Source
 

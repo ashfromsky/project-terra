@@ -83,12 +83,12 @@ Core API / terra-worker ────────────► AssessmentReques
 10. **`spatial_autocorrelation` (`1.0.0`):** Global Moran's $I$ (permutation pseudo-$p$) and Local Getis-Ord $G_i^*$ hotspot/coldspot $z$-scores over valid pixel footprints.
 11. **`cross_variable_association` (`1.0.0`):** Common-timestamp inner alignment, deseasonalization (`deseasonalize=True`), Pearson $r$ (Fisher-$z$ 95% CI), Spearman $\rho$, lagged cross-correlation (`max_lag_steps`), OLS multiple regression with Variance Inflation Factor (VIF) multicollinearity diagnostics, and partial correlation. Automatically warns on spatial resolution disparities and enforces non-causal wording.
 12. **`pettitt_change_point` (`1.0.0`):** Pettitt (1979) non-parametric Mann-Whitney two-sample shift statistic $K_T = \max_t |U_{t,T}|$ with recursive significant segment splitting and persistent disturbance episode grouping.
-13. **`event_recovery` (`1.0.0`):** Pre-disturbance baseline mean, trough magnitude, elapsed recovery duration, completeness ratio $(x_{\text{end/rec}} - x_{\text{peak}})/(x_{\text{pre}} - x_{\text{peak}})$, recovery rate, and `"incomplete_censored"` labeling when series ends before `recovery_fraction_threshold` (default `0.9`).
-14. **`resilience_dimensions` (`1.0.0`):** Reports four unpooled proxy dimensions:
-    - **Resistance:** $1 / (1 + \max|z_{\text{peak}}|)$ when disturbance occurs.
-    - **Recovery:** Mean completeness fraction across post-event recovery episodes.
-    - **Stability:** $1 / (1 + s(\text{deseasonalized residuals}))$ when $\ge 6$ valid residuals exist.
-    - **Sensitivity:** OLS response-anomaly slope per driver anomaly unit (labeled non-causal).
+13. **`event_recovery` (`1.1.0`):** Pre-disturbance finite baseline mean (returns `insufficient_data` when no valid pre-event observations exist), trough magnitude bounded before `next_event_idx`, elapsed recovery duration, completeness ratio $(x_{\text{end/rec}} - x_{\text{peak}})/(x_{\text{pre}} - x_{\text{peak}})$, recovery rate, consecutive confirmation policy requiring `confirmation_steps` (default `2`) consecutive finite observations $\ge$ recovery target before `next_event_idx` (resetting on missing or sub-threshold steps), and `"incomplete_censored"` / `"not_recovered"` labeling when the window terminates prior to confirmed recovery.
+14. **`resilience_dimensions` (`1.1.0`):** Reports four unpooled proxy dimensions:
+    - **Resistance:** $\frac{1}{k}\sum_{i=1}^{k} \frac{1}{1 + |z_{\text{neg\_peak}, i}|}$ across negative disturbance event peaks only (preserving per-event `event_values` traceability); returns `unavailable` when no eligible negative disturbance events occur rather than treating undisturbed series as high resistance.
+    - **Recovery:** Mean completeness fraction across evaluable post-event recovery episodes (`insufficient_data` episodes excluded from numeric aggregation).
+    - **Stability:** $1 / (1 + s(\text{standardized deseasonalized residuals}))$ using dimensionless climatologically standardized residuals (preferring robust MAD-scaled $z$-scores per `use_robust_default`) when $\ge 6$ finite residuals exist, keeping stability invariant to physical measurement units.
+    - **Sensitivity:** Pairwise OLS regression slope (`response_units / driver_units`, never Pearson $r$) of aligned deseasonalized response anomalies on the strongest associated environmental driver anomaly (explicitly labeled non-causal).
 
 ### P2 — Explicitly Deferred / Withheld
 
