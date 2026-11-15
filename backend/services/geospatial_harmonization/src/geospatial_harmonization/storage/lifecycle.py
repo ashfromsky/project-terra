@@ -13,6 +13,8 @@ from geospatial_harmonization.domain.models.temporal import require_tz_aware
 from geospatial_harmonization.domain.ports import StorageLedgerRepository, StoragePort
 from geospatial_harmonization.storage.zones import StorageZoneManager
 
+_GHS_MANAGED_ZONES: tuple[str, ...] = ("raw/", "intermediate/", "derived/")
+
 
 class StorageLifecycleManager:
     """Manages TTL expiration, failed artifact cleanup, and reference-safe mark-and-sweep."""
@@ -33,10 +35,14 @@ class StorageLifecycleManager:
         """Identify untracked physical keys, unreferenced ledger objects, and missing assets."""
         ref_now = (now or datetime.now(UTC)).astimezone(UTC)
         require_tz_aware(ref_now, "now")
-        physical_items = await self._storage.list_objects()
+        physical_keys_set: set[str] = set()
+        for zone_prefix in _GHS_MANAGED_ZONES:
+            for item in await self._storage.list_objects(zone_prefix):
+                if item.key.startswith(_GHS_MANAGED_ZONES):
+                    physical_keys_set.add(item.key)
         ledger_items = await self._ledger.list_objects()
 
-        physical_keys = {item.key for item in physical_items}
+        physical_keys = physical_keys_set
         ledger_keys = {item.object_key for item in ledger_items}
 
         untracked = tuple(sorted(physical_keys - ledger_keys))

@@ -68,5 +68,5 @@ packages = ["geospatial_harmonization"]
 mypy_path = "src"
 
 [[tool.mypy.overrides]]
-module = ["h5py.*", "netCDF4.*", "pyhdf.*", "rasterio.*", "rioxarray.*", "boto3.*"]
+module = ["h5py.*", "netCDF4.*", "pyhdf.*", "rasterio.*", "rioxarray.*", "boto3.*", "botocore.*"]
 ignore_missing_imports = true

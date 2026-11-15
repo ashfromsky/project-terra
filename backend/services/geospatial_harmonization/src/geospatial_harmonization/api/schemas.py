@@ -304,14 +304,36 @@ class DatasetOut(BaseModel):
     assets: tuple[AssetOut, ...]
     provenance: dict[str, object]
     extensions: dict[str, object]
+    bbox_wgs84: tuple[float, float, float, float] | None = None
 
     @classmethod
     def from_domain(cls, dataset: SpatialDataset) -> "DatasetOut":
+        from rasterio.warp import transform_bounds
+
         from geospatial_harmonization.infrastructure.database.codec import encode_dataset
 
         raw = encode_dataset(dataset)
         raw["assets"] = [AssetOut.from_domain(a).model_dump() for a in dataset.assets]
         raw["provenance"] = _sanitize_provenance_dict(raw.get("provenance"))
+
+        bbox_wgs84: tuple[float, float, float, float] | None = None
+        bounds = dataset.spatial_metadata.bounds
+        crs = dataset.spatial_metadata.crs
+        if bounds is None and dataset.spatial_metadata.grid is not None:
+            bounds = dataset.spatial_metadata.grid.bounds
+            crs = dataset.spatial_metadata.grid.crs
+        if bounds is not None:
+            if crs is None or "4326" in crs:
+                bbox_wgs84 = bounds.as_tuple()
+            else:
+                try:
+                    w, s, e, n = transform_bounds(
+                        crs, "EPSG:4326", *bounds.as_tuple(), densify_pts=21
+                    )
+                    bbox_wgs84 = (float(w), float(s), float(e), float(n))
+                except Exception:
+                    bbox_wgs84 = None
+        raw["bbox_wgs84"] = bbox_wgs84
         return cls.model_validate(raw)
 
 
@@ -652,3 +674,36 @@ class DatasetPointQueryResponse(BaseModel):
     pixel_col: int | None = None
     bbox: RasterPointBBoxOut
     time_series: list[DatasetPointSeriesPointOut] = []
+
+
+class DerivedDatasetCreateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    product: str = Field(min_length=1, max_length=128)
+    variable_name: str = Field(min_length=1, max_length=128)
+    units: str = Field(min_length=1, max_length=64)
+    bbox_wgs84: tuple[float, float, float, float]
+    scope: Literal["grid", "aoi"] = "aoi"
+    values_2d: list[list[float | None]] | None = None
+    scalar_value: float | None = None
+    aoi_geojson: dict[str, object] | None = None
+    temporal_start: datetime | None = None
+    temporal_end: datetime | None = None
+    timestamps: list[str] = Field(default_factory=list)
+    time_series_values: list[float | None] = Field(default_factory=list)
+    source_dataset_ids: list[str] = Field(default_factory=list)
+    qa_policy: str | None = None
+    method_version: str = "1.0.0"
+
+
+class AssetDownloadUrlOut(BaseModel):
+    dataset_id: UUID
+    asset_id: str
+    storage_key: str | None = None
+    filename: str
+    media_type: str
+    size_bytes: int | None = None
+    checksum_sha256: str | None = None
+    download_url: str
+    presigned: bool
+    expires_in: int | None = None

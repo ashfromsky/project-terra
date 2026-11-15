@@ -2,7 +2,9 @@
 
 import hmac
 from datetime import UTC, datetime
+from pathlib import Path, PurePosixPath
 from typing import Literal
+from urllib.parse import quote, unquote, urlparse
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, HTTPException, Query, Request, Response, status
@@ -14,6 +16,9 @@ from geospatial_harmonization.api.dependencies import (
     HandlersDep,
     HarmonizationServiceDep,
     JobRepoDep,
+    OptionalStorageDedupDep,
+    OptionalStorageQuotaDep,
+    OptionalStorageZonesDep,
     ReadersDep,
     SettingsDep,
     StorageDep,
@@ -22,6 +27,7 @@ from geospatial_harmonization.api.dependencies import (
     StorageQuotaDep,
 )
 from geospatial_harmonization.api.schemas import (
+    AssetDownloadUrlOut,
     CancelJobRequest,
     CapabilitiesOut,
     CleanupReportOut,
@@ -30,6 +36,7 @@ from geospatial_harmonization.api.schemas import (
     DatasetPointQueryResponse,
     DatasetProvenanceOut,
     DependencyHealth,
+    DerivedDatasetCreateRequest,
     DiscoveredObservationOut,
     DiscoverRequest,
     DiscoverResponse,
@@ -44,6 +51,7 @@ from geospatial_harmonization.api.schemas import (
     StoragePolicyOut,
     StorageUsageOut,
 )
+from geospatial_harmonization.application.derived_raster import persist_derived_raster
 from geospatial_harmonization.application.raster_viz import (
     RasterAssetUnavailableError,
     RasterVariableNotFoundError,
@@ -57,6 +65,7 @@ from geospatial_harmonization.domain.exceptions import (
     IncompatibleDatasetError,
     ProviderDisabledError,
 )
+from geospatial_harmonization.domain.models.dataset import AssetReference, SpatialDataset
 from geospatial_harmonization.domain.models.harmonization import HarmonizationJob
 from geospatial_harmonization.handlers.catalog import (
     DiscoverableHandler,
@@ -79,16 +88,23 @@ async def ready(
     response: Response,
     settings: SettingsDep,
     engine: EngineDep,
+    storage: StorageDep,
 ) -> ReadinessResponse:
-    """Verify database connectivity before marking instance ready."""
+    """Verify database and object storage readiness before marking instance ready."""
     db_ok = await check_database_health(engine)
-    if not db_ok:
+    storage_health_fn = getattr(storage, "check_health", None)
+    storage_ok = bool(await storage_health_fn()) if callable(storage_health_fn) else True
+    all_ok = db_ok and storage_ok
+    if not all_ok:
         response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
     return ReadinessResponse(
-        status="ready" if db_ok else "not_ready",
+        status="ready" if all_ok else "not_ready",
         service=settings.app_name,
         version=__version__,
-        checks={"database": DependencyHealth(status="ok" if db_ok else "unavailable")},
+        checks={
+            "database": DependencyHealth(status="ok" if db_ok else "unavailable"),
+            "storage": DependencyHealth(status="ok" if storage_ok else "unavailable"),
+        },
     )
 
 
@@ -231,6 +247,48 @@ async def list_datasets(
     return [DatasetOut.from_domain(item) for item in items]
 
 
+@v1_router.post(
+    "/datasets/derived",
+    response_model=DatasetOut,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_derived_dataset(
+    body: DerivedDatasetCreateRequest,
+    datasets: DatasetRepoDep,
+    storage: StorageDep,
+    quota: OptionalStorageQuotaDep = None,
+    dedup: OptionalStorageDedupDep = None,
+    zones: OptionalStorageZonesDep = None,
+) -> DatasetOut:
+    """Persist a derived or resilience raster GeoTIFF into GHS storage and register it."""
+    try:
+        ds = await persist_derived_raster(
+            datasets=datasets,
+            storage=storage,
+            product=body.product,
+            variable_name=body.variable_name,
+            units=body.units,
+            bbox_wgs84=body.bbox_wgs84,
+            scope=body.scope,
+            values_2d=body.values_2d,
+            scalar_value=body.scalar_value,
+            aoi_geojson=body.aoi_geojson,
+            temporal_start=body.temporal_start,
+            temporal_end=body.temporal_end,
+            timestamps=body.timestamps or None,
+            time_series_values=body.time_series_values or None,
+            source_dataset_ids=body.source_dataset_ids or None,
+            qa_policy=body.qa_policy,
+            method_version=body.method_version,
+            quota=quota,
+            dedup=dedup,
+            zones=zones,
+        )
+    except IncompatibleDatasetError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return DatasetOut.from_domain(ds)
+
+
 @v1_router.get("/datasets/{dataset_id}", response_model=DatasetOut)
 async def get_dataset(dataset_id: UUID, datasets: DatasetRepoDep) -> DatasetOut:
     """Retrieve canonical metadata, QC summary, and asset references by ID."""
@@ -249,6 +307,118 @@ async def get_dataset_provenance(
     if ds is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Dataset not found")
     return DatasetProvenanceOut.from_domain(ds)
+
+
+def _select_dataset_asset(ds: SpatialDataset, asset_id: str | None) -> AssetReference:
+    if not ds.assets:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Dataset has no stored assets"
+        )
+    if asset_id is None:
+        for preferred in ds.assets:
+            if preferred.data_format in {"geotiff", "netcdf", "hdf4", "hdf5", "zarr"}:
+                return preferred
+        return ds.assets[0]
+    for asset in ds.assets:
+        if asset.asset_id == asset_id or asset.storage_key == asset_id:
+            return asset
+    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Dataset asset not found")
+
+
+@v1_router.get("/datasets/{dataset_id}/asset-content")
+async def download_dataset_asset_content(
+    dataset_id: UUID,
+    datasets: DatasetRepoDep,
+    storage: StorageDep,
+    asset_id: str | None = Query(default=None),
+) -> Response:
+    """Stream stored dataset asset bytes (local or R2/S3) for Core/authorized callers."""
+    ds = await datasets.get_by_id(dataset_id)
+    if ds is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Dataset not found")
+    asset = _select_dataset_asset(ds, asset_id)
+    storage_key = asset.storage_key or asset.asset_id
+    payload: bytes | None = None
+    if storage_key:
+        try:
+            payload = await storage.get_bytes(storage_key)
+        except (FileNotFoundError, ValueError):
+            payload = None
+    if payload is None:
+        parsed = urlparse(asset.uri)
+        local_path: Path | None = None
+        if parsed.scheme == "file":
+            local_path = Path(unquote(parsed.path))
+        elif not parsed.scheme:
+            local_path = Path(asset.uri)
+        if local_path is not None and local_path.is_file():
+            payload = local_path.read_bytes()
+    if payload is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Dataset asset content unavailable"
+        )
+    filename = PurePosixPath(storage_key or asset.asset_id).name or f"{dataset_id}.bin"
+    headers = {"Content-Disposition": f'attachment; filename="{filename}"'}
+    if asset.checksum_sha256:
+        headers["ETag"] = f'"{asset.checksum_sha256}"'
+    return Response(content=payload, media_type=asset.media_type, headers=headers)
+
+
+@v1_router.get("/datasets/{dataset_id}/asset-url", response_model=AssetDownloadUrlOut)
+async def get_dataset_asset_download_url(
+    dataset_id: UUID,
+    datasets: DatasetRepoDep,
+    storage: StorageDep,
+    settings: SettingsDep,
+    asset_id: str | None = Query(default=None),
+    expires_in: int | None = Query(default=None, ge=30, le=86_400),
+) -> AssetDownloadUrlOut:
+    """Return a short-lived R2/S3 presigned download URL or local streaming path."""
+    ds = await datasets.get_by_id(dataset_id)
+    if ds is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Dataset not found")
+    asset = _select_dataset_asset(ds, asset_id)
+    storage_key = asset.storage_key or asset.asset_id
+    filename = PurePosixPath(storage_key or asset.asset_id).name or f"{dataset_id}.bin"
+    ttl = expires_in or settings.s3_presign_ttl_seconds
+    presign_fn = getattr(storage, "generate_presigned_download_url", None)
+    presigned_url: str | None = None
+    if callable(presign_fn) and storage_key:
+        presigned_url = await presign_fn(
+            storage_key,
+            expires_in=ttl,
+            filename=filename,
+            media_type=asset.media_type,
+        )
+    if presigned_url:
+        return AssetDownloadUrlOut(
+            dataset_id=dataset_id,
+            asset_id=asset.asset_id,
+            storage_key=asset.storage_key,
+            filename=filename,
+            media_type=asset.media_type,
+            size_bytes=asset.size_bytes,
+            checksum_sha256=asset.checksum_sha256,
+            download_url=presigned_url,
+            presigned=True,
+            expires_in=ttl,
+        )
+    encoded_asset = quote(asset.asset_id, safe="")
+    fallback_url = (
+        f"{settings.api_v1_prefix}/datasets/{dataset_id}/asset-content?asset_id={encoded_asset}"
+    )
+    return AssetDownloadUrlOut(
+        dataset_id=dataset_id,
+        asset_id=asset.asset_id,
+        storage_key=asset.storage_key,
+        filename=filename,
+        media_type=asset.media_type,
+        size_bytes=asset.size_bytes,
+        checksum_sha256=asset.checksum_sha256,
+        download_url=fallback_url,
+        presigned=False,
+        expires_in=None,
+    )
 
 
 def _parse_bbox_param(raw_bbox: str) -> tuple[float, float, float, float]:

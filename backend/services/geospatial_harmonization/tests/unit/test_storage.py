@@ -16,6 +16,7 @@ from geospatial_harmonization.infrastructure.storage import (
     LocalObjectStore,
     S3ObjectStore,
     build_storage_port,
+    normalize_s3_endpoint_url,
 )
 
 
@@ -314,3 +315,120 @@ async def test_s3_object_store_streaming_multipart_pagination_and_cleanup(
     assert isinstance(local_port, LocalObjectStore)
     with pytest.raises(ValueError, match="s3_bucket"):
         build_storage_port(Settings(storage_backend="s3", s3_bucket=None))
+
+
+async def test_r2_endpoint_normalization_config_presign_and_health(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    assert (
+        normalize_s3_endpoint_url(
+            "https://acct123.r2.cloudflarestorage.com/terra/",
+            "terra",
+        )
+        == "https://acct123.r2.cloudflarestorage.com"
+    )
+    assert (
+        normalize_s3_endpoint_url("https://acct123.r2.cloudflarestorage.com", "terra")
+        == "https://acct123.r2.cloudflarestorage.com"
+    )
+
+    captured: dict[str, Any] = {}
+
+    class _FakePresignS3(_FakeS3Client):
+        def head_bucket(self, *, Bucket: str) -> dict[str, object]:
+            assert Bucket == "terra"
+            return {}
+
+        def generate_presigned_url(
+            self, ClientMethod: str, *, Params: dict[str, Any], ExpiresIn: int
+        ) -> str:
+            assert ClientMethod == "get_object"
+            assert ExpiresIn == 180
+            return (
+                f"https://acct123.r2.cloudflarestorage.com/{Params['Bucket']}/{Params['Key']}?sig=1"
+            )
+
+    fake = _FakePresignS3()
+
+    def _fake_boto3_client(service: str, **kwargs: Any) -> Any:
+        captured["service"] = service
+        captured["kwargs"] = kwargs
+        return fake
+
+    import geospatial_harmonization.infrastructure.storage as storage_mod
+
+    monkeypatch.setattr(storage_mod.boto3, "client", _fake_boto3_client)
+    store = build_storage_port(
+        Settings(
+            _env_file=None,
+            environment="test",
+            storage_backend="s3",
+            s3_bucket="terra",
+            s3_endpoint_url="https://acct123.r2.cloudflarestorage.com/terra",
+            s3_region="auto",
+            aws_access_key_id="r2-key",
+            aws_secret_access_key="r2-secret",
+        )
+    )
+    assert isinstance(store, S3ObjectStore)
+    assert captured["service"] == "s3"
+    assert captured["kwargs"]["endpoint_url"] == "https://acct123.r2.cloudflarestorage.com"
+    assert captured["kwargs"]["region_name"] == "auto"
+    cfg = captured["kwargs"]["config"]
+    assert cfg.signature_version == "s3v4"
+    assert cfg.s3["addressing_style"] == "path"
+    assert await store.check_health() is True
+
+    await store.put_bytes("derived/TERRA-NDVI/test.tif", b"tif-data", media_type="image/tiff")
+    signed = await store.generate_presigned_download_url(
+        "derived/TERRA-NDVI/test.tif",
+        expires_in=180,
+        filename="ndvi.tif",
+        media_type="image/tiff",
+    )
+    assert signed is not None
+    assert "derived/TERRA-NDVI/test.tif" in signed
+
+    # Verify asset-content & asset-url routes plus derived ledger tracking
+    from httpx import ASGITransport, AsyncClient
+
+    from geospatial_harmonization.main import create_app
+
+    app_cfg = Settings(
+        _env_file=None,
+        environment="test",
+        database_url=f"sqlite+aiosqlite:///{tmp_path / 'ghs.db'}",
+        local_storage_dir=tmp_path / "local_store",
+    )
+    app = create_app(app_cfg)
+    async with (
+        app.router.lifespan_context(app),
+        AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client,
+    ):
+        created = await client.post(
+            "/api/v1/datasets/derived",
+            json={
+                "product": "TERRA-NDVI-ANOM",
+                "variable_name": "ndvi_zscore",
+                "units": "z-score",
+                "bbox_wgs84": [20.0, 48.0, 22.0, 50.0],
+                "scope": "aoi",
+                "scalar_value": -1.25,
+            },
+        )
+        assert created.status_code == 201
+        ds_id = created.json()["dataset_id"]
+
+        content_res = await client.get(f"/api/v1/datasets/{ds_id}/asset-content")
+        assert content_res.status_code == 200
+        assert content_res.headers["content-type"].startswith("image/tiff")
+        assert len(content_res.content) > 0
+
+        url_res = await client.get(f"/api/v1/datasets/{ds_id}/asset-url")
+        assert url_res.status_code == 200
+        assert url_res.json()["presigned"] is False
+        assert f"/api/v1/datasets/{ds_id}/asset-content" in url_res.json()["download_url"]
+
+        # Confirm derived asset is registered in ledger (zero untracked orphans)
+        orphans = await app.state.lifecycle.inspect_orphans()
+        assert orphans.untracked_in_store == ()
