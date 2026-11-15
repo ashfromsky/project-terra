@@ -7,6 +7,7 @@ from uuid import UUID
 from pydantic import Field
 
 from terra.api.schemas import CamelModel
+from terra.modules.assessments.api.schemas import AssessmentReadinessResponse
 from terra.modules.data_sources.domain.entities import IngestionOperationRecord
 
 BBoxTuple = tuple[float, float, float, float]
@@ -96,7 +97,7 @@ class StartIngestionRequest(CamelModel):
     bbox: BBoxTuple | None = None
     start_time: datetime
     end_time: datetime
-    max_granules: int = Field(default=24, ge=1, le=64)
+    max_granules: int = Field(default=24, ge=1, le=256)
     variables: list[str] = Field(default_factory=list)
     target_cadence: str | None = None
     target_aggregation: str | None = None
@@ -140,6 +141,8 @@ class PreparedDatasetSummaryResponse(CamelModel):
     observation_count: int = 0
     valid_fraction: float | None = None
     qa_policy: str | None = None
+    qa_layers_present: list[str] = Field(default_factory=list)
+    span_years: float | None = None
     region_id: UUID | None = None
     ingestion_operation_id: UUID | None = None
     warnings: list[str] = Field(default_factory=list)
@@ -191,3 +194,65 @@ class IngestionOperationResponse(CamelModel):
             created_at=record.created_at,
             updated_at=record.updated_at,
         )
+
+
+class DatasetAssetDownloadUrlResponse(CamelModel):
+    """Download descriptor for a prepared GHS/R2 dataset asset."""
+
+    dataset_id: str
+    asset_id: str
+    storage_key: str
+    filename: str
+    media_type: str
+    size_bytes: int
+    checksum_sha256: str
+    download_url: str
+    presigned: bool
+    expires_in: int | None = None
+
+
+class AutoProvisionRequest(CamelModel):
+    """Adaptive multi-source discovery and provisioning request for an AOI and window."""
+
+    region_id: UUID | None = None
+    bbox: BBoxTuple | None = None
+    analysis_start: datetime
+    analysis_end: datetime
+    target_cadence: str = Field(default="monthly", min_length=1)
+    baseline_type: str = Field(default="out_of_sample", min_length=1)
+    reference_start: datetime | None = None
+    reference_end: datetime | None = None
+    min_reference_years: int = Field(default=3, ge=1, le=30)
+    qa_level: str = Field(default="strict", min_length=1)
+    existing_dataset_ids: list[str] = Field(default_factory=list)
+    desired_domains: list[str] = Field(default_factory=lambda: ["climate", "vegetation"])
+    max_granules_per_product: int = Field(default=48, ge=1, le=256)
+
+
+class ProvisioningStepResponse(CamelModel):
+    """Single domain/provider attempt during adaptive data provisioning."""
+
+    domain: str
+    provider: str
+    product: str
+    status: str
+    dataset_id: str | None = None
+    window_start: datetime | None = None
+    window_end: datetime | None = None
+    detail: str
+
+
+class AutoProvisionResponse(CamelModel):
+    """Adaptive provisioning outcome, provisioned datasets, and readiness diagnostics."""
+
+    bbox: BBoxTuple
+    analysis_start: datetime
+    analysis_end: datetime
+    provision_start: datetime
+    provision_end: datetime
+    window_expanded: bool
+    window_expansion_reason: str | None = None
+    dataset_ids: list[str] = Field(default_factory=list)
+    datasets: list[PreparedDatasetSummaryResponse] = Field(default_factory=list)
+    steps: list[ProvisioningStepResponse] = Field(default_factory=list)
+    readiness: AssessmentReadinessResponse | None = None

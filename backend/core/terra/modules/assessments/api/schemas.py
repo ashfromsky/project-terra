@@ -5,6 +5,7 @@ from typing import Any
 from uuid import UUID
 
 from pydantic import Field
+from terra_scientific.domain.models.readiness import ReadinessAssessmentReport
 from terra_scientific.methods.registry import MethodSpec
 
 from terra.api.schemas import CamelModel
@@ -161,3 +162,105 @@ class AssessmentComparisonResponse(CamelModel):
     variable_comparisons: list[VariableComparisonSummary]
     compatibility_warnings: list[str]
     methodology_notes: list[str]
+
+
+class AssessmentArtifactItemResponse(CamelModel):
+    """Descriptor and download endpoints for a persisted assessment artifact."""
+
+    name: str
+    object_key: str
+    content_type: str
+    size_bytes: int
+    checksum_sha256: str | None = None
+    storage_backend: str
+    download_path: str
+    presigned_url: str | None = None
+    presigned: bool = False
+
+
+class AssessmentReadinessRequest(CamelModel):
+    """Request payload evaluating pre-run scientific readiness for datasets and AOI."""
+
+    region_id: UUID | None = None
+    request_config: dict[str, Any]
+    ghs_dataset_ids: list[str] = Field(default_factory=list)
+    inline_datasets: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class DatasetReadinessProfileResponse(CamelModel):
+    """Per-dataset observed coverage, QA presence, and adaptive thresholds."""
+
+    dataset_id: str
+    source_id: str
+    product: str
+    variables: list[str] = Field(default_factory=list)
+    native_cadence: str
+    target_cadence: str
+    observation_start: datetime | None = None
+    observation_end: datetime | None = None
+    span_years: float = 0.0
+    raw_step_count: int = 0
+    valid_qa_count: int = 0
+    valid_fraction: float = 0.0
+    qa_layers_present: list[str] = Field(default_factory=list)
+    has_grid_stack: bool = False
+    min_qa_fraction_required: float
+    min_step_coverage_required: float
+    min_trend_samples_required: int
+    min_baseline_years_required: int
+    status: str
+    notes: list[str] = Field(default_factory=list)
+
+
+class ReadinessCriterionResponse(CamelModel):
+    """Evaluated dataset/method readiness criterion with required vs actual diagnostics."""
+
+    criterion_id: str
+    category: str
+    dataset_id: str | None = None
+    variable_name: str | None = None
+    stage_or_metric: str
+    title: str
+    required_summary: str
+    actual_summary: str
+    required_value: float | int | str | None = None
+    actual_value: float | int | str | None = None
+    unit: str | None = None
+    status: str
+    scientific_rationale: str
+    missing_gap: str | None = None
+    remediation: str | None = None
+    spec_version: str
+
+
+class MetricAvailabilityResponse(CamelModel):
+    """Availability status of one scientific stage or derived metric."""
+
+    metric_id: str
+    label: str
+    priority: str
+    required: bool = True
+    status: str
+    blocking_criteria: list[str] = Field(default_factory=list)
+    reason: str
+    remediation: str | None = None
+
+
+class AssessmentReadinessResponse(CamelModel):
+    """Structured pre-run or post-run adaptive readiness diagnostic report."""
+
+    spec_version: str
+    evaluated_at_utc: datetime
+    overall_status: str
+    summary: str
+    datasets: list[DatasetReadinessProfileResponse] = Field(default_factory=list)
+    criteria: list[ReadinessCriterionResponse] = Field(default_factory=list)
+    metrics: list[MetricAvailabilityResponse] = Field(default_factory=list)
+    recommended_actions: list[str] = Field(default_factory=list)
+    suggested_window_start: datetime | None = None
+    suggested_window_end: datetime | None = None
+
+    @classmethod
+    def from_scientific(cls, report: ReadinessAssessmentReport) -> "AssessmentReadinessResponse":
+        """Convert pure Scientific Core ReadinessAssessmentReport to Core CamelModel."""
+        return cls.model_validate(report.model_dump(mode="python"))

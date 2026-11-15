@@ -1,5 +1,7 @@
 """HTTP client adapter calling Geospatial Harmonization Service over HTTP."""
 
+import re
+from pathlib import PurePosixPath
 from typing import Any
 
 import httpx
@@ -9,6 +11,25 @@ from terra.modules.data_sources.domain.exceptions import (
     DataSourcesNotFoundError,
     DataSourcesValidationError,
 )
+
+_VALID_DATASET_ID_RE = re.compile(r"^[A-Za-z0-9._:-]{1,128}$")
+
+
+def _validated_dataset_id(dataset_id: str) -> str:
+    cleaned = dataset_id.strip()
+    if not _VALID_DATASET_ID_RE.fullmatch(cleaned):
+        raise DataSourcesValidationError(f"Invalid dataset identifier: '{dataset_id}'")
+    return cleaned
+
+
+def _extract_filename_from_disposition(header_value: str | None, fallback: str) -> str:
+    if not header_value:
+        return fallback
+    match = re.search(r'filename="?([^";]+)"?', header_value)
+    if not match:
+        return fallback
+    candidate = PurePosixPath(match.group(1).replace("\\", "/")).name.strip()
+    return candidate or fallback
 
 
 def _extract_error_detail(response: httpx.Response) -> str:
@@ -139,11 +160,86 @@ class HttpxGhsServiceClient:
         return result
 
     async def get_dataset(self, dataset_id: str) -> dict[str, Any]:
+        cleaned = _validated_dataset_id(dataset_id)
         result = await self._request_json(
             "GET",
-            f"/api/v1/datasets/{dataset_id}",
+            f"/api/v1/datasets/{cleaned}",
             treat_404_as_not_found=True,
         )
         if not isinstance(result, dict):
             raise DataSourcesGhsError("Unexpected response format from GHS /datasets/{dataset_id}.")
         return result
+
+    async def get_dataset_asset_url(
+        self,
+        dataset_id: str,
+        *,
+        asset_id: str | None = None,
+        expires_in: int | None = None,
+    ) -> dict[str, Any]:
+        cleaned = _validated_dataset_id(dataset_id)
+        params: dict[str, Any] = {}
+        if asset_id:
+            params["asset_id"] = asset_id
+        if expires_in is not None:
+            params["expires_in"] = expires_in
+        result = await self._request_json(
+            "GET",
+            f"/api/v1/datasets/{cleaned}/asset-url",
+            params=params or None,
+            treat_404_as_not_found=True,
+        )
+        if not isinstance(result, dict):
+            raise DataSourcesGhsError(
+                "Unexpected response format from GHS /datasets/{dataset_id}/asset-url."
+            )
+        return result
+
+    async def download_dataset_asset_content(
+        self,
+        dataset_id: str,
+        *,
+        asset_id: str | None = None,
+    ) -> tuple[bytes, str, str]:
+        cleaned = _validated_dataset_id(dataset_id)
+        params = {"asset_id": asset_id} if asset_id else None
+        timeout = max(self._timeout, 120.0)
+        try:
+            async with httpx.AsyncClient(base_url=self._base_url, timeout=timeout) as client:
+                response = await client.get(
+                    f"/api/v1/datasets/{cleaned}/asset-content",
+                    params=params,
+                )
+        except httpx.TimeoutException as exc:
+            raise DataSourcesGhsError(
+                "Geospatial Harmonization Service asset download timed out.",
+                status_code=504,
+            ) from exc
+        except httpx.RequestError as exc:
+            raise DataSourcesGhsError(
+                "Geospatial Harmonization Service is unreachable.",
+                status_code=503,
+            ) from exc
+
+        if response.status_code == 404:
+            raise DataSourcesNotFoundError(_extract_error_detail(response))
+        if response.status_code in {400, 422}:
+            raise DataSourcesValidationError(_extract_error_detail(response))
+        if 400 <= response.status_code < 500:
+            raise DataSourcesGhsError(
+                _extract_error_detail(response),
+                status_code=response.status_code,
+            )
+        if response.status_code >= 500:
+            raise DataSourcesGhsError(
+                f"GHS upstream error ({response.status_code}): {_extract_error_detail(response)}",
+                status_code=502,
+            )
+
+        raw_ct = response.headers.get("content-type", "application/octet-stream")
+        media_type = raw_ct.split(";")[0].strip()
+        filename = _extract_filename_from_disposition(
+            response.headers.get("content-disposition"),
+            f"{cleaned}.tif",
+        )
+        return response.content, media_type or "application/octet-stream", filename

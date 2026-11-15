@@ -172,7 +172,16 @@ def test_assessment_ghs_client_mapping_artifacts_and_openapi(tmp_path: Path) -> 
     ndvi_vals = [round(0.50 + 0.012 * (idx // 12), 4) for idx in range(len(timestamps))]
     qa_vals = [0 for _ in timestamps]
 
+    published_products: list[str] = []
+
     def _ghs_handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "POST" and request.url.path == "/api/v1/datasets/derived":
+            import json as _json
+
+            payload = _json.loads(request.content.decode("utf-8"))
+            product = str(payload["product"])
+            published_products.append(product)
+            return httpx.Response(201, json={"dataset_id": f"derived-{product.lower()}"})
         if request.url.path == "/api/v1/datasets/ghs-mod13-1":
             return httpx.Response(
                 200,
@@ -182,7 +191,11 @@ def test_assessment_ghs_client_mapping_artifacts_and_openapi(tmp_path: Path) -> 
                     "product_version": "061",
                     "provider": "nasa_earthdata",
                     "granule_id": "MOD13Q1.A2018001.h19v04.061",
-                    "spatial": {"crs": "EPSG:4326", "nominal_resolution_m": 250.0},
+                    "spatial_metadata": {
+                        "crs": "EPSG:4326",
+                        "bounds": [23.0, 48.0, 25.0, 49.5],
+                        "nominal_resolution_m": 250.0,
+                    },
                     "temporal": {
                         "cadence": "monthly",
                         "semantics": "composite",
@@ -267,6 +280,12 @@ def test_assessment_ghs_client_mapping_artifacts_and_openapi(tmp_path: Path) -> 
         assert body["artifactPaths"]
         assert Path(body["artifactPaths"]["assessment_result_json"]).exists()
         assert body["artifactPaths"]["assessment_result_sha256"]
+        assert "TERRA-NDVI-ANOM" in published_products
+        assert "TERRA-VEG-TREND" in published_products
+        assert "TERRA-MK-TEST" in published_products
+        assert "TERRA-SEN-SLOPE" in published_products
+        assert "TERRA-TRI" not in published_products
+        assert body["artifactPaths"]["ghs_derived:TERRA-NDVI-ANOM"] == "derived-terra-ndvi-anom"
 
         # Unsafe output_artifact_dir outside configured root must fail 422
         escape = client.post(
