@@ -10,7 +10,7 @@ import socket
 import uuid
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, urljoin, urlparse
@@ -704,56 +704,16 @@ def _select_granule_link(entry: Mapping[str, Any], extensions: tuple[str, ...]) 
     return fallback
 
 
-async def discover_cmr_granules(
-    cmr_url: str,
-    product: str,
-    window_start: datetime,
-    window_end: datetime,
-    extensions: tuple[str, ...],
+def _parse_cmr_entries(
+    entries: object,
     *,
-    bbox: tuple[float, float, float, float] | None = None,
-    headers: Mapping[str, str] | None = None,
-    page_size: int = 10,
-    timeout: float = 30.0,
-    max_retries: int = 2,
-    backoff_seconds: float = 0.0,
-    transport: httpx.AsyncBaseTransport | None = None,
-    require_https: bool = True,
+    short_name: str,
+    version: str,
+    extensions: tuple[str, ...],
 ) -> list[CmrGranule]:
-    """Query NASA CMR granules API and return structured granule records matching extensions."""
-    if "." not in product:
-        raise ProviderValidationError(
-            f"Product '{product}' must include short_name.version for CMR lookup"
-        )
-    short_name, version = product.split(".", 1)
-    t0 = window_start.astimezone(UTC).isoformat()
-    t1 = window_end.astimezone(UTC).isoformat()
-    params = {
-        "short_name": short_name,
-        "version": version,
-        "temporal": f"{t0},{t1}",
-        "page_size": str(max(1, page_size)),
-    }
-    if bbox is not None:
-        params["bounding_box"] = ",".join(str(v) for v in bbox)
-    raw, _, _ = await safe_fetch_bytes(
-        f"{cmr_url.rstrip('/')}/granules.json",
-        allowed_hosts=earthdata_hosts_for(cmr_url),
-        headers=headers,
-        params=params,
-        timeout=timeout,
-        max_retries=max_retries,
-        backoff_seconds=backoff_seconds,
-        transport=transport,
-        require_https=require_https,
-        earthdata_auth=bool(headers),
-    )
-    try:
-        doc = json.loads(raw.decode("utf-8"))
-    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-        raise ProviderResponseError(f"Malformed CMR JSON response for '{product}': {exc}") from exc
-    entries = doc.get("feed", {}).get("entry", []) if isinstance(doc, Mapping) else []
-    results: list[CmrGranule] = []
+    if not isinstance(entries, list):
+        return []
+    parsed: list[CmrGranule] = []
     for entry in entries:
         if not isinstance(entry, Mapping):
             continue
@@ -781,7 +741,7 @@ async def discover_cmr_granules(
             )
             if key in entry
         }
-        results.append(
+        parsed.append(
             CmrGranule(
                 granule_id=granule_id,
                 producer_granule_id=producer_id or granule_id,
@@ -795,6 +755,205 @@ async def discover_cmr_granules(
                 source_metadata=meta,
             )
         )
+    return parsed
+
+
+def select_representative_granules(
+    granules: Sequence[CmrGranule],
+    max_granules: int,
+    *,
+    window_start: datetime | None = None,
+) -> tuple[list[CmrGranule], dict[str, Any]]:
+    """Select up to `max_granules` granules preserving full temporal coverage."""
+    fallback_dt = window_start or datetime.min.replace(tzinfo=UTC)
+    ordered = sorted(
+        granules,
+        key=lambda g: (g.time_start or fallback_dt, g.producer_granule_id),
+    )
+    deduped: list[CmrGranule] = []
+    seen_keys: set[tuple[str, str]] = set()
+    for item in ordered:
+        key = (item.granule_id, item.data_url)
+        if key not in seen_keys:
+            seen_keys.add(key)
+            deduped.append(item)
+
+    if len(deduped) <= max_granules or max_granules <= 0:
+        selected = deduped[: max(0, max_granules)]
+        return selected, {
+            "discovered_count": len(deduped),
+            "selection_strategy": "chronological_all",
+        }
+
+    dated_groups: list[list[CmrGranule]] = []
+    current_dt: datetime | None = None
+    has_marker = False
+    for item in deduped:
+        if not has_marker or item.time_start != current_dt:
+            dated_groups.append([item])
+            current_dt = item.time_start
+            has_marker = True
+        else:
+            dated_groups[-1].append(item)
+
+    if len(dated_groups) >= 2:
+        if len(dated_groups) >= max_granules:
+            chosen_indices: list[int] = []
+            used: set[int] = set()
+            total_groups = len(dated_groups)
+            if max_granules == 1:
+                chosen_indices = [0]
+            else:
+                for step in range(max_granules):
+                    idx = round(step * (total_groups - 1) / (max_granules - 1))
+                    while idx in used and idx + 1 < total_groups:
+                        idx += 1
+                    while idx in used and idx > 0:
+                        idx -= 1
+                    if idx not in used:
+                        used.add(idx)
+                        chosen_indices.append(idx)
+            chosen_indices.sort()
+            selected = [dated_groups[idx][0] for idx in chosen_indices[:max_granules]]
+        else:
+            selected = [grp[0] for grp in dated_groups]
+            extras = [g for grp in dated_groups for g in grp[1:]]
+            need = max_granules - len(selected)
+            if need > 0 and extras:
+                selected.extend(extras[:need])
+                selected.sort(key=lambda g: (g.time_start or fallback_dt, g.producer_granule_id))
+        return selected, {
+            "discovered_count": len(deduped),
+            "selection_strategy": "uniform_temporal_stratification",
+        }
+
+    if max_granules == 1:
+        return [deduped[0]], {
+            "discovered_count": len(deduped),
+            "selection_strategy": "uniform_temporal_stratification",
+        }
+    total_items = len(deduped)
+    chosen_idxs: list[int] = []
+    used_idx: set[int] = set()
+    for step in range(max_granules):
+        idx = round(step * (total_items - 1) / (max_granules - 1))
+        if idx not in used_idx:
+            used_idx.add(idx)
+            chosen_idxs.append(idx)
+    selected = [deduped[idx] for idx in sorted(chosen_idxs)]
+    return selected, {
+        "discovered_count": len(deduped),
+        "selection_strategy": "uniform_temporal_stratification",
+    }
+
+
+async def discover_cmr_granules(
+    cmr_url: str,
+    product: str,
+    window_start: datetime,
+    window_end: datetime,
+    extensions: tuple[str, ...],
+    *,
+    bbox: tuple[float, float, float, float] | None = None,
+    headers: Mapping[str, str] | None = None,
+    page_size: int = 10,
+    max_pages: int = 10,
+    stratify_target: int | None = None,
+    timeout: float = 30.0,
+    max_retries: int = 2,
+    backoff_seconds: float = 0.0,
+    transport: httpx.AsyncBaseTransport | None = None,
+    require_https: bool = True,
+) -> list[CmrGranule]:
+    """Query NASA CMR granules API with chronological sorting and safe pagination."""
+    if "." not in product:
+        raise ProviderValidationError(
+            f"Product '{product}' must include short_name.version for CMR lookup"
+        )
+    short_name, version = product.split(".", 1)
+    effective_page_size = min(max(1, page_size), 2000)
+    t0 = window_start.astimezone(UTC).isoformat()
+    t1 = window_end.astimezone(UTC).isoformat()
+
+    async def _fetch_page(
+        start_iso: str, end_iso: str, page_num: int, limit_size: int
+    ) -> tuple[list[CmrGranule], int]:
+        params = {
+            "short_name": short_name,
+            "version": version,
+            "temporal": f"{start_iso},{end_iso}",
+            "page_size": str(limit_size),
+            "page_num": str(page_num),
+            "sort_key[]": "+start_date",
+        }
+        if bbox is not None:
+            params["bounding_box"] = ",".join(str(v) for v in bbox)
+        raw, _, _ = await safe_fetch_bytes(
+            f"{cmr_url.rstrip('/')}/granules.json",
+            allowed_hosts=earthdata_hosts_for(cmr_url),
+            headers=headers,
+            params=params,
+            timeout=timeout,
+            max_retries=max_retries,
+            backoff_seconds=backoff_seconds,
+            transport=transport,
+            require_https=require_https,
+            earthdata_auth=bool(headers),
+        )
+        try:
+            doc = json.loads(raw.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise ProviderResponseError(
+                f"Malformed CMR JSON response for '{product}': {exc}"
+            ) from exc
+        entries = doc.get("feed", {}).get("entry", []) if isinstance(doc, Mapping) else []
+        return _parse_cmr_entries(
+            entries, short_name=short_name, version=version, extensions=extensions
+        ), (len(entries) if isinstance(entries, list) else 0)
+
+    results: list[CmrGranule] = []
+    seen_keys: set[tuple[str, str]] = set()
+    page_limit = max(1, max_pages)
+    last_raw_count = 0
+    for page_num in range(1, page_limit + 1):
+        parsed_page, raw_count = await _fetch_page(t0, t1, page_num, effective_page_size)
+        last_raw_count = raw_count
+        added_on_page = 0
+        for item in parsed_page:
+            dedup = (item.granule_id, item.data_url)
+            if dedup not in seen_keys:
+                seen_keys.add(dedup)
+                results.append(item)
+                added_on_page += 1
+        if raw_count < effective_page_size or added_on_page == 0:
+            break
+
+    total_span = window_end.astimezone(UTC) - window_start.astimezone(UTC)
+    if (
+        stratify_target is not None
+        and last_raw_count >= effective_page_size
+        and total_span > timedelta(days=30)
+        and results
+        and results[-1].time_end is not None
+        and results[-1].time_end < window_end.astimezone(UTC) - timedelta(days=15)
+    ):
+        slots = max(2, min(stratify_target, 16))
+        win_start_utc = window_start.astimezone(UTC)
+        slice_span = min(timedelta(days=5), total_span / slots)
+        per_slot = max(1, min(4, stratify_target // slots + 1))
+        for slot in range(1, slots):
+            offset = (total_span - slice_span) * (slot / (slots - 1))
+            sub_start = win_start_utc + offset
+            sub_end = min(window_end.astimezone(UTC), sub_start + slice_span)
+            sub_items, _ = await _fetch_page(
+                sub_start.isoformat(), sub_end.isoformat(), 1, per_slot
+            )
+            for item in sub_items:
+                dedup = (item.granule_id, item.data_url)
+                if dedup not in seen_keys:
+                    seen_keys.add(dedup)
+                    results.append(item)
+
     if not results:
         raise ProviderValidationError(f"No CMR granule download URL found for '{product}'")
     return results
@@ -884,13 +1043,16 @@ async def discover_cmr_observations(
         extensions,
         bbox=bbox,
         headers=None,
-        page_size=limit,
+        page_size=min(max(limit * 4, 200), 2000),
+        max_pages=3,
+        stratify_target=limit,
         timeout=timeout,
         max_retries=max_retries,
         backoff_seconds=backoff_seconds,
         transport=transport,
         require_https=True,
     )
+    selected_granules, _ = select_representative_granules(granules, limit, window_start=start_time)
     return tuple(
         DiscoveryResult(
             observation_id=g.granule_id,
@@ -908,7 +1070,7 @@ async def discover_cmr_observations(
                 **dict(g.source_metadata),
             },
         )
-        for g in granules[:limit]
+        for g in selected_granules
     )
 
 
