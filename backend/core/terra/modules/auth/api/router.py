@@ -2,7 +2,7 @@
 
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
-from fastapi import APIRouter, HTTPException, Query, Response, status
+from fastapi import APIRouter, HTTPException, Query, Request, Response, status
 from fastapi.responses import RedirectResponse
 
 from terra.api.dependencies import SettingsDep
@@ -53,6 +53,7 @@ def _build_frontend_redirect_url(
 
 
 @router.get("/github/login", response_model=GitHubLoginResponse)
+@router.post("/github/login", response_model=GitHubLoginResponse, include_in_schema=False)
 async def github_login(
     github_client: GitHubOAuthClientDep,
     token_service: TokenServiceDep,
@@ -77,18 +78,49 @@ async def github_login(
 
 
 @router.get("/github/callback", response_model=AuthCallbackResponse)
+@router.post("/github/callback", response_model=AuthCallbackResponse, include_in_schema=False)
 async def github_callback(
+    request: Request,
     response: Response,
     settings: SettingsDep,
     users: UserRepositoryDep,
     github_client: GitHubOAuthClientDep,
     token_service: TokenServiceDep,
-    state: str = Query(..., min_length=1),
-    code: str | None = Query(default=None, min_length=1),
+    state: str | None = Query(default=None),
+    code: str | None = Query(default=None),
     error: str | None = Query(default=None),
     redirect: bool = Query(default=False),
 ) -> AuthCallbackResponse | RedirectResponse:
     """Handle GitHub OAuth callback, upsert user by GitHub ID, and issue session."""
+    if request.method == "POST":
+        content_type = request.headers.get("content-type", "")
+        if "application/json" in content_type:
+            try:
+                body = await request.json()
+                if isinstance(body, dict):
+                    state = state or body.get("state")
+                    code = code or body.get("code")
+                    error = error or body.get("error")
+                    if "redirect" in body:
+                        redirect = bool(body["redirect"])
+            except Exception:
+                pass
+        elif "form" in content_type:
+            try:
+                form = await request.form()
+                state = state or form.get("state")
+                code = code or form.get("code")
+                error = error or form.get("error")
+                if "redirect" in form:
+                    redirect = form.get("redirect") == "true"
+            except Exception:
+                pass
+
+    if state is None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="Missing GitHub OAuth state parameter",
+        )
     if error is not None:
         try:
             claims = token_service.verify_oauth_state(state)
