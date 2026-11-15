@@ -26,7 +26,7 @@ from terra.modules.layers.domain.repositories import LayerCatalogRepository
 
 logger = logging.getLogger(__name__)
 
-_RENDERABLE_FORMATS: frozenset[str] = frozenset({"geotiff", "hdf4", "hdf5", "netcdf"})
+_RENDERABLE_FORMATS: frozenset[str] = frozenset({"geotiff", "hdf4", "hdf5", "netcdf", "zarr"})
 _QA_NAME_TOKENS = ("qa", "qc", "qual", "flag", "reliability", "bitmask", "lat", "lon")
 
 _STEPS_PER_YEAR: dict[ObservationGranularity, int] = {
@@ -68,9 +68,15 @@ _LAYER_GHS_SPECS: dict[str, _GhsLayerSpec] = {
         colormap="lst_celsius",
         unit_conversion="kelvin_to_celsius",
     ),
+    "lst-anomaly": _GhsLayerSpec(
+        product_tokens=("TERRA-LST-ANOM", "MOD11C3", "LST-ANOM"),
+        variable_tokens=("lst_anomaly", "lst_zscore", "anomaly"),
+        default_variable="lst_anomaly",
+        colormap="lst_celsius",
+    ),
     "precip-gpm-imerg": _GhsLayerSpec(
         product_tokens=("GPM_3IMERG", "3IMERG", "IMERG"),
-        variable_tokens=("precip",),
+        variable_tokens=("precipitationcal", "precipitation", "precip"),
         default_variable="precipitationCal",
         colormap="precip",
     ),
@@ -79,6 +85,60 @@ _LAYER_GHS_SPECS: dict[str, _GhsLayerSpec] = {
         variable_tokens=("soil_moisture",),
         default_variable="soil_moisture",
         colormap="soil_moisture",
+    ),
+    "ndvi-anomaly": _GhsLayerSpec(
+        product_tokens=("TERRA-NDVI-ANOM",),
+        variable_tokens=("ndvi_zscore", "ndvi_anomaly", "anomaly"),
+        default_variable="ndvi_zscore",
+        colormap="viridis",
+    ),
+    "evi-anomaly": _GhsLayerSpec(
+        product_tokens=("TERRA-EVI-ANOM",),
+        variable_tokens=("evi_zscore", "evi_anomaly", "anomaly"),
+        default_variable="evi_zscore",
+        colormap="viridis",
+    ),
+    "vegetation-trend": _GhsLayerSpec(
+        product_tokens=("TERRA-VEG-TREND",),
+        variable_tokens=("ndvi_trend_per_decade", "trend"),
+        default_variable="ndvi_trend_per_decade",
+        colormap="viridis",
+    ),
+    "mann-kendall-significance": _GhsLayerSpec(
+        product_tokens=("TERRA-MK-TEST",),
+        variable_tokens=("mk_adjusted_pvalue", "pvalue", "mk"),
+        default_variable="mk_adjusted_pvalue",
+        colormap="viridis",
+    ),
+    "sens-slope": _GhsLayerSpec(
+        product_tokens=("TERRA-SEN-SLOPE",),
+        variable_tokens=("sens_slope", "slope"),
+        default_variable="sens_slope",
+        colormap="viridis",
+    ),
+    "resistance": _GhsLayerSpec(
+        product_tokens=("TERRA-RES-RESISTANCE",),
+        variable_tokens=("resistance_index", "resistance"),
+        default_variable="resistance_index",
+        colormap="viridis",
+    ),
+    "recovery": _GhsLayerSpec(
+        product_tokens=("TERRA-RES-RECOVERY",),
+        variable_tokens=("recovery_index", "recovery"),
+        default_variable="recovery_index",
+        colormap="viridis",
+    ),
+    "stability": _GhsLayerSpec(
+        product_tokens=("TERRA-RES-STABILITY",),
+        variable_tokens=("stability_index", "stability"),
+        default_variable="stability_index",
+        colormap="viridis",
+    ),
+    "sensitivity": _GhsLayerSpec(
+        product_tokens=("TERRA-RES-SENSITIVITY",),
+        variable_tokens=("sensitivity_index", "sensitivity"),
+        default_variable="sensitivity_index",
+        colormap="viridis",
     ),
 }
 
@@ -153,6 +213,9 @@ def _valid_wgs84_bbox(raw: object) -> tuple[float, float, float, float] | None:
 
 
 def _extract_wgs84_bbox(dataset: Mapping[str, Any]) -> tuple[float, float, float, float] | None:
+    direct_bbox = _valid_wgs84_bbox(dataset.get("bbox_wgs84"))
+    if direct_bbox is not None:
+        return direct_bbox
     extensions = dataset.get("extensions")
     if isinstance(extensions, Mapping):
         summary = extensions.get("ingestion_summary")
@@ -168,6 +231,28 @@ def _extract_wgs84_bbox(dataset: Mapping[str, Any]) -> tuple[float, float, float
         if bbox is not None and ("4326" in crs or not crs):
             return bbox
     return None
+
+
+def _dataset_sort_key(ds: Mapping[str, Any]) -> tuple[int, str, str]:
+    raw_assets = ds.get("assets")
+    formats = {
+        str(a.get("data_format") or "").lower()
+        for a in (raw_assets if isinstance(raw_assets, list) else [])
+        if isinstance(a, Mapping)
+    }
+    if "geotiff" in formats:
+        fmt_rank = 3
+    elif formats & {"hdf4", "hdf5", "netcdf"}:
+        fmt_rank = 2
+    elif "zarr" in formats:
+        fmt_rank = 1
+    else:
+        fmt_rank = 0
+    temporal = ds.get("temporal_metadata")
+    end_ts = ""
+    if isinstance(temporal, Mapping):
+        end_ts = str(temporal.get("end") or temporal.get("start") or "")
+    return (fmt_rank, end_ts, str(ds.get("dataset_id") or ""))
 
 
 def _select_matching_dataset(
@@ -191,8 +276,7 @@ def _select_matching_dataset(
     if not matching:
         return None, False
 
-    geotiff_candidates: list[dict[str, Any]] = []
-    other_raster_candidates: list[dict[str, Any]] = []
+    matching.sort(key=_dataset_sort_key, reverse=True)
     for ds in matching:
         raw_assets = ds.get("assets")
         formats = {
@@ -200,15 +284,8 @@ def _select_matching_dataset(
             for a in (raw_assets if isinstance(raw_assets, list) else [])
             if isinstance(a, Mapping)
         }
-        if "geotiff" in formats:
-            geotiff_candidates.append(ds)
-        elif formats & _RENDERABLE_FORMATS:
-            other_raster_candidates.append(ds)
-
-    if geotiff_candidates:
-        return geotiff_candidates[0], False
-    if other_raster_candidates:
-        return other_raster_candidates[0], False
+        if formats & _RENDERABLE_FORMATS:
+            return ds, False
     return None, True
 
 
@@ -282,17 +359,17 @@ class LayerCatalogService:
         selected, has_only_non_raster = _select_matching_dataset(spec, datasets)
         if selected is None:
             reason = (
-                "Dataset exists only in Zarr or non-raster format and cannot be "
+                "Dataset exists only in non-raster format (e.g. JSON/CSV) and cannot be "
                 "directly rendered as raster tiles."
                 if has_only_non_raster
                 else (
-                    f"No ingested {base_layer.product_id}.{base_layer.product_version} "
+                    base_layer.unavailable_reason
+                    or f"No ingested {base_layer.product_id}.{base_layer.product_version} "
                     "raster dataset found in storage. Ingest observations via Data Sources."
                 )
             )
             return replace(
                 base_layer,
-                availability_status="unavailable",
                 tile_source=replace(base_layer.tile_source, url_template=None, is_connected=False),
                 unavailable_reason=reason,
             )
@@ -308,6 +385,11 @@ class LayerCatalogService:
             if isinstance(a, Mapping)
         }
         has_geotiff = "geotiff" in formats
+        has_only_zarr = "zarr" in formats and not (formats & {"geotiff", "hdf4", "hdf5", "netcdf"})
+        tile_format = "cog" if has_geotiff else ("zarr" if has_only_zarr else "xyz")
+        extensions = selected.get("extensions")
+        is_aoi_scoped = isinstance(extensions, Mapping) and extensions.get("scope") == "aoi"
+        status: DataAvailabilityStatus = "preview" if is_aoi_scoped else "connected"
         matched_var = (
             _match_variable_name(selected.get("variables"), spec.variable_tokens)
             or base_layer.variable
@@ -342,11 +424,11 @@ class LayerCatalogService:
             variable=matched_var,
             unit=layer_unit,
             available_time_range=active_range,
-            availability_status="connected",
+            availability_status=status,
             rendering_type="raster",
             tile_source=MapTileSource(
                 id=base_layer.tile_source.id,
-                format="cog" if has_geotiff else "xyz",
+                format=tile_format,
                 url_template=f"/api/v1/layers/{base_layer.id}/tiles/{{z}}/{{x}}/{{y}}.png",
                 crs="EPSG:3857",
                 requires_backend_authorization=False,
