@@ -74,9 +74,22 @@ For local exploration, **NASA POWER** ingestion, queued **GHS** processing, **Co
   3. Generate a Bearer token at `https://urs.earthdata.nasa.gov/user_tokens`.
   4. Set `EARTHDATA_TOKEN=<your_token>` in `.env`.
 
-### Optional S3 / Cloudflare R2 Storage (`STORAGE_BACKEND=s3`)
+### Cloudflare R2 / S3-Compatible Object Storage (`STORAGE_BACKEND=s3`)
 
-Keep `STORAGE_BACKEND=local` for local workflows. To test remote S3/R2 storage, set `STORAGE_BACKEND=s3`, `S3_BUCKET`, `S3_ENDPOINT_URL`, `S3_REGION`, `AWS_ACCESS_KEY_ID`, and `AWS_SECRET_ACCESS_KEY`.
+All four backend processes (`CORE`, `CORE-WORKER`, `GHS`, `GHS-WORKER`) share a consistent object storage abstraction (`Local` in development, `S3`/Cloudflare R2 with SigV4 path-style signing in `s3` mode):
+
+- **Private Bucket & Prefix Isolation:** Keep the Cloudflare R2 bucket **private** (`r2.dev` public URL disabled). Both services share one bucket cleanly without key collisions:
+  - **GHS** manages geospatial assets across `raw/`, `intermediate/`, and `derived/` zones (optionally scoped by `S3_PREFIX`).
+  - **Core & Core Worker** persist assessment outputs and provenance manifests under `CORE_S3_PREFIX` (default `core/`, so keys live under `core/assessments/<id>/result.json` and `provenance.json`).
+- **Authorized Presigned Downloads & CORS:** When `STORAGE_BACKEND=s3`, Core (`/api/v1/assessments/{id}/artifacts`, `/api/v1/data-sources/datasets/{id}/download-url`) returns short-lived S3 presigned `GET` URLs (`S3_PRESIGN_TTL_SECONDS`, default `300` s) for authorized users; direct browser downloads from R2 require bucket CORS allowing `GET`/`HEAD` from the frontend origins. No Cloudflare Worker proxy is deployed because authentication, ownership checks, and raster rendering stay in Core and GHS.
+- **Variable Reference:**
+  - `STORAGE_BACKEND`: Set `local` for local filesystem storage or `s3` for Cloudflare R2.
+  - `S3_BUCKET`: Bucket name from **Cloudflare Dashboard -> R2 Object Storage** (e.g., `terra`).
+  - `S3_ENDPOINT_URL`: Account-level endpoint `https://<ACCOUNT_ID>.r2.cloudflarestorage.com` (**without** a trailing `/<bucket>` suffix). Found on the **R2 Overview** page.
+  - `S3_REGION`: Set `auto` for Cloudflare R2.
+  - `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` (or `S3_ACCESS_KEY_ID` / `S3_SECRET_ACCESS_KEY`): Generated under **Cloudflare Dashboard -> R2 -> Manage R2 API Tokens** with **Object Read & Write** scoped to the bucket. Paste into `.env` only; never commit.
+  - `CORE_S3_PREFIX` (`core`), `S3_PREFIX` (`""`), `S3_PRESIGN_TTL_SECONDS` (`300`), `S3_CONNECT_TIMEOUT_SECONDS` (`10.0`), `S3_READ_TIMEOUT_SECONDS` (`60.0`), `S3_MAX_ATTEMPTS` (`4`).
+- **Lifecycle Rules on R2:** Configure bucket lifecycle rules to abort incomplete multipart uploads after 1 day (`86400s`) and expire `intermediate/` objects after 7 days; authoritative `raw/`, `derived/`, and `core/` retention remains governed by the GHS storage ledger and Core assessment records.
 
 ---
 
