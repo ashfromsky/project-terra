@@ -27,14 +27,38 @@ def _json_fallback(obj: object) -> object:
     return str(obj)
 
 
+_NAN_SENTINEL = "__terra_non_finite_nan__"
+_INF_SENTINEL = "__terra_non_finite_inf__"
+_NEG_INF_SENTINEL = "__terra_non_finite_neg_inf__"
+
+
 def _finite_json(value: Any) -> Any:
-    """Replace non-finite floats with null so PostgreSQL JSON accepts the payload."""
+    """Replace non-finite floats with JSON-safe sentinels for PostgreSQL JSON."""
     if isinstance(value, float):
-        return value if math.isfinite(value) else None
+        if math.isnan(value):
+            return _NAN_SENTINEL
+        if math.isinf(value):
+            return _INF_SENTINEL if value > 0 else _NEG_INF_SENTINEL
+        return value
     if isinstance(value, dict):
         return {key: _finite_json(item) for key, item in value.items()}
     if isinstance(value, list | tuple):
         return [_finite_json(item) for item in value]
+    return value
+
+
+def _restore_non_finite(value: Any) -> Any:
+    """Restore non-finite float sentinels produced by :func:`_finite_json`."""
+    if value == _NAN_SENTINEL:
+        return float("nan")
+    if value == _INF_SENTINEL:
+        return float("inf")
+    if value == _NEG_INF_SENTINEL:
+        return float("-inf")
+    if isinstance(value, dict):
+        return {key: _restore_non_finite(item) for key, item in value.items()}
+    if isinstance(value, list | tuple):
+        return [_restore_non_finite(item) for item in value]
     return value
 
 
@@ -46,7 +70,7 @@ def encode_dataset(dataset: SpatialDataset) -> dict[str, object]:
 
 def decode_dataset(payload: dict[str, object]) -> SpatialDataset:
     """Reconstruct and validate a SpatialDataset domain object from stored JSON."""
-    return _DATASET_ADAPTER.validate_python(payload)
+    return _DATASET_ADAPTER.validate_python(_restore_non_finite(payload))
 
 
 def encode_plan(plan: HarmonizationPlan) -> dict[str, object]:
@@ -57,4 +81,4 @@ def encode_plan(plan: HarmonizationPlan) -> dict[str, object]:
 
 def decode_plan(payload: dict[str, object]) -> HarmonizationPlan:
     """Reconstruct and validate a HarmonizationPlan domain object from stored JSON."""
-    return _PLAN_ADAPTER.validate_python(payload)
+    return _PLAN_ADAPTER.validate_python(_restore_non_finite(payload))
