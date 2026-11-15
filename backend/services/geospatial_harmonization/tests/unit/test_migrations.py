@@ -43,6 +43,11 @@ def test_alembic_upgrade_downgrade_cycle(tmp_path: Path) -> None:
         job_columns = {
             row[1] for row in conn.execute("PRAGMA table_info(ghs_harmonization_jobs)").fetchall()
         }
+        version_column = next(
+            row
+            for row in conn.execute("PRAGMA table_info(ghs_alembic_version)").fetchall()
+            if row[1] == "version_num"
+        )
     expected_tables = {
         "ghs_alembic_version",
         "ghs_datasets",
@@ -55,6 +60,7 @@ def test_alembic_upgrade_downgrade_cycle(tmp_path: Path) -> None:
         "ghs_storage_audit_events",
     }
     assert expected_tables <= tables
+    assert version_column[2].upper() == "VARCHAR(255)"
     assert {"error_category", "next_retry_at", "progress_pct", "idempotency_key"} <= job_columns
 
     command.downgrade(cfg, "0002_storage_ledger_and_lifecycle")

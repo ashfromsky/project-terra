@@ -43,6 +43,8 @@ Because `CORE`, `CORE-WORKER`, `GHS`, and `GHS-WORKER` launch from different pac
 
 Never point `DATABASE_URL` and `GHS_DATABASE_URL` to the same SQLite file or database schema.
 
+When `GHS_DATABASE_URL` points to an external PostgreSQL database, apply GHS migrations before the first start with `make ghs-migrate`; development SQLite databases are migrated automatically on startup.
+
 ---
 
 ## 4. Environment Variables & Credentials
@@ -96,7 +98,7 @@ make doctor
 
 - Required CLIs (`node`, `pnpm`, `uv`, `python3`)
 - `.env` and `.env.example` presence
-- Core `DATABASE_URL` vs `GHS_DATABASE_URL` separation and writable directories
+- Core `DATABASE_URL` vs `GHS_DATABASE_URL` separation, writable SQLite directories, and TCP reachability of external database endpoints
 - Consistent `GHS_BASE_URL` addressing (`http://127.0.0.1:8080`)
 - Writable artifact (`SCIENTIFIC_ARTIFACT_DIR`) and storage (`LOCAL_STORAGE_DIR`) directories
 - Port availability (or active TERRA health responses) on `8000`, `8080`, and `5173`
