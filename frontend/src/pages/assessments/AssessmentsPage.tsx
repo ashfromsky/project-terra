@@ -407,16 +407,19 @@ export default function AssessmentsPage() {
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [title, setTitle] = useState('')
   const [regionId, setRegionId] = useState(() => searchParams.get('regionId') ?? '')
-  const [analysisStart, setAnalysisStart] = useState('2021-01-01')
+  const [analysisProfile, setAnalysisProfile] = useState<
+    'quick' | 'seasonal' | 'historical' | 'custom'
+  >('quick')
+  const [analysisStart, setAnalysisStart] = useState('2024-01-01')
   const [analysisEnd, setAnalysisEnd] = useState('2024-12-31')
   const [baselineType, setBaselineType] = useState<'fixed_reference' | 'full_period_explicit'>(
-    'fixed_reference',
+    'full_period_explicit',
   )
   const [baselineStart, setBaselineStart] = useState('2018-01-01')
   const [baselineEnd, setBaselineEnd] = useState('2020-12-31')
   const [targetCadence, setTargetCadence] = useState<'monthly' | 'daily' | 'sixteen_day'>('monthly')
-  const [qaLevel, setQaLevel] = useState<'strict' | 'permissive'>('strict')
-  const [minYearsRequired, setMinYearsRequired] = useState(3)
+  const [qaLevel, setQaLevel] = useState<'strict' | 'permissive'>('permissive')
+  const [minYearsRequired, setMinYearsRequired] = useState(1)
   const [selectedDatasetIds, setSelectedDatasetIds] = useState<string[]>(() => {
     const preselected = searchParams.get('datasetId')
     return preselected ? [preselected] : []
@@ -425,6 +428,34 @@ export default function AssessmentsPage() {
   const [executeNow, setExecuteNow] = useState(true)
   const [formError, setFormError] = useState<string | null>(null)
   const [provisionResult, setProvisionResult] = useState<AutoProvisionResponse | null>(null)
+
+  const applyProfile = (profile: 'quick' | 'seasonal' | 'historical') => {
+    setAnalysisProfile(profile)
+    if (profile === 'quick') {
+      setAnalysisStart('2024-01-01')
+      setAnalysisEnd('2024-12-31')
+      setBaselineType('full_period_explicit')
+      setMinYearsRequired(1)
+      setQaLevel('permissive')
+      setTargetCadence('monthly')
+    } else if (profile === 'seasonal') {
+      setAnalysisStart('2023-01-01')
+      setAnalysisEnd('2024-12-31')
+      setBaselineType('full_period_explicit')
+      setMinYearsRequired(1)
+      setQaLevel('strict')
+      setTargetCadence('monthly')
+    } else if (profile === 'historical') {
+      setAnalysisStart('2021-01-01')
+      setAnalysisEnd('2024-12-31')
+      setBaselineType('fixed_reference')
+      setBaselineStart('2018-01-01')
+      setBaselineEnd('2020-12-31')
+      setMinYearsRequired(3)
+      setQaLevel('strict')
+      setTargetCadence('monthly')
+    }
+  }
 
   const currentUserQuery = useCurrentUserQuery()
   const isAuthenticated = Boolean(currentUserQuery.data)
@@ -461,6 +492,7 @@ export default function AssessmentsPage() {
   const scientificRequestConfig = useMemo<Record<string, unknown>>(
     () => ({
       request_id: `ui-preview`,
+      analysis_profile: analysisProfile,
       analysis_start: `${analysisStart}T00:00:00Z`,
       analysis_end: `${analysisEnd}T23:59:59Z`,
       target_cadence: targetCadence,
@@ -484,6 +516,7 @@ export default function AssessmentsPage() {
     }),
     [
       analysisEnd,
+      analysisProfile,
       analysisStart,
       baselineEnd,
       baselineStart,
@@ -728,6 +761,42 @@ export default function AssessmentsPage() {
             />
           ) : (
             <form className="sci-form" onSubmit={handleCreateSubmit}>
+              <div className="sci-field">
+                <label className="sci-label">Analysis Profile</label>
+                <div style={{ display: 'flex', gap: '8px', marginBottom: '8px', flexWrap: 'wrap' }}>
+                  <Button
+                    type="button"
+                    variant={analysisProfile === 'quick' ? 'primary' : 'secondary'}
+                    onClick={() => applyProfile('quick')}
+                  >
+                    Quick Assessment
+                  </Button>
+                  <Button
+                    type="button"
+                    variant={analysisProfile === 'seasonal' ? 'primary' : 'secondary'}
+                    onClick={() => applyProfile('seasonal')}
+                  >
+                    Seasonal Assessment
+                  </Button>
+                  <Button
+                    type="button"
+                    variant={analysisProfile === 'historical' ? 'primary' : 'secondary'}
+                    onClick={() => applyProfile('historical')}
+                  >
+                    Historical Resilience
+                  </Button>
+                </div>
+                <p className="sci-dim-card__note">
+                  {analysisProfile === 'quick'
+                    ? 'Quick Profile: 1-year window, full-period baseline (min 1 yr). Fast diagnostic avoiding multi-year archive blocks.'
+                    : analysisProfile === 'seasonal'
+                      ? 'Seasonal Profile: 1–2 annual cycles evaluating seasonal anomalies and vegetative trend departures.'
+                      : analysisProfile === 'historical'
+                        ? 'Historical Profile: 3+ year window with fixed 3-year baseline for 4-dimension resilience scoring.'
+                        : 'Custom Profile: Custom baseline and temporal window parameters.'}
+                </p>
+              </div>
+
               <div className="sci-field">
                 <label className="sci-label" htmlFor="assessment-title">
                   Title
