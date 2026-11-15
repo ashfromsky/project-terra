@@ -274,6 +274,8 @@ class HarmonizationService:
                 media_type=asset.media_type,
                 checksum_sha256=stored.record.content_sha256,
                 size_bytes=stored.record.size_bytes,
+                storage_key=stored.record.object_key,
+                zone=zone,
             )
             delta = 0 if stored.deduplicated else stored.record.size_bytes
             return persisted, delta
@@ -288,7 +290,12 @@ class HarmonizationService:
                 extra_reservations=extra_reservations,
                 now=now,
             )
-        persisted = await self._storage.put_file(object_key, src_path, asset.media_type)
+        raw_persisted = await self._storage.put_file(object_key, src_path, asset.media_type)
+        persisted = replace(
+            raw_persisted,
+            storage_key=raw_persisted.storage_key or object_key,
+            zone=zone,
+        )
         return persisted, (persisted.size_bytes or size_bytes)
 
     async def _persist_raw_assets(
@@ -520,6 +527,17 @@ class HarmonizationService:
         try:
             async with scope_cm as res_handle:
                 raw_dataset = await handler.handle_payload(plan.request_payload)
+                source_lookup_id = raw_dataset.granule_id or raw_dataset.source_id
+                existing_source = await self._datasets.find_by_source(
+                    plan.provider, plan.product, source_lookup_id
+                )
+                extra_warnings: list[str] = []
+                if existing_source is not None:
+                    extra_warnings.append(
+                        f"Source observation '{source_lookup_id}' matches previously ingested "
+                        f"dataset {existing_source.dataset_id}; raw assets deduplicated "
+                        "against ledger."
+                    )
                 with tempfile.TemporaryDirectory(prefix="ghs-exec-", dir=temp_base) as tmp_root:
                     scratch = Path(tmp_root)
                     staged_ds, local_paths, raw_delta = await self._persist_raw_assets(
@@ -557,6 +575,7 @@ class HarmonizationService:
                             self._validate_raw_dataset, staged_ds, local_paths
                         )
                         final_ds = staged_ds
+                    warnings = (*extra_warnings, *warnings)
 
                 await self._datasets.save(final_ds)
 
