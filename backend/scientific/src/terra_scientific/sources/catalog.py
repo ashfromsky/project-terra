@@ -519,6 +519,26 @@ def _nasa_power_spec() -> SourceProductSpec:
             description="MERRA-2 Surface Soil Wetness",
             attributes={"origin_dataset": "MERRA-2", "native_grid_deg": "0.5x0.625"},
         ),
+        "WS10M": VariableMetadata(
+            name="WS10M",
+            canonical_name="wind_speed_10m",
+            units="m/s",
+            semantic_kind=VariableSemanticKind.CONTINUOUS_INTENSIVE,
+            fill_values=(-999.0,),
+            valid_range=(0.0, 75.0),
+            description="10-meter Wind Speed",
+            attributes={"origin_dataset": "MERRA-2", "native_grid_deg": "0.5x0.625"},
+        ),
+        "CLRSKY_SFC_SW_DWN": VariableMetadata(
+            name="CLRSKY_SFC_SW_DWN",
+            canonical_name="clear_sky_shortwave_irradiance",
+            units="W/m^2",
+            semantic_kind=VariableSemanticKind.CONTINUOUS_EXTENSIVE,
+            fill_values=(-999.0,),
+            valid_range=(0.0, 1500.0),
+            description="Clear-Sky Surface Shortwave Downward Irradiance",
+            attributes={"origin_dataset": "CERES_SYN1deg", "native_grid_deg": "1.0x1.0"},
+        ),
     }
     qa_policies = {
         level: QaPolicySpec(
@@ -596,10 +616,31 @@ def get_source_spec(source_id: DataSourceId, product: str | None = None) -> Sour
     key_product = product or _SOURCE_ALIASES.get(source_id, "")
     spec = SOURCE_REGISTRY.get((source_id, key_product))
     if spec is None and key_product:
-        upper = key_product.upper()
+        upper = key_product.strip().upper()
         for (sid, prod_key), candidate in SOURCE_REGISTRY.items():
-            if sid == source_id and (prod_key.upper() == upper or prod_key.upper() in upper):
+            if sid != source_id:
+                continue
+            prod_upper = prod_key.upper()
+            if prod_upper == upper or prod_upper in upper:
                 return candidate
+        if source_id == DataSourceId.NASA_POWER and any(
+            token in upper for token in ("NASA_POWER", "POWER_DAILY", "POWER_HOURLY", "POWER")
+        ):
+            return SOURCE_REGISTRY[(DataSourceId.NASA_POWER, "POWER_DAILY")]
+        if source_id == DataSourceId.GPM_IMERG and any(
+            token in upper for token in ("GPM_3IMERG", "3IMERG")
+        ):
+            if ".06" in upper or "V06" in upper:
+                return SOURCE_REGISTRY[(DataSourceId.GPM_IMERG, "GPM_3IMERGHH.06")]
+            return SOURCE_REGISTRY[(DataSourceId.GPM_IMERG, "GPM_3IMERGHH.07")]
+        if source_id == DataSourceId.MODIS_MOD13Q1 and "MOD13" in upper:
+            return SOURCE_REGISTRY[(DataSourceId.MODIS_MOD13Q1, "MOD13Q1.061")]
+        if source_id == DataSourceId.MODIS_MOD11A2 and "MOD11" in upper:
+            return SOURCE_REGISTRY[(DataSourceId.MODIS_MOD11A2, "MOD11A2.061")]
+        if source_id == DataSourceId.SMAP_SPL3SMP_E and any(
+            token in upper for token in ("SPL3SMP", "SMAP")
+        ):
+            return SOURCE_REGISTRY[(DataSourceId.SMAP_SPL3SMP_E, "SPL3SMP_E.006")]
     if spec is None:
         default_key = _SOURCE_ALIASES.get(source_id)
         if default_key is not None and not product:

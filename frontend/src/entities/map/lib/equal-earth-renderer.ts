@@ -1,4 +1,5 @@
 import { geoPath } from 'd3-geo'
+import { buildLayerRenderPngUrl, resolveLayerEffectiveDate } from '../../../shared/api/layers'
 import { BASEMAP_PROVIDER_REGISTRY } from '../../../shared/config/geospatial'
 import { clampLatitude, normalizeAoiGeometry, normalizeLongitude } from '../../../shared/lib/geojson-utils'
 import type { BasemapId, MapViewportState } from '../../../shared/types/geospatial'
@@ -14,6 +15,7 @@ import {
   drawEqualEarthCanvas,
   drawEqualEarthOverlayLabels,
   drawEqualEarthSvgVectors,
+  type ScienceOverlayRaster,
 } from './equal-earth-draw'
 import {
   applyEqualEarthZoom,
@@ -52,6 +54,8 @@ export class EqualEarthRenderer implements MapRenderer {
   private pointerDownPos: [number, number] | null = null
   private lastPointerPos: [number, number] | null = null
   private loadedBasemapRasters = new Map<BasemapId, CachedGibsRaster | null>()
+  private loadedScienceRasters = new Map<string, ScienceOverlayRaster | null>()
+  private pendingScienceKeys = new Set<string>()
   private cachedCanvasRenderKey = ''
   private destroyed = false
 
@@ -141,7 +145,74 @@ export class EqualEarthRenderer implements MapRenderer {
         })
       }
     }
+    this.ensureScienceRasterLoaded(state)
     this.render()
+  }
+
+  private resolveScienceRenderKey(state: MapRenderState): { url: string; bbox: readonly [number, number, number, number] } | null {
+    const active = state.activeLayer
+    if (
+      !active ||
+      !active.visible ||
+      active.layer.availabilityStatus !== 'connected' ||
+      !active.layer.tileSource.isConnected ||
+      !active.layer.datasetBbox ||
+      active.layer.datasetBbox.length !== 4
+    ) {
+      return null
+    }
+    const bbox: readonly [number, number, number, number] = [
+      active.layer.datasetBbox[0],
+      active.layer.datasetBbox[1],
+      active.layer.datasetBbox[2],
+      active.layer.datasetBbox[3],
+    ]
+    const url = buildLayerRenderPngUrl(active.layer.id, {
+      bbox,
+      width: 512,
+      height: 512,
+      timestamp: resolveLayerEffectiveDate(active.layer, state.selectedDate),
+      vmin: active.minValue,
+      vmax: active.maxValue,
+      datasetId: active.layer.activeDatasetId ?? undefined,
+    })
+    return { url, bbox }
+  }
+
+  private ensureScienceRasterLoaded(state: MapRenderState): void {
+    const target = this.resolveScienceRenderKey(state)
+    if (!target) return
+    if (this.loadedScienceRasters.has(target.url) || this.pendingScienceKeys.has(target.url)) return
+    this.pendingScienceKeys.add(target.url)
+    fetch(target.url, { credentials: 'include' })
+      .then((res) => (res.ok ? res.blob() : null))
+      .then((blob) => (blob ? createImageBitmap(blob) : null))
+      .then((bitmap) => {
+        this.pendingScienceKeys.delete(target.url)
+        if (!bitmap || this.destroyed) return
+        const off = document.createElement('canvas')
+        off.width = bitmap.width
+        off.height = bitmap.height
+        const offCtx = off.getContext('2d')
+        if (!offCtx) {
+          bitmap.close()
+          return
+        }
+        offCtx.drawImage(bitmap, 0, 0)
+        const imgData = offCtx.getImageData(0, 0, bitmap.width, bitmap.height)
+        bitmap.close()
+        this.loadedScienceRasters.set(target.url, {
+          bbox: target.bbox,
+          width: imgData.width,
+          height: imgData.height,
+          data: imgData.data,
+        })
+        this.render()
+      })
+      .catch(() => {
+        this.pendingScienceKeys.delete(target.url)
+        this.loadedScienceRasters.set(target.url, null)
+      })
   }
 
   setViewport(viewport: MapViewportState): void {
@@ -344,8 +415,11 @@ export class EqualEarthRenderer implements MapRenderer {
     const pathGen = geoPath(projection)
     const basemap = BASEMAP_PROVIDER_REGISTRY[this.state.basemap]
     const raster = this.loadedBasemapRasters.get(this.state.basemap)
+    const scienceTarget = this.resolveScienceRenderKey(this.state)
+    const scienceRaster = scienceTarget ? this.loadedScienceRasters.get(scienceTarget.url) : null
+    const scienceOpacity = this.state.activeLayer?.opacity ?? 0.85
     const step = this.isDragging ? 3 : 2
-    const canvasKey = `${this.camera.width}x${this.camera.height}:${this.camera.scaleFactor.toFixed(4)}:${this.camera.panX.toFixed(2)}:${this.camera.panY.toFixed(2)}:${this.state.basemap}:${Boolean(raster)}:${step}`
+    const canvasKey = `${this.camera.width}x${this.camera.height}:${this.camera.scaleFactor.toFixed(4)}:${this.camera.panX.toFixed(2)}:${this.camera.panY.toFixed(2)}:${this.state.basemap}:${Boolean(raster)}:${scienceTarget?.url ?? ''}:${Boolean(scienceRaster)}:${scienceOpacity}:${step}`
     if (this.cachedCanvasRenderKey !== canvasKey) {
       this.cachedCanvasRenderKey = canvasKey
       drawEqualEarthCanvas({
@@ -356,6 +430,8 @@ export class EqualEarthRenderer implements MapRenderer {
         pathGen,
         basemap,
         raster,
+        scienceRaster,
+        scienceOpacity,
         step,
       })
     }
@@ -369,6 +445,7 @@ export class EqualEarthRenderer implements MapRenderer {
       pathGen,
       basemap,
       hasRasterBasemap: Boolean(raster),
+      hasScienceRaster: Boolean(scienceRaster),
     })
     drawEqualEarthOverlayLabels({
       container: this.labelsEl,

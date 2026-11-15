@@ -1,12 +1,12 @@
-import { useCallback, useEffect, useRef } from 'react'
+import { useEffect, useRef } from 'react'
 import type { Map as MapLibreMap, MapGeoJSONFeature, MapLayerMouseEvent } from 'maplibre-gl'
 import type {
   CountrySelectionSummary,
   RegionOption,
   VariableOption,
 } from '../../../shared/store/ui-store'
-import type { AnomalyHotspotDatum } from '../model/types'
-import { ANOMALY_HOTSPOTS } from '../config/cartographic-data'
+import type { MapLayerDefinition } from '../../../shared/types/geospatial'
+import { REGION_CAMERA_PRESETS } from '../config/cartographic-data'
 
 function parseCountrySummary(
   feature: MapGeoJSONFeature,
@@ -25,10 +25,6 @@ function parseCountrySummary(
       typeof props.terraRegion === 'string'
         ? (props.terraRegion as RegionOption)
         : 'Global land',
-    demoLstTrend: Number(props.demoLstTrend ?? 0.25),
-    demoNdvi: Number(props.demoNdvi ?? 0.45),
-    demoEvi: Number(props.demoEvi ?? 0.35),
-    demoPrecipAnomaly: Number(props.demoPrecipAnomaly ?? 0),
     centerLon: Number(props.labelLon ?? 0),
     centerLat: Number(props.labelLat ?? 0),
   }
@@ -41,7 +37,6 @@ export interface UseRegionInteractionParams {
   selectedCountry: CountrySelectionSummary | null
   setSelectedCountry: (country: CountrySelectionSummary | null) => void
   setSelectedRegion: (region: RegionOption) => void
-  setSelectedHotspotId: (id: string) => void
 }
 
 export function useRegionInteraction({
@@ -51,7 +46,6 @@ export function useRegionInteraction({
   selectedCountry,
   setSelectedCountry,
   setSelectedRegion,
-  setSelectedHotspotId,
 }: UseRegionInteractionParams) {
   const hoveredFeatureIdRef = useRef<string | number | null>(null)
   const selectedCountryRef = useRef<CountrySelectionSummary | null>(
@@ -67,8 +61,8 @@ export function useRegionInteraction({
       return
     }
 
-    const interactiveLayers = ['country-thematic-fill', 'country-base-fill'].filter(
-      (layerId) => Boolean(mapInstance.getLayer(layerId)),
+    const interactiveLayers = ['country-hit-fill'].filter((layerId) =>
+      Boolean(mapInstance.getLayer(layerId)),
     )
 
     if (interactiveLayers.length === 0) {
@@ -137,12 +131,6 @@ export function useRegionInteraction({
       setSelectedCountry(summary)
       if (summary.terraRegion !== 'Global land') {
         setSelectedRegion(summary.terraRegion)
-        const matchingHotspot = ANOMALY_HOTSPOTS.find(
-          (item) => item.regionName === summary.terraRegion,
-        )
-        if (matchingHotspot) {
-          setSelectedHotspotId(matchingHotspot.id)
-        }
       }
     }
 
@@ -164,27 +152,14 @@ export function useRegionInteraction({
     mapInstance,
     setHoveredCountry,
     setSelectedCountry,
-    setSelectedHotspotId,
     setSelectedRegion,
   ])
-
-  const selectHotspot = useCallback(
-    (hotspot: AnomalyHotspotDatum) => {
-      setSelectedHotspotId(hotspot.id)
-      setSelectedCountry(null)
-      setSelectedRegion(hotspot.regionName)
-    },
-    [setSelectedCountry, setSelectedHotspotId, setSelectedRegion],
-  )
-
-  return {
-    selectHotspot,
-  }
 }
 
 export function formatCalloutReadout(
   variable: VariableOption,
-  hotspot: AnomalyHotspotDatum,
+  activeLayer: MapLayerDefinition | null,
+  selectedRegion: RegionOption,
   activeCountry: CountrySelectionSummary | null,
 ): {
   title: string
@@ -192,41 +167,34 @@ export function formatCalloutReadout(
   subtitleLabel: string
   anchorCoordinates: [number, number]
 } {
+  const isConnected = activeLayer?.availabilityStatus === 'connected'
+  const valueLabel = isConnected
+    ? `Connected · ${activeLayer.nativeSpatialResolution}`
+    : 'Unavailable'
+  const temporalLabel =
+    activeLayer && activeLayer.availableDates && activeLayer.availableDates.length > 0
+      ? `${activeLayer.availableDates[0]} → ${activeLayer.availableDates[activeLayer.availableDates.length - 1]}`
+      : activeLayer
+        ? `${activeLayer.availableTimeRange.start} → ${activeLayer.availableTimeRange.end}`
+        : ''
+  const subtitleLabel = isConnected && activeLayer
+    ? `${activeLayer.productId}.${activeLayer.productVersion}${temporalLabel ? ` · ${temporalLabel}` : ''}`
+    : (activeLayer?.unavailableReason ?? `${variable} dataset not ingested`)
+
   if (activeCountry) {
-    let valueLabel = `${activeCountry.demoLstTrend >= 0 ? '+' : '−'}${Math.abs(
-      activeCountry.demoLstTrend,
-    ).toFixed(2)}°C / decade`
-
-    if (variable === 'Vegetation index (NDVI)') {
-      valueLabel = `${activeCountry.demoNdvi.toFixed(2)} NDVI mean`
-    } else if (variable === 'Enhanced vegetation (EVI)') {
-      valueLabel = `${activeCountry.demoEvi.toFixed(2)} EVI mean`
-    } else if (variable === 'Precipitation anomaly') {
-      const sign = activeCountry.demoPrecipAnomaly >= 0 ? '+' : '−'
-      valueLabel = `${sign}${Math.abs(activeCountry.demoPrecipAnomaly).toFixed(1)} mm / mo`
-    }
-
     return {
       title: `${activeCountry.name} (${activeCountry.isoA3})`,
       valueLabel,
-      subtitleLabel: `${activeCountry.subregion} · Synthetic demo`,
+      subtitleLabel: `${activeCountry.subregion} · ${subtitleLabel}`,
       anchorCoordinates: [activeCountry.centerLon, activeCountry.centerLat],
     }
   }
 
-  let valueLabel = hotspot.lstTrendLabel
-  if (variable === 'Vegetation index (NDVI)') {
-    valueLabel = hotspot.ndviLabel
-  } else if (variable === 'Enhanced vegetation (EVI)') {
-    valueLabel = hotspot.eviLabel
-  } else if (variable === 'Precipitation anomaly') {
-    valueLabel = hotspot.precipLabel
-  }
-
+  const preset = REGION_CAMERA_PRESETS[selectedRegion]
   return {
-    title: hotspot.title,
+    title: selectedRegion,
     valueLabel,
-    subtitleLabel: hotspot.significanceLabel,
-    anchorCoordinates: hotspot.coordinates,
+    subtitleLabel,
+    anchorCoordinates: preset.center,
   }
 }

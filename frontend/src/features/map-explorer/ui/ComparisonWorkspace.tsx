@@ -20,7 +20,6 @@ export function ComparisonWorkspace() {
   const setComparisonLeft = useExploreStore((s) => s.setComparisonLeft)
   const setComparisonRight = useExploreStore((s) => s.setComparisonRight)
 
-  const syntheticPreviewEnabled = useExploreStore((s) => s.syntheticPreviewEnabled)
   const showGraticules = useExploreStore((s) => s.showGraticules)
   const showBorders = useExploreStore((s) => s.showBorders)
   const showLabels = useExploreStore((s) => s.showLabels)
@@ -68,7 +67,6 @@ export function ComparisonWorkspace() {
             maxValue: leftLayer.valueRange.defaultMax,
           }
         : null,
-      syntheticPreviewEnabled,
       showGraticules,
       showBorders,
       showLabels,
@@ -101,7 +99,6 @@ export function ComparisonWorkspace() {
       showGraticules,
       showLabels,
       showRegionBoundaries,
-      syntheticPreviewEnabled,
       viewport,
     ],
   )
@@ -120,7 +117,6 @@ export function ComparisonWorkspace() {
             maxValue: rightLayer.valueRange.defaultMax,
           }
         : null,
-      syntheticPreviewEnabled,
       showGraticules,
       showBorders,
       showLabels,
@@ -153,7 +149,6 @@ export function ComparisonWorkspace() {
       showGraticules,
       showLabels,
       showRegionBoundaries,
-      syntheticPreviewEnabled,
       viewport,
     ],
   )
@@ -285,6 +280,13 @@ export function ComparisonWorkspace() {
                 <span>
                   {leftLayer.shortName} ({leftLayer.unit})
                 </span>
+                <span
+                  className={`explorer-status-pill ${
+                    leftLayer.availabilityStatus === 'connected' ? 'is-connected' : 'is-unavailable'
+                  }`}
+                >
+                  {leftLayer.availabilityStatus === 'connected' ? 'Connected' : 'Unavailable'}
+                </span>
                 <div
                   className="explorer-legend-gradient"
                   style={{ background: leftLayer.legend.gradientCss }}
@@ -377,6 +379,15 @@ export function ComparisonWorkspace() {
               <>
                 <span>
                   {rightLayer.shortName} ({rightLayer.unit})
+                </span>
+                <span
+                  className={`explorer-status-pill ${
+                    rightLayer.availabilityStatus === 'connected'
+                      ? 'is-connected'
+                      : 'is-unavailable'
+                  }`}
+                >
+                  {rightLayer.availabilityStatus === 'connected' ? 'Connected' : 'Unavailable'}
                 </span>
                 <div
                   className="explorer-legend-gradient"

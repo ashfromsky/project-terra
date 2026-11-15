@@ -60,7 +60,7 @@ class HttpxGhsDatasetClient:
 
         try:
             return map_ghs_dataset_payload(payload)
-        except ScientificCoreError as exc:
+        except (ScientificCoreError, TypeError, ValueError, KeyError) as exc:
             raise GhsIntegrationError(
                 f"GHS dataset '{cleaned}' failed Scientific Core mapping: {exc}"
             ) from exc

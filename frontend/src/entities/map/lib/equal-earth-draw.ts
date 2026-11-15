@@ -6,13 +6,18 @@ import type { AoiGeometry, BasemapId } from '../../../shared/types/geospatial'
 import {
   CONTINENT_AND_OCEAN_LABELS,
   MAJOR_COUNTRY_LABELS,
-  REGION_AOI_GEOJSON,
 } from '../../../widgets/world-map/config/cartographic-data'
 import type { CountryFeatureProperties } from '../../../widgets/world-map/model/types'
-import { extractPreviewFeatureValue, interpolateColorFromLayer } from '../../layer/lib/layer-coloring'
 import type { NaturalEarthBundle } from '../api/natural-earth-loader'
 import type { MapRenderState } from '../model/map-renderer'
 import type { CachedGibsRaster } from './gibs-overview-loader'
+
+export interface ScienceOverlayRaster {
+  bbox: readonly [number, number, number, number]
+  width: number
+  height: number
+  data: Uint8ClampedArray
+}
 
 export const EQUAL_EARTH_SPHERE: GeoPermissibleObjects = { type: 'Sphere' }
 
@@ -45,9 +50,22 @@ export function drawEqualEarthCanvas(params: {
   pathGen: ReturnType<typeof geoPath>
   basemap: (typeof BASEMAP_PROVIDER_REGISTRY)[BasemapId]
   raster: CachedGibsRaster | null | undefined
+  scienceRaster?: ScienceOverlayRaster | null
+  scienceOpacity?: number
   step: number
 }): void {
-  const { canvas, width, height, projection, pathGen, basemap, raster, step } = params
+  const {
+    canvas,
+    width,
+    height,
+    projection,
+    pathGen,
+    basemap,
+    raster,
+    scienceRaster,
+    scienceOpacity = 0.85,
+    step,
+  } = params
   const dpr = Math.min(window.devicePixelRatio || 1, 2)
   const targetW = Math.round(width * dpr)
   const targetH = Math.round(height * dpr)
@@ -70,7 +88,7 @@ export function drawEqualEarthCanvas(params: {
   ctx.fillStyle = basemap.backgroundOceanColor
   ctx.fillRect(0, 0, width, height)
 
-  if (raster) {
+  if (raster || scienceRaster) {
     const imgWidth = Math.ceil(width / step)
     const imgHeight = Math.ceil(height / step)
     const offscreen = document.createElement('canvas')
@@ -80,6 +98,9 @@ export function drawEqualEarthCanvas(params: {
     if (offCtx) {
       const out = offCtx.createImageData(imgWidth, imgHeight)
       const degPerPx = 0.28125
+      const [minLon, minLat, maxLon, maxLat] = scienceRaster?.bbox ?? [0, 0, 0, 0]
+      const spanLon = maxLon - minLon
+      const spanLat = maxLat - minLat
       for (let py = 0; py < imgHeight; py++) {
         const sy = py * step + step * 0.5
         for (let px = 0; px < imgWidth; px++) {
@@ -88,18 +109,70 @@ export function drawEqualEarthCanvas(params: {
           if (!coords) continue
           const [lon, lat] = coords
           if (lon < -180 || lon > 180 || lat < -90 || lat > 90) continue
-          const rx = Math.max(0, Math.min(raster.width - 1, Math.floor((lon + 180) / degPerPx)))
-          const ry = Math.max(0, Math.min(raster.height - 1, Math.floor((90 - lat) / degPerPx)))
-          const srcIdx = (ry * raster.width + rx) * 4
           const dstIdx = (py * imgWidth + px) * 4
-          out.data[dstIdx] = raster.data[srcIdx]
-          out.data[dstIdx + 1] = raster.data[srcIdx + 1]
-          out.data[dstIdx + 2] = raster.data[srcIdx + 2]
-          out.data[dstIdx + 3] = 255
+
+          let r = 0
+          let g = 0
+          let b = 0
+          let a = 0
+
+          if (raster) {
+            const rx = Math.max(0, Math.min(raster.width - 1, Math.floor((lon + 180) / degPerPx)))
+            const ry = Math.max(0, Math.min(raster.height - 1, Math.floor((90 - lat) / degPerPx)))
+            const srcIdx = (ry * raster.width + rx) * 4
+            r = raster.data[srcIdx]
+            g = raster.data[srcIdx + 1]
+            b = raster.data[srcIdx + 2]
+            a = 255
+          }
+
+          if (
+            scienceRaster &&
+            spanLon > 0 &&
+            spanLat > 0 &&
+            lon >= minLon &&
+            lon <= maxLon &&
+            lat >= minLat &&
+            lat <= maxLat
+          ) {
+            const srx = Math.max(
+              0,
+              Math.min(
+                scienceRaster.width - 1,
+                Math.floor(((lon - minLon) / spanLon) * scienceRaster.width),
+              ),
+            )
+            const sry = Math.max(
+              0,
+              Math.min(
+                scienceRaster.height - 1,
+                Math.floor(((maxLat - lat) / spanLat) * scienceRaster.height),
+              ),
+            )
+            const sIdx = (sry * scienceRaster.width + srx) * 4
+            const srcAlpha = (scienceRaster.data[sIdx + 3] / 255) * scienceOpacity
+            if (srcAlpha > 0) {
+              if (a === 255) {
+                r = Math.round(scienceRaster.data[sIdx] * srcAlpha + r * (1 - srcAlpha))
+                g = Math.round(scienceRaster.data[sIdx + 1] * srcAlpha + g * (1 - srcAlpha))
+                b = Math.round(scienceRaster.data[sIdx + 2] * srcAlpha + b * (1 - srcAlpha))
+              } else {
+                r = scienceRaster.data[sIdx]
+                g = scienceRaster.data[sIdx + 1]
+                b = scienceRaster.data[sIdx + 2]
+                a = Math.round(srcAlpha * 255)
+              }
+            }
+          }
+
+          out.data[dstIdx] = r
+          out.data[dstIdx + 1] = g
+          out.data[dstIdx + 2] = b
+          out.data[dstIdx + 3] = a
         }
       }
       offCtx.putImageData(out, 0, 0)
-      ctx.imageSmoothingEnabled = true
+      ctx.imageSmoothingEnabled = false
       ctx.drawImage(offscreen, 0, 0, width, height)
     }
   }
@@ -118,16 +191,22 @@ export function drawEqualEarthSvgVectors(params: {
   pathGen: ReturnType<typeof geoPath>
   basemap: (typeof BASEMAP_PROVIDER_REGISTRY)[BasemapId]
   hasRasterBasemap: boolean
+  hasScienceRaster?: boolean
 }): void {
-  const { svg, state, bundle, width, height, projection, pathGen, basemap, hasRasterBasemap } = params
+  const {
+    svg,
+    state,
+    bundle,
+    width,
+    height,
+    projection,
+    pathGen,
+    basemap,
+    hasRasterBasemap,
+    hasScienceRaster = false,
+  } = params
   svg.setAttribute('viewBox', `0 0 ${width} ${height}`)
 
-  const showPreviewChoropleth = Boolean(
-    state.activeLayer &&
-      state.activeLayer.visible &&
-      state.syntheticPreviewEnabled &&
-      state.activeLayer.layer.isSyntheticPreview,
-  )
   const fragments: string[] = []
 
   if (state.showGraticules) {
@@ -149,19 +228,8 @@ export function drawEqualEarthSvgVectors(params: {
       const isSelected = state.selectedCountry?.isoA3 === iso
       const isHovered = state.hoveredCountryIso === iso
 
-      let fill = hasRasterBasemap ? 'transparent' : basemap.landFallbackColor
-      let fillOpacity = hasRasterBasemap ? 0 : 1
-
-      if (showPreviewChoropleth && state.activeLayer) {
-        const val = extractPreviewFeatureValue(props, state.activeLayer.layer)
-        fill = interpolateColorFromLayer(
-          state.activeLayer.layer,
-          val,
-          state.activeLayer.minValue,
-          state.activeLayer.maxValue,
-        )
-        fillOpacity = state.activeLayer.opacity
-      }
+      const fill = hasRasterBasemap || hasScienceRaster ? 'transparent' : basemap.landFallbackColor
+      const fillOpacity = hasRasterBasemap || hasScienceRaster ? 0 : 1
 
       countriesPaths.push(
         `<path data-iso="${iso}" d="${d}" fill="${fill}" fill-opacity="${fillOpacity}" stroke="${
@@ -188,14 +256,30 @@ export function drawEqualEarthSvgVectors(params: {
     }
   }
 
-  if (state.showRegionBoundaries) {
-    for (const regionFeature of REGION_AOI_GEOJSON.features) {
-      const d = pathGen(regionFeature as GeoPermissibleObjects)
-      if (d) {
-        fragments.push(
-          `<path d="${d}" fill="rgba(21,155,145,0.08)" stroke="#159b91" stroke-width="1.2" stroke-dasharray="4 3" pointer-events="none" />`,
-        )
-      }
+  const dsBbox = state.activeLayer?.visible ? state.activeLayer.layer.datasetBbox : null
+  if (dsBbox && dsBbox.length === 4) {
+    const [minLon, minLat, maxLon, maxLat] = dsBbox
+    const extentFeature: Feature<Geometry> = {
+      type: 'Feature',
+      properties: {},
+      geometry: {
+        type: 'Polygon',
+        coordinates: [
+          [
+            [minLon, minLat],
+            [maxLon, minLat],
+            [maxLon, maxLat],
+            [minLon, maxLat],
+            [minLon, minLat],
+          ],
+        ],
+      },
+    }
+    const extentD = pathGen(extentFeature as GeoPermissibleObjects)
+    if (extentD) {
+      fragments.push(
+        `<path d="${extentD}" fill="none" stroke="#159b91" stroke-width="1.5" stroke-dasharray="4 2" pointer-events="none" />`,
+      )
     }
   }
 

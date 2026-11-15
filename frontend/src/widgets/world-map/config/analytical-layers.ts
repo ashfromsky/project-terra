@@ -1,211 +1,104 @@
-import type { Layer, PickingInfo } from '@deck.gl/core'
-import { GeoJsonLayer, PolygonLayer, ScatterplotLayer } from '@deck.gl/layers'
-import type { Feature } from 'geojson'
-import type {
-  MapLayerVisibility,
-  RegionOption,
-  VariableOption,
-} from '../../../shared/store/ui-store'
-import type {
-  AnomalyHotspotDatum,
-  RegionAoiFeatureProperties,
-  SyntheticAnomalyCellDatum,
-} from '../model/types'
-import {
-  ANOMALY_HOTSPOTS,
-  REGION_AOI_GEOJSON,
-  SYNTHETIC_ANOMALY_CELLS,
-} from './cartographic-data'
+import type { Layer } from '@deck.gl/core'
+import { GeoJsonLayer } from '@deck.gl/layers'
+import type { Feature, Polygon } from 'geojson'
+import type { RegionResponse } from '../../../shared/api/contracts'
+import type { MapLayerVisibility, RegionOption } from '../../../shared/store/ui-store'
+import type { MapLayerDefinition } from '../../../shared/types/geospatial'
 
-export interface AnalyticalLayersOptions {
-  selectedVariable: VariableOption
+export interface AnalyticalOverlayOptions {
   selectedRegion: RegionOption
-  selectedHotspotId: string
+  regions: readonly RegionResponse[]
+  activeLayer: MapLayerDefinition | null
   visibility: MapLayerVisibility
-  onSelectHotspot: (hotspot: AnomalyHotspotDatum) => void
-  onSelectRegionAoi: (region: RegionOption) => void
+  onSelectRegion?: (region: RegionResponse) => void
 }
 
-function getCellFillColor(
-  cell: SyntheticAnomalyCellDatum,
-  variable: VariableOption,
-  selectedRegion: RegionOption,
-): [number, number, number, number] {
-  const isFocusedRegion =
-    selectedRegion === 'Global land' || cell.regionName === selectedRegion
-  const alpha = isFocusedRegion ? 78 : 28
-
-  if (variable === 'Vegetation index (NDVI)') {
-    if (cell.ndviScore >= 0.65) return [21, 155, 145, alpha]
-    if (cell.ndviScore >= 0.4) return [145, 198, 188, alpha]
-    return [223, 184, 146, alpha]
+function buildDatasetExtentFeature(
+  bbox: readonly number[],
+  layer: MapLayerDefinition,
+): Feature<Polygon, { title: string; subtitle: string }> {
+  const [west, south, east, north] = bbox
+  return {
+    type: 'Feature',
+    properties: {
+      title: `${layer.name} coverage`,
+      subtitle: `${layer.productId}.${layer.productVersion} · ${layer.nativeSpatialResolution}`,
+    },
+    geometry: {
+      type: 'Polygon',
+      coordinates: [
+        [
+          [west, south],
+          [east, south],
+          [east, north],
+          [west, north],
+          [west, south],
+        ],
+      ],
+    },
   }
-
-  if (variable === 'Enhanced vegetation (EVI)') {
-    if (cell.eviScore >= 0.5) return [14, 124, 116, alpha]
-    if (cell.eviScore >= 0.3) return [142, 199, 190, alpha]
-    return [229, 203, 176, alpha]
-  }
-
-  if (variable === 'Precipitation anomaly') {
-    if (cell.precipDelta <= -18) return [199, 127, 109, alpha]
-    if (cell.precipDelta < 0) return [222, 180, 159, alpha]
-    return [49, 147, 206, alpha]
-  }
-
-  if (cell.lstDelta >= 0.38) return [199, 127, 109, alpha]
-  if (cell.lstDelta >= 0.3) return [231, 182, 167, alpha]
-  return [21, 155, 145, alpha]
 }
 
 export function createAnalyticalOverlayLayers({
-  selectedVariable,
-  selectedRegion,
-  selectedHotspotId,
+  regions,
+  activeLayer,
   visibility,
-  onSelectHotspot,
-  onSelectRegionAoi,
-}: AnalyticalLayersOptions): Layer[] {
+  onSelectRegion,
+}: AnalyticalOverlayOptions): Layer[] {
   const layers: Layer[] = []
 
-  if (visibility.anomalyGrid && visibility.thematicOverlay) {
+  if (visibility.regionBoundaries && regions.length > 0) {
     layers.push(
-      new PolygonLayer<SyntheticAnomalyCellDatum>({
-        id: 'terra-synthetic-anomaly-grid',
-        data: SYNTHETIC_ANOMALY_CELLS,
+      new GeoJsonLayer<RegionResponse>({
+        id: 'terra-user-regions',
+        data: {
+          type: 'FeatureCollection',
+          features: regions.map((region) => ({
+            type: 'Feature',
+            id: region.id,
+            geometry: region.geometry,
+            properties: region,
+          })),
+        },
+        pickable: Boolean(onSelectRegion),
+        stroked: true,
+        filled: true,
+        lineWidthMinPixels: 1.5,
+        getFillColor: [21, 155, 145, 28],
+        getLineColor: [21, 155, 145, 220],
+        getLineWidth: 2,
+        onClick: onSelectRegion
+          ? (info) => {
+              const region = info.object?.properties as RegionResponse | undefined
+              if (region) {
+                onSelectRegion(region)
+              }
+            }
+          : undefined,
+      }),
+    )
+  }
+
+  if (
+    visibility.thematicOverlay &&
+    activeLayer &&
+    activeLayer.availabilityStatus === 'connected' &&
+    activeLayer.datasetBbox &&
+    activeLayer.datasetBbox.length === 4
+  ) {
+    layers.push(
+      new GeoJsonLayer({
+        id: 'terra-dataset-extent-outline',
+        data: {
+          type: 'FeatureCollection',
+          features: [buildDatasetExtentFeature(activeLayer.datasetBbox, activeLayer)],
+        },
         pickable: false,
         stroked: true,
-        filled: true,
-        wireframe: false,
-        lineWidthMinPixels: 0.5,
-        getPolygon: (cell) => cell.polygon,
-        getFillColor: (cell) =>
-          getCellFillColor(cell, selectedVariable, selectedRegion),
-        getLineColor: [255, 255, 255, 55],
-        updateTriggers: {
-          getFillColor: [selectedVariable, selectedRegion],
-        },
-      }),
-    )
-  }
-
-  if (visibility.regionBoundaries) {
-    layers.push(
-      new GeoJsonLayer<RegionAoiFeatureProperties>({
-        id: 'terra-region-aoi-boundaries',
-        data: REGION_AOI_GEOJSON,
-        pickable: true,
-        stroked: true,
-        filled: true,
-        lineWidthUnits: 'pixels',
-        lineWidthMinPixels: 1.2,
-        lineWidthMaxPixels: 3,
-        getFillColor: (feature: Feature) => {
-          const props = feature.properties as RegionAoiFeatureProperties | null
-          if (!props) return [21, 155, 145, 20]
-          const isSelected =
-            selectedRegion === props.regionName ||
-            (selectedRegion === 'Global land' &&
-              props.regionName === 'Amazon basin')
-          if (isSelected) {
-            return [21, 155, 145, 42]
-          }
-          return [21, 155, 145, 14]
-        },
-        getLineColor: (feature: Feature) => {
-          const props = feature.properties as RegionAoiFeatureProperties | null
-          if (!props) return [21, 155, 145, 180]
-          const isSelected =
-            selectedRegion === props.regionName ||
-            (selectedRegion === 'Global land' &&
-              props.regionName === 'Amazon basin')
-          return isSelected ? [21, 155, 145, 240] : [21, 155, 145, 115]
-        },
-        getLineWidth: (feature: Feature) => {
-          const props = feature.properties as RegionAoiFeatureProperties | null
-          if (!props) return 1.2
-          const isSelected =
-            selectedRegion === props.regionName ||
-            (selectedRegion === 'Global land' &&
-              props.regionName === 'Amazon basin')
-          return isSelected ? 1.85 : 1.1
-        },
-        onClick: (info: PickingInfo) => {
-          const feature = info.object as Feature | undefined
-          const props = feature?.properties as
-            | RegionAoiFeatureProperties
-            | undefined
-          if (props?.regionName) {
-            onSelectRegionAoi(props.regionName)
-          }
-        },
-        updateTriggers: {
-          getFillColor: [selectedRegion],
-          getLineColor: [selectedRegion],
-          getLineWidth: [selectedRegion],
-        },
-      }),
-    )
-  }
-
-  if (visibility.anomalyHotspots) {
-    layers.push(
-      new ScatterplotLayer<AnomalyHotspotDatum>({
-        id: 'terra-anomaly-hotspots-halo',
-        data: ANOMALY_HOTSPOTS,
-        pickable: true,
-        stroked: true,
-        filled: true,
-        radiusUnits: 'pixels',
-        radiusMinPixels: 10,
-        radiusMaxPixels: 18,
-        lineWidthUnits: 'pixels',
-        lineWidthMinPixels: 1,
-        getPosition: (d) => d.coordinates,
-        getRadius: (d) => (d.id === selectedHotspotId ? 14 : 10),
-        getFillColor: (d) =>
-          d.tone === 'teal'
-            ? [21, 155, 145, d.id === selectedHotspotId ? 76 : 48]
-            : [199, 127, 109, d.id === selectedHotspotId ? 76 : 48],
-        getLineColor: (d) =>
-          d.tone === 'teal'
-            ? [21, 155, 145, d.id === selectedHotspotId ? 210 : 120]
-            : [199, 127, 109, d.id === selectedHotspotId ? 210 : 120],
-        onClick: (info: PickingInfo<AnomalyHotspotDatum>) => {
-          if (info.object) {
-            onSelectHotspot(info.object)
-          }
-        },
-        updateTriggers: {
-          getRadius: [selectedHotspotId],
-          getFillColor: [selectedHotspotId],
-          getLineColor: [selectedHotspotId],
-        },
-      }),
-      new ScatterplotLayer<AnomalyHotspotDatum>({
-        id: 'terra-anomaly-hotspots-core',
-        data: ANOMALY_HOTSPOTS,
-        pickable: true,
-        stroked: true,
-        filled: true,
-        radiusUnits: 'pixels',
-        radiusMinPixels: 4,
-        radiusMaxPixels: 7,
-        lineWidthUnits: 'pixels',
+        filled: false,
         lineWidthMinPixels: 1.5,
-        getPosition: (d) => d.coordinates,
-        getRadius: (d) => (d.id === selectedHotspotId ? 5.5 : 4.2),
-        getFillColor: (d) =>
-          d.tone === 'teal' ? [21, 155, 145, 255] : [199, 127, 109, 255],
-        getLineColor: [255, 255, 255, 245],
-        onClick: (info: PickingInfo<AnomalyHotspotDatum>) => {
-          if (info.object) {
-            onSelectHotspot(info.object)
-          }
-        },
-        updateTriggers: {
-          getRadius: [selectedHotspotId],
-        },
+        getLineColor: [11, 114, 133, 210],
+        getLineWidth: 2,
       }),
     )
   }

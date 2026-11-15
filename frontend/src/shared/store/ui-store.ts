@@ -28,9 +28,7 @@ export type TemporalCadence = 'Monthly' | 'Seasonal' | 'Annual'
 
 export interface MapLayerVisibility {
   thematicOverlay: boolean
-  anomalyGrid: boolean
   regionBoundaries: boolean
-  anomalyHotspots: boolean
   graticules: boolean
   countryBorders: boolean
   countryLabels: boolean
@@ -42,10 +40,6 @@ export interface CountrySelectionSummary {
   continent: string
   subregion: string
   terraRegion: RegionOption
-  demoLstTrend: number
-  demoNdvi: number
-  demoEvi: number
-  demoPrecipAnomaly: number
   centerLon: number
   centerLat: number
 }
@@ -62,8 +56,6 @@ interface UiState {
   setActiveWorkspaceTab: (tab: WorkspaceTab) => void
   activeMapTool: MapToolId
   setActiveMapTool: (tool: MapToolId) => void
-  selectedHotspotId: string
-  setSelectedHotspotId: (id: string) => void
   selectedCountry: CountrySelectionSummary | null
   setSelectedCountry: (country: CountrySelectionSummary | null) => void
   hoveredCountry: CountrySelectionSummary | null
@@ -86,10 +78,8 @@ interface UiState {
 
 const DEFAULT_LAYER_VISIBILITY: MapLayerVisibility = {
   thematicOverlay: true,
-  anomalyGrid: false,
-  regionBoundaries: false,
-  anomalyHotspots: false,
-  graticules: true,
+  regionBoundaries: true,
+  graticules: false,
   countryBorders: true,
   countryLabels: true,
 }
@@ -106,8 +96,6 @@ export const useUiStore = create<UiState>()((set) => ({
   setActiveWorkspaceTab: (activeWorkspaceTab) => set({ activeWorkspaceTab }),
   activeMapTool: 'layers',
   setActiveMapTool: (activeMapTool) => set({ activeMapTool }),
-  selectedHotspotId: 'amazon',
-  setSelectedHotspotId: (selectedHotspotId) => set({ selectedHotspotId }),
   selectedCountry: null,
   setSelectedCountry: (selectedCountry) => set({ selectedCountry }),
   hoveredCountry: null,

@@ -23,8 +23,8 @@ OBSERVATION_LAYERS: tuple[LayerDefinition, ...] = (
         short_name="NDVI",
         group_id="vegetation",
         description=(
-            "Normalized Difference Vegetation Index 16-day composite. Visual preview uses "
-            "synthetic Natural Earth attributes until COG raster ingestion is connected."
+            "Normalized Difference Vegetation Index 16-day composite at 250 m native resolution "
+            "from MODIS Terra."
         ),
         data_source="NASA LP DAAC · MODIS Terra",
         product_id="MOD13Q1",
@@ -34,10 +34,10 @@ OBSERVATION_LAYERS: tuple[LayerDefinition, ...] = (
         native_spatial_resolution="250 m",
         temporal_resolution="16-day composite",
         available_time_range=AvailableTimeRange("2001-01-01", "2025-12-31", "16-day"),
-        attribution="NASA LP DAAC · MOD13Q1 v061 (Synthetic preview overlay)",
-        availability_status="preview",
-        rendering_type="choropleth",
-        supported_tile_formats=("cog", "tilejson", "geojson"),
+        attribution="NASA LP DAAC · MOD13Q1 v061",
+        availability_status="unavailable",
+        rendering_type="raster",
+        supported_tile_formats=("cog", "xyz"),
         qa_policy="MOD13Q1 Pixel Reliability == 0 (Good data) & VI Quality bitmask screening",
         limitations=(
             "Optical composite affected by persistent tropical cloud cover; "
@@ -59,8 +59,12 @@ OBSERVATION_LAYERS: tuple[LayerDefinition, ...] = (
             stops=VEGETATION_RAMP,
         ),
         tile_source=MapTileSource("src-mod13q1-ndvi", "cog", None, "EPSG:4326", True, False),
-        is_synthetic_preview=True,
-        preview_property_key="demoNdvi",
+        is_synthetic_preview=False,
+        preview_property_key=None,
+        unavailable_reason=(
+            "No ingested MOD13Q1.061 NDVI dataset found in storage. "
+            "Ingest observations via Data Sources."
+        ),
     ),
     LayerDefinition(
         id="evi-mod13q1",
@@ -68,8 +72,8 @@ OBSERVATION_LAYERS: tuple[LayerDefinition, ...] = (
         short_name="EVI",
         group_id="vegetation",
         description=(
-            "Enhanced Vegetation Index reducing atmospheric aerosol and soil background noise in "
-            "dense canopies. Visual preview uses synthetic Natural Earth demonstration attributes."
+            "Enhanced Vegetation Index reducing atmospheric aerosol and soil background noise "
+            "in dense canopies."
         ),
         data_source="NASA LP DAAC · MODIS Terra",
         product_id="MOD13Q1",
@@ -79,10 +83,10 @@ OBSERVATION_LAYERS: tuple[LayerDefinition, ...] = (
         native_spatial_resolution="250 m",
         temporal_resolution="16-day composite",
         available_time_range=AvailableTimeRange("2001-01-01", "2025-12-31", "16-day"),
-        attribution="NASA LP DAAC · MOD13Q1 v061 (Synthetic preview overlay)",
-        availability_status="preview",
-        rendering_type="choropleth",
-        supported_tile_formats=("cog", "tilejson", "geojson"),
+        attribution="NASA LP DAAC · MOD13Q1 v061",
+        availability_status="unavailable",
+        rendering_type="raster",
+        supported_tile_formats=("cog", "xyz"),
         qa_policy="VI Usefulness <= 2; snow/ice & adjacent cloud bits excluded",
         limitations="Sensitive to topographic slope effects in steep mountainous terrain.",
         color_ramp=EVI_RAMP,
@@ -101,8 +105,12 @@ OBSERVATION_LAYERS: tuple[LayerDefinition, ...] = (
             stops=EVI_RAMP,
         ),
         tile_source=MapTileSource("src-mod13q1-evi", "cog", None, "EPSG:4326", True, False),
-        is_synthetic_preview=True,
-        preview_property_key="demoEvi",
+        is_synthetic_preview=False,
+        preview_property_key=None,
+        unavailable_reason=(
+            "No ingested MOD13Q1.061 EVI dataset found in storage. "
+            "Ingest observations via Data Sources."
+        ),
     ),
     LayerDefinition(
         id="lst-mod11a2",
@@ -122,9 +130,9 @@ OBSERVATION_LAYERS: tuple[LayerDefinition, ...] = (
         temporal_resolution="8-day composite",
         available_time_range=AvailableTimeRange("2001-01-01", "2025-12-31", "8-day"),
         attribution="NASA LP DAAC · MOD11A2 v061",
-        availability_status="planned",
+        availability_status="unavailable",
         rendering_type="raster",
-        supported_tile_formats=("cog", "tilejson", "zarr"),
+        supported_tile_formats=("cog", "xyz"),
         qa_policy="Mandatory QA == Good / Average LST error <= 1 K; scale 0.02 K -> °C",
         limitations="Clear-sky radiometric skin temperature bias; cloud-covered days are absent.",
         color_ramp=THERMAL_ABS_RAMP,
@@ -143,6 +151,10 @@ OBSERVATION_LAYERS: tuple[LayerDefinition, ...] = (
             stops=THERMAL_ABS_RAMP,
         ),
         tile_source=MapTileSource("src-mod11a2-lst", "cog", None, "EPSG:4326", True, False),
+        unavailable_reason=(
+            "No ingested MOD11A2.061 daytime LST dataset found in storage. "
+            "Ingest observations via Data Sources."
+        ),
     ),
     LayerDefinition(
         id="lst-anomaly",
@@ -151,7 +163,7 @@ OBSERVATION_LAYERS: tuple[LayerDefinition, ...] = (
         group_id="temperature",
         description=(
             "Decadal or seasonal Land Surface Temperature anomaly relative to baseline "
-            "climatology. Visual preview uses synthetic demonstration trends."
+            "climatology derived from scientific assessments."
         ),
         data_source="NASA LP DAAC · MOD11A2 / MOD11C3",
         product_id="MOD11A2 / MOD11C3",
@@ -161,10 +173,10 @@ OBSERVATION_LAYERS: tuple[LayerDefinition, ...] = (
         native_spatial_resolution="1 km / 0.05° CMG",
         temporal_resolution="Monthly composite",
         available_time_range=AvailableTimeRange("2001-01-01", "2025-12-31", "monthly"),
-        attribution="NASA MODIS LST · Synthetic preview overlay",
-        availability_status="preview",
-        rendering_type="choropleth",
-        supported_tile_formats=("cog", "tilejson", "geojson"),
+        attribution="NASA LP DAAC · MOD11A2 / MOD11C3",
+        availability_status="unavailable",
+        rendering_type="raster",
+        supported_tile_formats=("cog", "xyz"),
         qa_policy="Baseline 2001-2010 same-calendar-month anomaly; >= 80% valid months",
         limitations=(
             "Surface skin temperature trend is not directly interchangeable "
@@ -187,8 +199,9 @@ OBSERVATION_LAYERS: tuple[LayerDefinition, ...] = (
             stops=THERMAL_TREND_RAMP,
         ),
         tile_source=MapTileSource("src-lst-anomaly", "cog", None, "EPSG:4326", True, False),
-        is_synthetic_preview=True,
-        preview_property_key="demoLstTrend",
+        is_synthetic_preview=False,
+        preview_property_key=None,
+        unavailable_reason="No spatially gridded LST anomaly artifact is currently available.",
     ),
     LayerDefinition(
         id="precip-gpm-imerg",
@@ -197,33 +210,33 @@ OBSERVATION_LAYERS: tuple[LayerDefinition, ...] = (
         group_id="water",
         description=(
             "GPM IMERG Final Run gauge-calibrated precipitation estimate converted from interval "
-            "rates to monthly accumulated depth / anomaly."
+            "rates to accumulated depth."
         ),
         data_source="NASA GES DISC · GPM",
         product_id="GPM_3IMERGHH",
         product_version="V07",
         variable="precipitationCal",
-        unit="mm / month",
+        unit="mm / hr",
         native_spatial_resolution="0.1° (~10 km)",
         temporal_resolution="30-min / Monthly sum",
         available_time_range=AvailableTimeRange("2001-01-01", "2025-12-31", "monthly"),
-        attribution="NASA GES DISC · GPM IMERG V07 (Synthetic preview overlay)",
-        availability_status="preview",
-        rendering_type="choropleth",
-        supported_tile_formats=("zarr", "cog", "tilejson"),
+        attribution="NASA GES DISC · GPM IMERG V07",
+        availability_status="unavailable",
+        rendering_type="raster",
+        supported_tile_formats=("cog", "xyz", "zarr"),
         qa_policy="Final Run V07; interval mm/hr rate integrated to mm depth before monthly sum",
         limitations=(
             "Lower accuracy over complex orographic snow/ice regions (>60° latitude); "
             "distinct from NASA POWER."
         ),
         color_ramp=PRECIP_ANOMALY_RAMP,
-        value_range=ValueRange(-80, 80, -40, 40, 5),
+        value_range=ValueRange(0, 100, 0, 25, 1),
         legend=LegendConfiguration(
-            title="Precipitation Anomaly",
-            unit="mm / month",
-            min_label="-40",
-            mid_label="0",
-            max_label="+40",
+            title="Precipitation Rate",
+            unit="mm / hr",
+            min_label="0",
+            mid_label="12.5",
+            max_label="25",
             gradient_css=(
                 "linear-gradient(90deg, #c77f6d 0%, #ead6bc 34%, "
                 "#e8eef0 50%, #91c6bc 76%, #3193ce 100%)"
@@ -232,9 +245,13 @@ OBSERVATION_LAYERS: tuple[LayerDefinition, ...] = (
             nodata_label="NoData / High-latitude snow mask",
             stops=PRECIP_ANOMALY_RAMP,
         ),
-        tile_source=MapTileSource("src-gpm-imerg", "zarr", None, "EPSG:4326", True, False),
-        is_synthetic_preview=True,
-        preview_property_key="demoPrecipAnomaly",
+        tile_source=MapTileSource("src-gpm-imerg", "cog", None, "EPSG:4326", True, False),
+        is_synthetic_preview=False,
+        preview_property_key=None,
+        unavailable_reason=(
+            "No ingested GPM IMERG V07 precipitation dataset found in storage. "
+            "Ingest observations via Data Sources."
+        ),
     ),
     LayerDefinition(
         id="soil-moisture-smap",
@@ -254,9 +271,9 @@ OBSERVATION_LAYERS: tuple[LayerDefinition, ...] = (
         temporal_resolution="Daily (AM/PM)",
         available_time_range=AvailableTimeRange("2015-03-31", "2025-12-31", "daily"),
         attribution="NASA NSIDC DAAC · SMAP SPL3SMP_E",
-        availability_status="planned",
+        availability_status="unavailable",
         rendering_type="raster",
-        supported_tile_formats=("cog", "zarr", "tilejson"),
+        supported_tile_formats=("cog", "xyz", "zarr"),
         qa_policy=(
             "Retrieval quality bit 0 (recommended); frozen soil, water, "
             "and high VWC (>5 kg/m²) excluded"
@@ -281,5 +298,9 @@ OBSERVATION_LAYERS: tuple[LayerDefinition, ...] = (
             stops=SOIL_MOISTURE_RAMP,
         ),
         tile_source=MapTileSource("src-smap-spl3smp-e", "cog", None, "EPSG:4326", True, False),
+        unavailable_reason=(
+            "No ingested SMAP SPL3SMP_E.006 soil moisture dataset found in storage. "
+            "Ingest observations via Data Sources."
+        ),
     ),
 )

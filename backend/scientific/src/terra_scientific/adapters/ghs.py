@@ -124,20 +124,36 @@ def _resolve_catalog_var(
     return catalog_spec.variables.get(canonical)
 
 
+def _optional_float(value: Any, default: float | None = None) -> float | None:
+    if value is None:
+        return default
+    return float(value)
+
+
+def _float_or_default(value: Any, default: float) -> float:
+    if value is None:
+        return default
+    return float(value)
+
+
 def _map_variable_spec(
     name: str,
     raw_spec: Mapping[str, Any],
     catalog_spec: SourceProductSpec | None,
 ) -> VariableMetadata:
     catalog_var = _resolve_catalog_var(name, catalog_spec)
-    scale_factor = float(
-        raw_spec.get("scale_factor", catalog_var.scale_factor if catalog_var else 1.0)
+    scale_factor = _float_or_default(
+        raw_spec.get("scale_factor"),
+        catalog_var.scale_factor if catalog_var else 1.0,
     )
-    add_offset = float(raw_spec.get("add_offset", catalog_var.add_offset if catalog_var else 0.0))
+    add_offset = _float_or_default(
+        raw_spec.get("add_offset"),
+        catalog_var.add_offset if catalog_var else 0.0,
+    )
 
     attrs = dict(raw_spec.get("attributes") or {})
     str_attrs = {str(k): str(v) for k, v in attrs.items()}
-    dtype_str = str(raw_spec.get("dtype", "float64")).lower()
+    dtype_str = str(raw_spec.get("dtype") or "float64").lower()
     explicit_scaled = attrs.get("is_scaled")
     if explicit_scaled is not None:
         is_scaled = bool(explicit_scaled)
@@ -147,9 +163,9 @@ def _map_variable_spec(
         is_scaled = True
 
     fill_vals: list[float] = []
-    nodata = raw_spec.get("nodata")
-    if nodata is not None:
-        fill_vals.append(float(nodata))
+    nodata_val = _optional_float(raw_spec.get("nodata"))
+    if nodata_val is not None:
+        fill_vals.append(nodata_val)
     if catalog_var is not None:
         for val in catalog_var.fill_values:
             if val not in fill_vals:
@@ -159,15 +175,19 @@ def _map_variable_spec(
     valid_range: tuple[float, float] | None = None
     if catalog_var and catalog_var.valid_range is not None:
         valid_range = catalog_var.valid_range
-    elif isinstance(raw_range, list | tuple) and len(raw_range) == 2:
+    elif (
+        isinstance(raw_range, list | tuple)
+        and len(raw_range) == 2
+        and raw_range[0] is not None
+        and raw_range[1] is not None
+    ):
         low, high = float(raw_range[0]), float(raw_range[1])
         if scale_factor != 1.0 or add_offset != 0.0:
-            # Convert integer raw bounds from HDF metadata into physical units.
             low = low * scale_factor + add_offset
             high = high * scale_factor + add_offset
         valid_range = (min(low, high), max(low, high))
 
-    semantics_raw = str(raw_spec.get("semantics", "continuous_intensive")).lower()
+    semantics_raw = str(raw_spec.get("semantics") or "continuous_intensive").lower()
     sem_map = {
         "continuous_intensive": VariableSemanticKind.CONTINUOUS_INTENSIVE,
         "continuous_extensive": VariableSemanticKind.CONTINUOUS_EXTENSIVE,
@@ -182,10 +202,11 @@ def _map_variable_spec(
     canonical = (
         catalog_var.canonical_name if catalog_var else name.lower().replace("/", "_").strip("_")
     )
+    units = str(raw_spec.get("units") or (catalog_var.units if catalog_var else "dimensionless"))
     return VariableMetadata(
         name=name,
         canonical_name=canonical,
-        units=str(raw_spec.get("units", catalog_var.units if catalog_var else "dimensionless")),
+        units=units,
         semantic_kind=sem_kind,
         scale_factor=scale_factor,
         add_offset=add_offset,
@@ -218,9 +239,16 @@ def map_ghs_dataset_payload(payload: Mapping[str, Any]) -> ScientificDataset:
     temporal_raw = dict(payload.get("temporal_metadata") or {})
 
     raw_variables = dict(payload.get("variables") or {})
+    has_catalog_raw_vars = catalog_spec is not None and any(
+        _resolve_catalog_var(vname, catalog_spec) is not None for vname in raw_variables
+    )
     mapped_vars: dict[str, VariableMetadata] = {}
     for var_name, raw_var in raw_variables.items():
         if isinstance(raw_var, Mapping):
+            if has_catalog_raw_vars and _resolve_catalog_var(var_name, catalog_spec) is None:
+                sem = str(raw_var.get("semantics") or "").lower()
+                if sem not in {"qa_flag", "coordinate"}:
+                    continue
             mapped = _map_variable_spec(var_name, raw_var, catalog_spec)
             mapped_vars[var_name] = mapped
             canonical_alias = _CANONICAL_ALIAS_MAP.get(var_name)
@@ -262,16 +290,22 @@ def map_ghs_dataset_payload(payload: Mapping[str, Any]) -> ScientificDataset:
     )
 
     crs = str(spatial_raw.get("crs") or (catalog_spec.native_crs if catalog_spec else "EPSG:4326"))
-    nom_res = spatial_raw.get("nominal_resolution_m") or spatial_raw.get("resolution_x")
+    nom_res = _optional_float(spatial_raw.get("nominal_resolution_m"))
+    if nom_res is None:
+        nom_res = _optional_float(spatial_raw.get("resolution_x"))
     if nom_res is None and catalog_spec is not None:
         nom_res = catalog_spec.nominal_resolution_m
-    nom_res_f = abs(float(nom_res)) if nom_res is not None else None
+    nom_res_f = abs(nom_res) if nom_res is not None else None
     if nom_res_f is not None and nom_res_f <= 0.0:
         nom_res_f = None
 
     raw_bounds = spatial_raw.get("bounds")
     bounds_tuple: tuple[float, float, float, float] | None = None
-    if isinstance(raw_bounds, list | tuple) and len(raw_bounds) == 4:
+    if (
+        isinstance(raw_bounds, list | tuple)
+        and len(raw_bounds) == 4
+        and all(b is not None for b in raw_bounds)
+    ):
         bounds_tuple = (
             float(raw_bounds[0]),
             float(raw_bounds[1]),
@@ -305,16 +339,26 @@ def map_ghs_dataset_payload(payload: Mapping[str, Any]) -> ScientificDataset:
     embedded_series: dict[str, ObservationSeries] = {}
     raw_ts_map = extensions.get("time_series")
     if isinstance(raw_ts_map, Mapping):
+        has_catalog_ts_vars = catalog_spec is not None and any(
+            _resolve_catalog_var(str(k), catalog_spec) is not None for k in raw_ts_map
+        )
         for var_name, ts_payload in raw_ts_map.items():
             if not isinstance(ts_payload, Mapping):
                 continue
-            canonical_alias = _CANONICAL_ALIAS_MAP.get(var_name)
+            var_name_str = str(var_name)
+            canonical_alias = _CANONICAL_ALIAS_MAP.get(var_name_str)
+            if (
+                has_catalog_ts_vars
+                and _resolve_catalog_var(var_name_str, catalog_spec) is None
+                and var_name_str != "accumulated_depth_mm"
+            ):
+                continue
             var_meta = (
-                mapped_vars.get(var_name)
+                mapped_vars.get(var_name_str)
                 or (mapped_vars.get(canonical_alias) if canonical_alias else None)
-                or _resolve_catalog_var(var_name, catalog_spec)
+                or _resolve_catalog_var(var_name_str, catalog_spec)
             )
-            if var_meta is None and var_name == "accumulated_depth_mm":
+            if var_meta is None and var_name_str == "accumulated_depth_mm":
                 var_meta = VariableMetadata(
                     name="accumulated_depth_mm",
                     canonical_name="precipitation_depth",
@@ -324,12 +368,22 @@ def map_ghs_dataset_payload(payload: Mapping[str, Any]) -> ScientificDataset:
                 )
             if var_meta is None:
                 continue
+            if var_meta.semantic_kind in {
+                VariableSemanticKind.QA_FLAG,
+                VariableSemanticKind.COORDINATE,
+            }:
+                continue
+            target_key = canonical_alias or var_name_str
+            var_updates: dict[str, Any] = {"name": target_key}
             if "is_scaled" in ts_payload:
-                var_meta = var_meta.model_copy(update={"is_scaled": bool(ts_payload["is_scaled"])})
-                if var_name in mapped_vars:
-                    mapped_vars[var_name] = var_meta
+                var_updates["is_scaled"] = bool(ts_payload["is_scaled"])
+            ts_units = ts_payload.get("units")
+            if isinstance(ts_units, str) and ts_units.strip():
+                var_updates["units"] = ts_units.strip()
+            var_meta = var_meta.model_copy(update=var_updates)
+            mapped_vars[target_key] = var_meta
             ts_dates = [_parse_datetime(x) for x in ts_payload.get("timestamps", [])]
-            vals = [None if v is None else float(v) for v in ts_payload.get("values", [])]
+            vals = [_optional_float(v) for v in ts_payload.get("values", [])]
             qa_raw = dict(ts_payload.get("qa_layers") or {})
             qa_layers: dict[str, list[int | None]] = {}
             for k, q_vals in qa_raw.items():
@@ -338,10 +392,13 @@ def map_ghs_dataset_payload(payload: Mapping[str, Any]) -> ScientificDataset:
                     continue
                 if key == "precipitationQualityIndex":
                     qa_layers["pqi_milli"] = [
-                        None if q is None else round(float(q) * 1000) for q in q_vals
+                        None if (qf := _optional_float(q)) is None else round(qf * 1000)
+                        for q in q_vals
                     ]
                 else:
-                    qa_layers[key] = [None if q is None else round(float(q)) for q in q_vals]
+                    qa_layers[key] = [
+                        None if (qf := _optional_float(q)) is None else round(qf) for q in q_vals
+                    ]
             series_obj = ObservationSeries(
                 timestamps=ts_dates,
                 values=vals,
@@ -349,12 +406,7 @@ def map_ghs_dataset_payload(payload: Mapping[str, Any]) -> ScientificDataset:
                 overpass_tags=ts_payload.get("overpass_tags"),
                 metadata=var_meta,
             )
-            embedded_series[var_name] = series_obj
-            if canonical_alias and canonical_alias not in embedded_series:
-                alias_meta = var_meta.model_copy(update={"name": canonical_alias})
-                embedded_series[canonical_alias] = series_obj.model_copy(
-                    update={"metadata": alias_meta}
-                )
+            embedded_series[target_key] = series_obj
 
     granule_raw = payload.get("granule_id")
     granule_ids = (str(granule_raw),) if granule_raw else ()

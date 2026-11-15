@@ -2,7 +2,6 @@ import { LAYER_GROUPS } from '../../../entities/layer/model/layer-catalog'
 import { useLayerCatalogQuery } from '../../../shared/api/layers'
 import type { DataAvailabilityStatus, MapLayerDefinition } from '../../../shared/types/geospatial'
 import {
-  AlertTriangle,
   Eye,
   EyeOff,
   RotateCcw,
@@ -20,14 +19,18 @@ function getStatusBadgeMeta(layer: MapLayerDefinition): {
   }
   const map: Record<DataAvailabilityStatus, { label: string; toneClass: string }> = {
     connected: { label: 'Connected', toneClass: 'is-connected' },
-    preview: { label: 'Preview · Synthetic', toneClass: 'is-preview' },
-    planned: { label: 'Planned', toneClass: 'is-planned' },
+    preview: { label: 'Unavailable', toneClass: 'is-unavailable' },
+    planned: { label: 'Unavailable', toneClass: 'is-unavailable' },
     unavailable: { label: 'Unavailable', toneClass: 'is-unavailable' },
   }
   return map[layer.availabilityStatus]
 }
 
-export function LayerCatalogSidebar() {
+export interface LayerCatalogSidebarProps {
+  onZoomToBbox?: (bbox: readonly [number, number, number, number]) => void
+}
+
+export function LayerCatalogSidebar({ onZoomToBbox }: LayerCatalogSidebarProps) {
   const leftSidebarOpen = useExploreStore((s) => s.leftSidebarOpen)
   const setLeftSidebarOpen = useExploreStore((s) => s.setLeftSidebarOpen)
   const primaryLayerId = useExploreStore((s) => s.primaryLayerId)
@@ -37,8 +40,6 @@ export function LayerCatalogSidebar() {
   const setLayerOpacity = useExploreStore((s) => s.setLayerOpacity)
   const setLayerValueRange = useExploreStore((s) => s.setLayerValueRange)
   const resetLayerValueRange = useExploreStore((s) => s.resetLayerValueRange)
-  const syntheticPreviewEnabled = useExploreStore((s) => s.syntheticPreviewEnabled)
-  const setSyntheticPreviewEnabled = useExploreStore((s) => s.setSyntheticPreviewEnabled)
 
   const showGraticules = useExploreStore((s) => s.showGraticules)
   const setShowGraticules = useExploreStore((s) => s.setShowGraticules)
@@ -56,11 +57,12 @@ export function LayerCatalogSidebar() {
     return null
   }
 
+  const connectedCount = layers.filter((layer) => layer.availabilityStatus === 'connected').length
   const subtitle = catalogQuery.isPending
     ? 'Connecting to TERRA Core API…'
     : catalogQuery.isError
       ? 'Catalog unavailable · Core API offline'
-      : `${layers.length} cataloged products · backend raster pending`
+      : `${connectedCount} / ${layers.length} products connected`
 
   return (
     <aside
@@ -83,25 +85,6 @@ export function LayerCatalogSidebar() {
       </div>
 
       <div className="explorer-sidebar__scroll">
-        <div className="explorer-notice-box explorer-notice-box--synthetic">
-          <div className="explorer-notice-box__head">
-            <AlertTriangle size={13} aria-hidden="true" />
-            <span>Synthetic demonstration preview</span>
-          </div>
-          <p className="explorer-notice-box__body">
-            Preview layers shade Natural Earth polygons with synthetic sample values until NASA
-            raster feeds connect.
-          </p>
-          <label className="explorer-toggle-row">
-            <input
-              type="checkbox"
-              checked={syntheticPreviewEnabled}
-              onChange={(e) => setSyntheticPreviewEnabled(e.target.checked)}
-            />
-            <span>Display preview fills</span>
-          </label>
-        </div>
-
         <section className="explorer-sidebar-section" aria-label="Cartographic overlays">
           <h3 className="explorer-group-heading">Reference Cartography</h3>
           <div className="explorer-overlay-grid">
@@ -135,7 +118,7 @@ export function LayerCatalogSidebar() {
                 checked={showRegionBoundaries}
                 onChange={(e) => setShowRegionBoundaries(e.target.checked)}
               />
-              <span>Biome AOIs</span>
+              <span>User AOIs</span>
             </label>
           </div>
         </section>
@@ -222,6 +205,22 @@ export function LayerCatalogSidebar() {
                         {isPrimary && (
                           <div className="explorer-layer-item__details">
                             <p className="explorer-layer-item__desc">{layer.description}</p>
+
+                            {layer.availabilityStatus !== 'connected' && layer.unavailableReason && (
+                              <div className="explorer-status-banner is-unavailable">
+                                <p>{layer.unavailableReason}</p>
+                              </div>
+                            )}
+
+                            {layer.datasetBbox && onZoomToBbox && (
+                              <button
+                                type="button"
+                                className="explorer-action-btn"
+                                onClick={() => onZoomToBbox(layer.datasetBbox!)}
+                              >
+                                Zoom to data extent
+                              </button>
+                            )}
 
                             <div className="explorer-control-block">
                               <div className="explorer-control-row">

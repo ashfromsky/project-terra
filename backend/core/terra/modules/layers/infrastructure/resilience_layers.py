@@ -57,7 +57,7 @@ def _build_resilience_layer(
         available_time_range=AvailableTimeRange("2001-01-01", "2025-12-31", "multi-year"),
         attribution=attribution,
         availability_status=availability_status,
-        rendering_type="choropleth",
+        rendering_type="raster",
         supported_tile_formats=supported_tile_formats,
         qa_policy=qa_policy,
         limitations=limitations,
