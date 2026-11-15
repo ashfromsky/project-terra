@@ -42,6 +42,9 @@ def _build_engine_kwargs(settings: Settings) -> dict[str, Any]:
             kwargs["poolclass"] = StaticPool
     else:
         kwargs["pool_pre_ping"] = True
+        kwargs["pool_size"] = 2
+        kwargs["max_overflow"] = 1
+        kwargs["pool_recycle"] = 300
     return kwargs
 
 
