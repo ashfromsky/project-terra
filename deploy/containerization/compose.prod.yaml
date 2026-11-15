@@ -1,0 +1,301 @@
+# ==============================================================================
+# PROJECT TERRA — Production VPS Docker Compose Configuration
+#
+# Production backend stack for VPS deployment:
+# 1. PostgreSQL (Internal database engine: terra_core & terra_ghs)
+# 2. GHS Database Migration (One-shot Alembic migration)
+# 3. GHS API (Geospatial Ingestion & Harmonization API - Internal only)
+# 4. GHS Worker (Background Ingestion Runner - Internal only)
+# 5. Core API (FastAPI Backend Application - Exposed via Localhost / Tunnel)
+# 6. Core Worker (Scientific Assessment Runner - Internal only)
+# 7. Cloudflare Tunnel (Optional Profile `tunnel` for Zero-Trust Ingress)
+#
+# Frontend is decoupled and hosted independently on Cloudflare Pages.
+# ==============================================================================
+
+name: terra-prod
+
+networks:
+  terra-internal:
+    driver: bridge
+    internal: false # Requires outbound egress for NASA/CMR downloads and R2 SigV4
+
+volumes:
+  prod_postgres_data:
+    name: terra_prod_postgres_data
+  prod_core_artifacts:
+    name: terra_prod_core_artifacts
+  prod_ghs_storage:
+    name: terra_prod_ghs_storage
+  prod_ghs_scratch:
+    name: terra_prod_ghs_scratch
+
+services:
+  # ----------------------------------------------------------------------------
+  # PostgreSQL Service (Multi-database, strictly internal to Docker network)
+  # ----------------------------------------------------------------------------
+  postgres:
+    image: postgres:16-alpine
+    container_name: terra-prod-postgres
+    restart: always
+    init: true
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be configured in production}
+      POSTGRES_DB: postgres
+    volumes:
+      - prod_postgres_data:/var/lib/postgresql/data
+      - ./postgres/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - terra-internal
+
+  # ----------------------------------------------------------------------------
+  # GHS Migration (One-shot Alembic migration job)
+  # ----------------------------------------------------------------------------
+  ghs-migration:
+    image: terra-ghs:latest
+    container_name: terra-prod-ghs-migration
+    build:
+      context: ../../backend/services/geospatial_harmonization
+      dockerfile: Dockerfile
+    command: ["alembic", "upgrade", "head"]
+    restart: "no"
+    environment:
+      ENVIRONMENT: production
+      GHS_DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@postgres:5432/terra_ghs
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - terra-internal
+
+  # ----------------------------------------------------------------------------
+  # GHS API Service (Internal only, strictly inaccessible from public internet)
+  # ----------------------------------------------------------------------------
+  ghs-api:
+    image: terra-ghs:latest
+    container_name: terra-prod-ghs-api
+    restart: always
+    init: true
+    stop_grace_period: 30s
+    environment:
+      ENVIRONMENT: production
+      DEBUG: "false"
+      GHS_DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@postgres:5432/terra_ghs
+      STORAGE_BACKEND: ${STORAGE_BACKEND:-s3}
+      LOCAL_STORAGE_DIR: /data/ghs_storage
+      GHS_STORAGE_TEMP_DIR: /data/ghs_scratch
+      GHS_STORAGE_BUDGET_BYTES: ${GHS_STORAGE_BUDGET_BYTES:-8000000000}
+      GHS_STORAGE_MAX_OBJECT_BYTES: ${GHS_STORAGE_MAX_OBJECT_BYTES:-2147483648}
+      GHS_STORAGE_MAX_JOB_OUTPUT_BYTES: ${GHS_STORAGE_MAX_JOB_OUTPUT_BYTES:-1073741824}
+      GHS_STORAGE_RASTER_CODEC: ${GHS_STORAGE_RASTER_CODEC:-ZSTD}
+      GHS_STORAGE_RASTER_COG_ENABLED: ${GHS_STORAGE_RASTER_COG_ENABLED:-true}
+      GHS_STORAGE_NETCDF_COMPLEVEL: ${GHS_STORAGE_NETCDF_COMPLEVEL:-5}
+      GHS_STORAGE_ZARR_CODEC: ${GHS_STORAGE_ZARR_CODEC:-zstd}
+      GHS_STORAGE_RAW_RETENTION_DAYS: ${GHS_STORAGE_RAW_RETENTION_DAYS:-30}
+      GHS_STORAGE_DERIVED_RETENTION_DAYS: ${GHS_STORAGE_DERIVED_RETENTION_DAYS:-30}
+      GHS_ADMIN_TOKEN: ${GHS_ADMIN_TOKEN:-}
+      # Cloudflare R2 / S3 Configuration
+      S3_BUCKET: ${S3_BUCKET:-}
+      S3_PREFIX: ${GHS_S3_PREFIX:-}
+      S3_ENDPOINT_URL: ${S3_ENDPOINT_URL:-}
+      S3_REGION: ${S3_REGION:-auto}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
+      S3_PRESIGN_TTL_SECONDS: ${S3_PRESIGN_TTL_SECONDS:-300}
+      # NASA & Earthdata Providers
+      EARTHDATA_TOKEN: ${EARTHDATA_TOKEN:-}
+      CMR_BASE_URL: ${CMR_BASE_URL:-https://cmr.earthdata.nasa.gov/search}
+      NASA_POWER_BASE_URL: ${NASA_POWER_BASE_URL:-https://power.larc.nasa.gov/api}
+      APPEEARS_BASE_URL: ${APPEEARS_BASE_URL:-https://appeears.earthdatacloud.nasa.gov/api}
+      MODIS_ENABLED: ${MODIS_ENABLED:-true}
+      GPM_ENABLED: ${GPM_ENABLED:-true}
+      SMAP_ENABLED: ${SMAP_ENABLED:-true}
+      NASA_POWER_ENABLED: ${NASA_POWER_ENABLED:-true}
+      GENERIC_HANDLER_ALLOWED_HOSTS: ${GENERIC_HANDLER_ALLOWED_HOSTS:-[]}
+    volumes:
+      - prod_ghs_storage:/data/ghs_storage
+      - prod_ghs_scratch:/data/ghs_scratch
+    depends_on:
+      postgres:
+        condition: service_healthy
+      ghs-migration:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/ready', timeout=3)"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    networks:
+      - terra-internal
+
+  # ----------------------------------------------------------------------------
+  # GHS Worker Service (Background Ingestion Runner)
+  # ----------------------------------------------------------------------------
+  ghs-worker:
+    image: terra-ghs:latest
+    container_name: terra-prod-ghs-worker
+    command: ["python", "-m", "geospatial_harmonization.worker"]
+    restart: always
+    init: true
+    stop_grace_period: 30s
+    environment:
+      ENVIRONMENT: production
+      DEBUG: "false"
+      GHS_DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@postgres:5432/terra_ghs
+      STORAGE_BACKEND: ${STORAGE_BACKEND:-s3}
+      LOCAL_STORAGE_DIR: /data/ghs_storage
+      GHS_STORAGE_TEMP_DIR: /data/ghs_scratch
+      WORKER_POLL_INTERVAL_SECONDS: ${WORKER_POLL_INTERVAL_SECONDS:-2.0}
+      WORKER_LEASE_SECONDS: ${WORKER_LEASE_SECONDS:-300}
+      S3_BUCKET: ${S3_BUCKET:-}
+      S3_PREFIX: ${GHS_S3_PREFIX:-}
+      S3_ENDPOINT_URL: ${S3_ENDPOINT_URL:-}
+      S3_REGION: ${S3_REGION:-auto}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
+      EARTHDATA_TOKEN: ${EARTHDATA_TOKEN:-}
+      CMR_BASE_URL: ${CMR_BASE_URL:-https://cmr.earthdata.nasa.gov/search}
+      NASA_POWER_BASE_URL: ${NASA_POWER_BASE_URL:-https://power.larc.nasa.gov/api}
+      APPEEARS_BASE_URL: ${APPEEARS_BASE_URL:-https://appeears.earthdatacloud.nasa.gov/api}
+      MODIS_ENABLED: ${MODIS_ENABLED:-true}
+      GPM_ENABLED: ${GPM_ENABLED:-true}
+      SMAP_ENABLED: ${SMAP_ENABLED:-true}
+      NASA_POWER_ENABLED: ${NASA_POWER_ENABLED:-true}
+      GENERIC_HANDLER_ALLOWED_HOSTS: ${GENERIC_HANDLER_ALLOWED_HOSTS:-[]}
+    volumes:
+      - prod_ghs_storage:/data/ghs_storage
+      - prod_ghs_scratch:/data/ghs_scratch
+    depends_on:
+      postgres:
+        condition: service_healthy
+      ghs-migration:
+        condition: service_completed_successfully
+      ghs-api:
+        condition: service_healthy
+    networks:
+      - terra-internal
+
+  # ----------------------------------------------------------------------------
+  # Core Backend API Service (Application Gateway, port 8000)
+  # ----------------------------------------------------------------------------
+  core:
+    image: terra-core:latest
+    container_name: terra-prod-core
+    build:
+      context: ../../
+      dockerfile: deploy/containerization/docker/core.Dockerfile
+    restart: always
+    init: true
+    stop_grace_period: 30s
+    ports:
+      # Bound to loopback interface only so external traffic flows through
+      # reverse proxy (Nginx/Caddy) or Cloudflare Tunnel, never unauthenticated direct port
+      - "127.0.0.1:${CORE_PORT:-8000}:8000"
+    environment:
+      ENVIRONMENT: production
+      DEBUG: "false"
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@postgres:5432/terra_core
+      DATABASE_AUTO_CREATE_TABLES: "false"
+      GHS_BASE_URL: http://ghs-api:8080
+      GHS_TIMEOUT_SECONDS: ${GHS_TIMEOUT_SECONDS:-30.0}
+      SCIENTIFIC_ARTIFACT_DIR: /data/artifacts
+      STORAGE_BACKEND: ${STORAGE_BACKEND:-s3}
+      # Cloudflare R2 / S3 Configuration
+      S3_BUCKET: ${S3_BUCKET:-}
+      CORE_S3_PREFIX: ${CORE_S3_PREFIX:-core}
+      S3_ENDPOINT_URL: ${S3_ENDPOINT_URL:-}
+      S3_REGION: ${S3_REGION:-auto}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
+      S3_PRESIGN_TTL_SECONDS: ${S3_PRESIGN_TTL_SECONDS:-300}
+      # Authentication & Session Security (Strict production requirements)
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:?JWT_SECRET_KEY must be set to a strong secret in production}
+      JWT_ALGORITHM: ${JWT_ALGORITHM:-HS256}
+      JWT_ACCESS_TOKEN_EXPIRE_MINUTES: ${JWT_ACCESS_TOKEN_EXPIRE_MINUTES:-1440}
+      AUTH_COOKIE_NAME: ${AUTH_COOKIE_NAME:-terra_session}
+      AUTH_COOKIE_SECURE: "true"
+      # Strict CORS and Domain Configuration
+      CORS_ORIGINS: ${CORS_ORIGINS:?CORS_ORIGINS must be set to the frontend origin in production}
+      CORS_ALLOW_CREDENTIALS: "true"
+      FRONTEND_AUTH_REDIRECT_URL: ${FRONTEND_AUTH_REDIRECT_URL:?FRONTEND_AUTH_REDIRECT_URL must be configured}
+      GITHUB_CLIENT_ID: ${GITHUB_CLIENT_ID:-}
+      GITHUB_CLIENT_SECRET: ${GITHUB_CLIENT_SECRET:-}
+      GITHUB_REDIRECT_URI: ${GITHUB_REDIRECT_URI:?GITHUB_REDIRECT_URI must be configured}
+      GITHUB_OAUTH_SCOPES: ${GITHUB_OAUTH_SCOPES:-read:user user:email}
+    volumes:
+      - prod_core_artifacts:/data/artifacts
+    depends_on:
+      postgres:
+        condition: service_healthy
+      ghs-api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/ready', timeout=3)"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    networks:
+      - terra-internal
+
+  # ----------------------------------------------------------------------------
+  # Core Worker Service (Scientific Assessment Runner)
+  # ----------------------------------------------------------------------------
+  core-worker:
+    image: terra-core:latest
+    container_name: terra-prod-core-worker
+    command: ["python", "-m", "terra_worker"]
+    restart: always
+    init: true
+    stop_grace_period: 30s
+    environment:
+      ENVIRONMENT: production
+      DEBUG: "false"
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@postgres:5432/terra_core
+      GHS_BASE_URL: http://ghs-api:8080
+      GHS_TIMEOUT_SECONDS: ${GHS_TIMEOUT_SECONDS:-30.0}
+      SCIENTIFIC_ARTIFACT_DIR: /data/artifacts
+      STORAGE_BACKEND: ${STORAGE_BACKEND:-s3}
+      S3_BUCKET: ${S3_BUCKET:-}
+      CORE_S3_PREFIX: ${CORE_S3_PREFIX:-core}
+      S3_ENDPOINT_URL: ${S3_ENDPOINT_URL:-}
+      S3_REGION: ${S3_REGION:-auto}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
+      TERRA_WORKER_POLL_SECONDS: ${TERRA_WORKER_POLL_SECONDS:-2.0}
+    volumes:
+      - prod_core_artifacts:/data/artifacts
+    depends_on:
+      postgres:
+        condition: service_healthy
+      core:
+        condition: service_healthy
+    networks:
+      - terra-internal
+
+  # ----------------------------------------------------------------------------
+  # Cloudflare Tunnel Service (Optional Profile `tunnel`)
+  # ----------------------------------------------------------------------------
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: terra-prod-tunnel
+    restart: always
+    init: true
+    command: ["tunnel", "--no-autoupdate", "run"]
+    environment:
+      TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN:-}
+    depends_on:
+      core:
+        condition: service_healthy
+    networks:
+      - terra-internal
+    profiles:
+      - tunnel
