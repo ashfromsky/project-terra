@@ -49,3 +49,4 @@ class SystemInfoResponse(CamelModel):
     default_crs: str
     github_oauth_configured: bool
     dev_auth_enabled: bool = False
+    storage_backend: str = "local"
