@@ -165,7 +165,9 @@ jobs:
           test -f .env.prod || { echo "CRITICAL: .env.prod is missing!"; exit 1; }
 
           echo "=== 2. Building Backend Docker Images ==="
-          docker compose --env-file .env.prod -f compose.prod.yaml build core ghs-api
+          # ghs-api/ghs-worker reuse terra-ghs:latest, which is built by the
+          # ghs-migration service. Building ghs-api alone is a no-op.
+          docker compose --env-file .env.prod -f compose.prod.yaml build core ghs-migration
 
           echo "=== 3. Executing Database Migrations ==="
           docker compose --env-file .env.prod -f compose.prod.yaml run --rm ghs-migration alembic upgrade head
