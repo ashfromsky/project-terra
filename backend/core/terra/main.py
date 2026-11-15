@@ -21,6 +21,7 @@ from terra.api.health import router as health_router
 from terra.api.v1.router import api_router
 from terra.config import Settings, get_settings
 from terra.infrastructure.database import DatabaseManager
+from terra.infrastructure.object_storage import build_core_object_storage
 
 logger = logging.getLogger("terra")
 
@@ -31,6 +32,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     settings: Settings = app.state.settings
     db = DatabaseManager(settings)
     app.state.db = db
+    app.state.object_storage = build_core_object_storage(settings)
 
     if settings.database_auto_create_tables and settings.environment != "production":
         await db.create_schema()
