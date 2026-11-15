@@ -198,3 +198,37 @@ def test_dev_session_enabled_only_in_development_and_sets_cookie() -> None:
 
             blocked_resp = blocked_client.post("/api/v1/auth/dev-session")
             assert blocked_resp.status_code == 403
+
+
+def test_github_login_and_callback_support_post_method() -> None:
+    stub = StubGitHubClient(GitHubProfile(github_id=888, github_login="post-user"))
+    app = create_app(
+        Settings(
+            environment="test",
+            database_url="sqlite+aiosqlite:///:memory:",
+            github_client_id="cid",
+            github_client_secret="csec",
+            frontend_auth_redirect_url="http://localhost:5173",
+        )
+    )
+    app.dependency_overrides[get_github_oauth_client] = lambda: stub
+
+    with TestClient(app) as client:
+        login_post = client.post(
+            "/api/v1/auth/github/login",
+            params={"redirect": "true", "returnTo": "/explore"},
+            follow_redirects=False,
+        )
+        assert login_post.status_code == 302
+        state = _extract_state(login_post.headers["location"])
+
+        cb_post_json = client.post(
+            "/api/v1/auth/github/callback",
+            json={"code": "post-code", "state": state},
+            params={"redirect": "true"},
+            follow_redirects=False,
+        )
+        assert cb_post_json.status_code == 302
+        assert "terra_session" in cb_post_json.headers.get("set-cookie", "")
+        assert client.get("/api/v1/auth/me").status_code == 200
+        assert client.get("/api/v1/auth/me").json()["githubLogin"] == "post-user"
