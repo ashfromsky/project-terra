@@ -52,10 +52,71 @@ function layerAvailabilityTone(status: string): StatusBadgeTone {
   return 'neutral'
 }
 
+function extractEarthdataAuthUrl(message: string | null | undefined): string | null {
+  if (!message) return null
+  const match = message.match(/https:\/\/urs\.earthdata\.nasa\.gov\/approve_app[^\s"')<>]+/i)
+  if (match) return match[0]
+  if (message.includes('EULA Acceptance Failure') || message.includes('e2WVk8Pw6weeLUKZYOxvTQ')) {
+    return 'https://urs.earthdata.nasa.gov/approve_app?client_id=e2WVk8Pw6weeLUKZYOxvTQ'
+  }
+  return null
+}
+
+function EarthdataAuthBanner({ message }: { message: string }) {
+  const authUrl = extractEarthdataAuthUrl(message)
+  if (!authUrl) return null
+
+  return (
+    <div className="sci-banner sci-banner--warning" style={{ marginTop: '0.75rem' }} role="alert">
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', width: '100%' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.75rem' }}>
+          <div>
+            <strong>NASA Earthdata Application Approval Required</strong>
+            <p style={{ margin: '0.25rem 0 0', fontSize: '0.875rem' }}>
+              GES DISC requires one-time application authorization under your NASA Earthdata Login profile to download GPM IMERG granules.
+            </p>
+          </div>
+          <a
+            href={authUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="sci-btn sci-btn--primary"
+            style={{ textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: '0.35rem', whiteSpace: 'nowrap' }}
+          >
+            Authorize GES DISC on NASA Earthdata ↗
+          </a>
+        </div>
+        <p style={{ margin: '0.25rem 0 0', fontSize: '0.8rem', opacity: 0.85 }}>
+          Tip: NASA POWER Precipitation (<code>PRECTOTCORR</code>) is available immediately without Earthdata login or application approval.
+        </p>
+      </div>
+    </div>
+  )
+}
+
 function formatDate(iso: string | null | undefined): string {
   if (!iso) return '—'
   const date = new Date(iso)
   return Number.isNaN(date.getTime()) ? iso : date.toLocaleString()
+}
+
+function formatCrsLabel(crs: string | null | undefined): string {
+  if (!crs) return 'unknown'
+  const trimmed = crs.trim()
+  if (trimmed.length <= 32) return trimmed
+  const epsgMatch = trimmed.match(/ID\["EPSG",\s*(\d+)\]/i)
+  if (epsgMatch && !trimmed.toUpperCase().startsWith('PROJCRS')) {
+    return `EPSG:${epsgMatch[1]}`
+  }
+  const methodMatch = trimmed.match(/METHOD\["([^"]+)"/i)
+  if (methodMatch) {
+    return `${methodMatch[1]} (projected)`
+  }
+  const crsNameMatch = trimmed.match(/^(?:PROJCRS|GEOGCRS)\["([^"]+)"/i)
+  if (crsNameMatch && crsNameMatch[1] && crsNameMatch[1].toLowerCase() !== 'unknown') {
+    return crsNameMatch[1]
+  }
+  return `${trimmed.slice(0, 28)}…`
 }
 
 export function DataSourcesPage() {
@@ -99,6 +160,7 @@ export function DataSourcesPage() {
 
   const [groupFilter, setGroupFilter] = useState('all')
   const [selectedAssessmentId, setSelectedAssessmentId] = useState<string | null>(null)
+  const [showDerivedDatasets, setShowDerivedDatasets] = useState(false)
 
   const providers = useMemo(() => providersQuery.data ?? [], [providersQuery.data])
   const effectiveProvider = useMemo(() => {
@@ -133,7 +195,16 @@ export function DataSourcesPage() {
     ingestions.find((item) => item.id === activeOperationId) ??
     null
 
-  const preparedDatasets = useMemo(() => datasetsQuery.data ?? [], [datasetsQuery.data])
+  const allPreparedDatasets = useMemo(() => datasetsQuery.data ?? [], [datasetsQuery.data])
+  const derivedDatasetsCount = useMemo(
+    () => allPreparedDatasets.filter((d) => d.provider === 'terra_scientific').length,
+    [allPreparedDatasets],
+  )
+  const preparedDatasets = useMemo(() => {
+    if (showDerivedDatasets) return allPreparedDatasets
+    const obsOnly = allPreparedDatasets.filter((d) => d.provider !== 'terra_scientific')
+    return obsOnly.length > 0 ? obsOnly : allPreparedDatasets
+  }, [allPreparedDatasets, showDerivedDatasets])
   const effectiveDatasetId =
     selectedDatasetId ??
     activeOperation?.datasetId ??
@@ -145,7 +216,7 @@ export function DataSourcesPage() {
   )
   const activeDataset =
     datasetDetailQuery.data ??
-    preparedDatasets.find((d) => d.datasetId === effectiveDatasetId) ??
+    allPreparedDatasets.find((d) => d.datasetId === effectiveDatasetId) ??
     null
 
   const activeDatasetPreview = activeDataset?.timeSeriesPreviews?.[0] ?? null
@@ -600,9 +671,12 @@ export function DataSourcesPage() {
                 </label>
 
                 {actionError ? (
-                  <div className="sci-banner sci-banner--error" role="alert">
-                    {actionError}
-                  </div>
+                  <>
+                    <div className="sci-banner sci-banner--error" role="alert">
+                      {actionError}
+                    </div>
+                    <EarthdataAuthBanner message={actionError} />
+                  </>
                 ) : null}
 
                 <div className="sci-btn-row">
@@ -732,7 +806,10 @@ export function DataSourcesPage() {
                               {step.status}
                             </StatusBadge>
                           </td>
-                          <td style={{ whiteSpace: 'normal', minWidth: 240 }}>{step.detail}</td>
+                          <td style={{ whiteSpace: 'normal', minWidth: 240 }}>
+                            {step.detail}
+                            <EarthdataAuthBanner message={step.detail} />
+                          </td>
                         </tr>
                       ))}
                     </tbody>
@@ -825,13 +902,16 @@ export function DataSourcesPage() {
                 </div>
 
                 {activeOperation.errorMessage ? (
-                  <div className="sci-banner sci-banner--error" role="alert">
-                    <strong>
-                      Ingestion failed
-                      {activeOperation.errorCategory ? ` (${activeOperation.errorCategory})` : ''}
-                    </strong>
-                    <span>{activeOperation.errorMessage}</span>
-                  </div>
+                  <>
+                    <div className="sci-banner sci-banner--error" role="alert">
+                      <strong>
+                        Ingestion failed
+                        {activeOperation.errorCategory ? ` (${activeOperation.errorCategory})` : ''}
+                      </strong>
+                      <span>{activeOperation.errorMessage}</span>
+                    </div>
+                    <EarthdataAuthBanner message={activeOperation.errorMessage} />
+                  </>
                 ) : null}
 
                 {activeOperation.datasetId ? (
@@ -868,7 +948,19 @@ export function DataSourcesPage() {
                   </p>
                 </div>
                 {isAuthenticated ? (
-                  <StatusBadge tone="teal">{preparedDatasets.length} datasets</StatusBadge>
+                  <div className="sci-btn-row">
+                    {derivedDatasetsCount > 0 ? (
+                      <label className="sci-checkbox-row">
+                        <input
+                          type="checkbox"
+                          checked={showDerivedDatasets}
+                          onChange={(e) => setShowDerivedDatasets(e.target.checked)}
+                        />
+                        <span>Show derived artifacts ({derivedDatasetsCount})</span>
+                      </label>
+                    ) : null}
+                    <StatusBadge tone="teal">{preparedDatasets.length} datasets</StatusBadge>
+                  </div>
                 ) : null}
               </div>
 
@@ -972,8 +1064,11 @@ export function DataSourcesPage() {
                         <span className="sci-dim-card__name">
                           Dataset Preview · {activeDataset.product} ({activeDataset.datasetId})
                         </span>
-                        <StatusBadge tone="neutral">
-                          CRS: {activeDataset.spatialCrs ?? 'unknown'} ·{' '}
+                        <StatusBadge
+                          tone="neutral"
+                          title={activeDataset.spatialCrs ?? undefined}
+                        >
+                          CRS: {formatCrsLabel(activeDataset.spatialCrs)} ·{' '}
                           {activeDataset.nominalResolutionM
                             ? `${activeDataset.nominalResolutionM} m`
                             : 'native res'}
@@ -1182,12 +1277,33 @@ export function DataSourcesPage() {
                 <p className="sci-dim-card__note">
                   Input digest:{' '}
                   <code className="sci-code-chip">
-                    {parsedDetail.provenance.inputDigestSha256}
+                    {parsedDetail.provenance.inputDigestSha256 || '—'}
                   </code>{' '}
-                  · Config digest:{' '}
-                  <code className="sci-code-chip">
-                    {parsedDetail.provenance.configDigestSha256}
-                  </code>
+                  ·{' '}
+                  {parsedDetail.provenance.configDigestSha256 ? (
+                    <>
+                      Config digest:{' '}
+                      <code className="sci-code-chip">
+                        {parsedDetail.provenance.configDigestSha256}
+                      </code>
+                    </>
+                  ) : (
+                    <>
+                      Trace ID:{' '}
+                      <code className="sci-code-chip">
+                        {parsedDetail.provenance.traceId || '—'}
+                      </code>
+                    </>
+                  )}
+                  {parsedDetail.provenance.generatedAtUtc ? (
+                    <>
+                      {' '}
+                      · Generated UTC:{' '}
+                      <code className="sci-code-chip">
+                        {parsedDetail.provenance.generatedAtUtc}
+                      </code>
+                    </>
+                  ) : null}
                 </p>
               ) : null}
             </div>

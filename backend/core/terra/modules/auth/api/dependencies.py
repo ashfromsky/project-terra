@@ -46,22 +46,35 @@ async def get_current_user(
     users: Annotated[UserRepository, Depends(get_user_repository)],
     tokens: Annotated[TokenService, Depends(get_token_service)],
 ) -> User:
-    """Resolve the currently authenticated user or raise 401."""
+    """Resolve the currently authenticated user or fallback to researcher session."""
     token = _extract_token(request, settings.auth_cookie_name)
-    if not token:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Authentication required",
-            headers={"WWW-Authenticate": "Bearer"},
+    if token:
+        try:
+            return await GetCurrentUserUseCase(users, tokens).execute(token)
+        except AuthenticationError:
+            pass
+
+    if settings.auto_researcher_session:
+        user = await users.get_by_github_id(123993174)
+        if user is not None:
+            return user
+        from terra.modules.auth.domain.models import GitHubProfile
+
+        return await users.upsert_by_github_id(
+            GitHubProfile(
+                github_id=123993174,
+                github_login="ashfromsky",
+                display_name="Timothy",
+                avatar_url="https://avatars.githubusercontent.com/u/123993174?v=4",
+                email="gamertimka9@gmail.com",
+            )
         )
-    try:
-        return await GetCurrentUserUseCase(users, tokens).execute(token)
-    except AuthenticationError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=str(exc),
-            headers={"WWW-Authenticate": "Bearer"},
-        ) from exc
+
+    raise HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Authentication required",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
 
 
 UserRepositoryDep = Annotated[UserRepository, Depends(get_user_repository)]

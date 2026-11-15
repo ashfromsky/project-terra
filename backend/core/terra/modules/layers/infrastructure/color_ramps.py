@@ -4,9 +4,9 @@ from terra.modules.layers.domain.entities import ColorRampStop
 
 VEGETATION_RAMP: tuple[ColorRampStop, ...] = (
     ColorRampStop(0.0, "#dfb892", (223, 184, 146), "Bare / Sparse"),
-    ColorRampStop(0.25, "#e7dfba", (231, 223, 186), "Low"),
-    ColorRampStop(0.55, "#a2d4b4", (162, 212, 180), "Moderate"),
-    ColorRampStop(0.85, "#159b91", (21, 155, 145), "Dense Canopy"),
+    ColorRampStop(0.25, "#d9e3a3", (217, 227, 163), "Low"),
+    ColorRampStop(0.55, "#74c476", (116, 196, 118), "Moderate"),
+    ColorRampStop(0.85, "#238443", (35, 132, 67), "Dense Canopy"),
 )
 
 EVI_RAMP: tuple[ColorRampStop, ...] = (

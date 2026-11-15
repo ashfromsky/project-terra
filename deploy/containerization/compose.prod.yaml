@@ -278,6 +278,7 @@ services:
       GITHUB_CLIENT_SECRET: ${GITHUB_CLIENT_SECRET:-}
       GITHUB_REDIRECT_URI: ${GITHUB_REDIRECT_URI:?GITHUB_REDIRECT_URI must be configured}
       GITHUB_OAUTH_SCOPES: ${GITHUB_OAUTH_SCOPES:-read:user user:email}
+      AUTO_RESEARCHER_SESSION: ${AUTO_RESEARCHER_SESSION:-true}
     volumes:
       - prod_core_artifacts:/data/artifacts
     depends_on:

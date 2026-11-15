@@ -13,7 +13,7 @@ import tempfile
 import warnings
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
+from typing import ClassVar, Literal
 from uuid import UUID
 
 import numpy as np
@@ -115,18 +115,21 @@ def _to_physical_array(
         is_nodata = np.zeros(arr.shape, dtype=bool)
         if spec.nodata is not None:
             is_nodata = arr == spec.nodata
-        is_valid_range = np.ones(arr.shape, dtype=bool)
-        if spec.valid_range is not None:
-            lo, hi = spec.valid_range
-            is_valid_range = (arr >= lo) & (arr <= hi)
 
         scale = float(spec.scale_factor) if spec.scale_factor is not None else 1.0
         offset = float(spec.add_offset) if spec.add_offset is not None else 0.0
 
         phys = arr.astype(np.float32) * scale + offset
-        phys[is_nodata | ~is_valid_range] = np.nan
+        phys[is_nodata] = np.nan
+
+        if spec.valid_range is not None:
+            lo, hi = spec.valid_range
+            phys[(phys < lo) | (phys > hi)] = np.nan
     else:
         phys = arr.astype(np.float32)
+        if spec.valid_range is not None:
+            lo, hi = spec.valid_range
+            phys[(phys < lo) | (phys > hi)] = np.nan
 
     valid_samples = phys[np.isfinite(phys)]
     sample_f64 = valid_samples.astype(np.float64, copy=False) if valid_samples.size > 0 else None
@@ -207,6 +210,8 @@ def _build_projected_geotiff(
 class CogPublisher:
     """Idempotent publisher converting dataset rasters into validated Cloud Optimized GeoTIFFs."""
 
+    _publish_locks: ClassVar[dict[tuple[int, str], asyncio.Lock]] = {}
+
     def __init__(
         self,
         storage: StoragePort | None,
@@ -217,25 +222,28 @@ class CogPublisher:
         self._readers = readers
         self._datasets = datasets
 
-    async def get_or_publish_cog(
+    def _lock_for_key(self, cog_key: str) -> asyncio.Lock:
+        loop_id = id(asyncio.get_running_loop())
+        cache_key = (loop_id, cog_key)
+        lock = self._publish_locks.get(cache_key)
+        if lock is None:
+            lock = asyncio.Lock()
+            self._publish_locks[cache_key] = lock
+        return lock
+
+    async def _find_existing_cog(
         self,
         dataset: SpatialDataset,
-        *,
-        variable: str | None = None,
-        timestamp: str | None = None,
-        unit_conversion: str | None = None,
-        target_crs: str = "EPSG:3857",
-    ) -> CogPublishResult:
-        """Resolve an existing valid COG or publish a new one idempotently."""
-        var_name = variable or next(iter(dataset.variables.keys()))
-        cog_key = _deterministic_cog_key(dataset.dataset_id, var_name, timestamp)
-
-        # 1. Check existing dataset assets for a matching COG
+        var_name: str,
+        timestamp: str | None,
+        cog_key: str,
+    ) -> CogPublishResult | None:
+        if self._storage is None:
+            return None
         for asset in dataset.assets:
             if (
                 asset.data_format == "geotiff"
                 and asset.storage_key == cog_key
-                and self._storage is not None
                 and await self._storage.exists(cog_key)
             ):
                 local_p = getattr(self._storage, "root_dir", None)
@@ -251,8 +259,7 @@ class CogPublisher:
                     is_valid_cog=True,
                 )
 
-        # 2. Check if object already exists in storage
-        if self._storage is not None and await self._storage.exists(cog_key):
+        if await self._storage.exists(cog_key):
             local_p = getattr(self._storage, "root_dir", None)
             resolved_p = (local_p / cog_key) if local_p is not None else None
             uri_val = (
@@ -278,16 +285,37 @@ class CogPublisher:
                 is_reused=True,
                 is_valid_cog=True,
             )
+        return None
 
-        # 3. Publish a new COG from the source asset
-        return await self._publish_sync(
-            dataset=dataset,
-            variable=variable,
-            timestamp=timestamp,
-            unit_conversion=unit_conversion,
-            target_crs=target_crs,
-            cog_key=cog_key,
-        )
+    async def get_or_publish_cog(
+        self,
+        dataset: SpatialDataset,
+        *,
+        variable: str | None = None,
+        timestamp: str | None = None,
+        unit_conversion: str | None = None,
+        target_crs: str = "EPSG:3857",
+    ) -> CogPublishResult:
+        """Resolve an existing valid COG or publish a new one idempotently."""
+        var_name = variable or next(iter(dataset.variables.keys()))
+        cog_key = _deterministic_cog_key(dataset.dataset_id, var_name, timestamp)
+
+        existing = await self._find_existing_cog(dataset, var_name, timestamp, cog_key)
+        if existing is not None:
+            return existing
+
+        async with self._lock_for_key(cog_key):
+            existing = await self._find_existing_cog(dataset, var_name, timestamp, cog_key)
+            if existing is not None:
+                return existing
+            return await self._publish_sync(
+                dataset=dataset,
+                variable=variable,
+                timestamp=timestamp,
+                unit_conversion=unit_conversion,
+                target_crs=target_crs,
+                cog_key=cog_key,
+            )
 
     async def _publish_sync(
         self,
@@ -298,7 +326,9 @@ class CogPublisher:
         target_crs: str,
         cog_key: str,
     ) -> CogPublishResult:
-        asset, step_idx = _select_raster_asset(dataset, timestamp=timestamp, variable=variable)
+        asset, step_idx = _select_raster_asset(
+            dataset, timestamp=timestamp, variable=variable, prefer_raw=True
+        )
         scratch_base = scratch_base_dir()
 
         with tempfile.TemporaryDirectory(prefix="ghs-cog-pub-", dir=scratch_base) as tmp_dir:

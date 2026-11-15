@@ -4,6 +4,7 @@ import {
   BASEMAP_PROVIDER_REGISTRY,
   PROJECTION_REGISTRY,
 } from '../../../shared/config/geospatial'
+import { getMaxSelectableDateIso } from '../../../shared/lib/date'
 import type { BasemapId, ProjectionId } from '../../../shared/types/geospatial'
 import {
   Calendar,
@@ -174,7 +175,7 @@ export function ExplorerTopToolbar({
             className="explorer-date-chip__input"
             value={displayDate}
             min="2000-02-24"
-            max="2026-11-02"
+            max={getMaxSelectableDateIso()}
             onChange={(e) => {
               if (!e.target.value) return
               setSelectedDate(e.target.value)
@@ -211,6 +212,7 @@ export function ExplorerTopToolbar({
           type="button"
           className={`explorer-icon-btn ${comparisonMode ? 'is-active-accent' : ''}`}
           aria-pressed={comparisonMode}
+          aria-label="Toggle side-by-side comparison mode"
           onClick={() => setComparisonMode(!comparisonMode)}
           title="Toggle side-by-side comparison mode"
         >

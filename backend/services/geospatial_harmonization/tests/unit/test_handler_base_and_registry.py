@@ -365,3 +365,19 @@ def test_discover_error_classification_helpers() -> None:
     assert classify_exception(ProviderAuthenticationError("bad")) == ("authentication", False)
     assert classify_exception(TransientTransferError("timeout")) == ("network", True)
     assert classify_exception(ProviderResponseError("bad html")) == ("provider", False)
+
+
+def test_raise_for_status_eula_acceptance_failure() -> None:
+    from geospatial_harmonization.handlers.base import _raise_for_status
+
+    url = "https://data.gesdisc.earthdata.nasa.gov/data/GPM_L3/file.HDF5"
+    eula_body = '{"status_code":403,"error_description":"EULA Acceptance Failure","resolution_url":"https://urs.earthdata.nasa.gov/approve_app?client_id=e2WVk8Pw6weeLUKZYOxvTQ"}'
+    with pytest.raises(ProviderAuthorizationError) as exc_info:
+        _raise_for_status(url, 403, detail=eula_body)
+    err = exc_info.value
+    assert "EULA Acceptance Failure" in str(err)
+    assert "https://urs.earthdata.nasa.gov/approve_app?client_id=e2WVk8Pw6weeLUKZYOxvTQ" in str(err)
+    assert (
+        err.resolution_url
+        == "https://urs.earthdata.nasa.gov/approve_app?client_id=e2WVk8Pw6weeLUKZYOxvTQ"
+    )

@@ -27,3 +27,19 @@ def test_full_catalog_contains_all_sixteen_layers() -> None:
         assert tri.is_experimental is True
 
     asyncio.run(scenario())
+
+
+def test_catalog_repository_advances_archive_end_dynamically() -> None:
+    async def scenario() -> None:
+        current_day = "2026-11-18"
+        repo = StaticLayerCatalogRepository(date_provider=lambda: current_day)
+
+        layer = await repo.get_by_id("ndvi-mod13q1")
+        assert layer is not None
+        assert layer.available_time_range.end == "2026-11-18"
+
+        current_day = "2026-11-19"
+        layers = await repo.list_layers(group_id="vegetation")
+        assert all(item.available_time_range.end == "2026-11-19" for item in layers)
+
+    asyncio.run(scenario())

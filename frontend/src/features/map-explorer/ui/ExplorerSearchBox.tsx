@@ -227,7 +227,7 @@ export function ExplorerSearchBox({
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           onFocus={() => setSearchFocused(true)}
-          placeholder="Search place, layer, or lat, lon"
+          placeholder="Search country, biome, layer, or lat, lon"
           aria-label="Search country, biome, environmental layer, or lat lon coordinates"
         />
       </form>

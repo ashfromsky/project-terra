@@ -70,7 +70,7 @@ class Settings(BaseSettings):
     database_auto_create_tables: bool = True
 
     ghs_base_url: str = "http://127.0.0.1:8080"
-    ghs_timeout_seconds: float = 30.0
+    ghs_timeout_seconds: float = 60.0
     scientific_artifact_dir: str | None = None
     terra_worker_poll_seconds: float = Field(default=2.0, gt=0.0, le=60.0)
 
@@ -102,6 +102,7 @@ class Settings(BaseSettings):
     jwt_access_token_expire_minutes: int = 60 * 24
     auth_cookie_name: str = "terra_session"
     auth_cookie_secure: bool = False
+    auto_researcher_session: bool = False
 
     # `NoDecode` keeps the raw string from env/dotenv sources so the validator
     # below can accept both JSON arrays and comma-separated lists. Without it,

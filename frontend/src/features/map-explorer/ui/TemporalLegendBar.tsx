@@ -2,6 +2,7 @@ import { useEffect, useMemo } from 'react'
 import { useLayerCatalogQuery, useTemporalCoverageQuery } from '../../../shared/api/layers'
 import { BASEMAP_PROVIDER_REGISTRY } from '../../../shared/config/geospatial'
 import { buildGibsMapLayer, findLiveLayer } from '../../../shared/config/live-environment'
+import { getMaxSelectableDateIso } from '../../../shared/lib/date'
 import type { ObservationGranularity } from '../../../shared/types/geospatial'
 import {
   ChevronDown,
@@ -11,29 +12,13 @@ import {
   Pause,
   Play,
 } from '../../../shared/ui/explorer-icons'
+import {
+  computeTimelineSliderState,
+  dayIndexToIsoDate,
+  stepIsoDate,
+  stepTimelineDate,
+} from '../lib/timeline'
 import { resolveLayerControlState, useExploreStore } from '../model/use-explore-store'
-
-function stepIsoDate(isoDate: string, cadence: ObservationGranularity, dir: 1 | -1): string {
-  const parsed = new Date(`${isoDate}T00:00:00Z`)
-  if (Number.isNaN(parsed.getTime())) return isoDate
-  if (cadence === 'daily' || cadence === '30-minute') {
-    parsed.setUTCDate(parsed.getUTCDate() + dir)
-  } else if (cadence === '8-day') {
-    parsed.setUTCDate(parsed.getUTCDate() + 8 * dir)
-  } else if (cadence === '16-day') {
-    parsed.setUTCDate(parsed.getUTCDate() + 16 * dir)
-  } else if (cadence === 'multi-year') {
-    parsed.setUTCFullYear(parsed.getUTCFullYear() + dir)
-  } else {
-    parsed.setUTCMonth(parsed.getUTCMonth() + dir)
-  }
-  return parsed.toISOString().slice(0, 10)
-}
-
-function dateToMs(isoDate: string): number {
-  const t = Date.parse(`${isoDate}T00:00:00Z`)
-  return Number.isNaN(t) ? Date.parse('2025-12-01T00:00:00Z') : t
-}
 
 export function TemporalLegendBar() {
   const bottomPanelOpen = useExploreStore((s) => s.bottomPanelOpen)
@@ -65,40 +50,42 @@ export function TemporalLegendBar() {
   )
   const cadence: ObservationGranularity = activeLayer?.availableTimeRange.cadence ?? 'monthly'
   const availableDates = useMemo(
-    () => activeLayer?.availableDates ?? [],
-    [activeLayer?.availableDates],
+    () => (liveMapLayer ? [] : (activeLayer?.availableDates ?? [])),
+    [activeLayer?.availableDates, liveMapLayer],
+  )
+  const displayDate = liveMapLayer ? gibsDate : selectedDate
+  const maxSelectableDate = getMaxSelectableDateIso()
+  const sliderState = useMemo(
+    () =>
+      computeTimelineSliderState({
+        dateRangeStart,
+        dateRangeEnd,
+        displayDate,
+        maxSelectableDate,
+      }),
+    [dateRangeEnd, dateRangeStart, displayDate, maxSelectableDate],
   )
 
   useEffect(() => {
     if (!temporalPlaying || !activeLayer) return
     const timer = window.setInterval(() => {
-      const current = useExploreStore.getState().selectedDate
-      if (availableDates.length > 0) {
-        const idx = availableDates.indexOf(current)
-        const nextIdx = idx >= 0 && idx + 1 < availableDates.length ? idx + 1 : 0
-        setSelectedDate(availableDates[nextIdx])
-        return
-      }
+      const store = useExploreStore.getState()
+      const current = store.gibsLayerId ? store.gibsDate : store.selectedDate
       const next = stepIsoDate(current, cadence, 1)
-      if (next > dateRangeEnd) {
-        setSelectedDate(dateRangeStart)
-      } else {
-        setSelectedDate(next)
-      }
+      const target = next > sliderState.effectiveRangeEnd ? dateRangeStart : next
+      setSelectedDate(target)
+      if (store.gibsLayerId) setGibsDate(target)
     }, 950)
     return () => window.clearInterval(timer)
-  }, [activeLayer, availableDates, cadence, dateRangeEnd, dateRangeStart, setSelectedDate, temporalPlaying])
-
-  const rangeMinMs = useMemo(() => dateToMs(dateRangeStart), [dateRangeStart])
-  const rangeMaxMs = useMemo(
-    () => Math.max(rangeMinMs + 86_400_000, dateToMs(dateRangeEnd)),
-    [dateRangeEnd, rangeMinMs],
-  )
-  const displayDate = liveMapLayer ? gibsDate : selectedDate
-  const currentMs = useMemo(() => {
-    const val = dateToMs(displayDate)
-    return Math.min(rangeMaxMs, Math.max(rangeMinMs, val))
-  }, [displayDate, rangeMaxMs, rangeMinMs])
+  }, [
+    activeLayer,
+    cadence,
+    dateRangeStart,
+    setGibsDate,
+    setSelectedDate,
+    sliderState.effectiveRangeEnd,
+    temporalPlaying,
+  ])
 
   if (!bottomPanelOpen) {
     return (
@@ -125,6 +112,11 @@ export function TemporalLegendBar() {
   const maxDisplay = activeControl?.maxValue ?? 1
   const midDisplay = Number(((minDisplay + maxDisplay) / 2).toFixed(2))
 
+  const rangeEndMax =
+    activeLayer?.availableTimeRange.end && activeLayer.availableTimeRange.end > maxSelectableDate
+      ? activeLayer.availableTimeRange.end
+      : maxSelectableDate
+
   return (
     <section
       className="explorer-bottom-dock"
@@ -139,14 +131,15 @@ export function TemporalLegendBar() {
               disabled={!activeLayer}
               onClick={() => {
                 setTemporalPlaying(false)
-                if (availableDates.length > 0) {
-                  const idx = availableDates.indexOf(selectedDate)
-                  const targetIdx = idx > 0 ? idx - 1 : 0
-                  setSelectedDate(availableDates[targetIdx])
-                  return
-                }
-                const prev = stepIsoDate(selectedDate, cadence, -1)
-                setSelectedDate(prev < dateRangeStart ? dateRangeStart : prev)
+                const target = stepTimelineDate({
+                  currentDate: displayDate,
+                  cadence,
+                  direction: -1,
+                  minDate: dateRangeStart,
+                  maxDate: sliderState.effectiveRangeEnd,
+                })
+                setSelectedDate(target)
+                if (liveMapLayer) setGibsDate(target)
               }}
               aria-label="Previous observation step"
               title="Previous observation step"
@@ -169,17 +162,15 @@ export function TemporalLegendBar() {
               disabled={!activeLayer}
               onClick={() => {
                 setTemporalPlaying(false)
-                if (availableDates.length > 0) {
-                  const idx = availableDates.indexOf(selectedDate)
-                  const targetIdx =
-                    idx >= 0 && idx + 1 < availableDates.length
-                      ? idx + 1
-                      : availableDates.length - 1
-                  setSelectedDate(availableDates[targetIdx])
-                  return
-                }
-                const next = stepIsoDate(selectedDate, cadence, 1)
-                setSelectedDate(next > dateRangeEnd ? dateRangeEnd : next)
+                const target = stepTimelineDate({
+                  currentDate: displayDate,
+                  cadence,
+                  direction: 1,
+                  minDate: dateRangeStart,
+                  maxDate: sliderState.effectiveRangeEnd,
+                })
+                setSelectedDate(target)
+                if (liveMapLayer) setGibsDate(target)
               }}
               aria-label="Next observation step"
               title="Next observation step"
@@ -191,12 +182,12 @@ export function TemporalLegendBar() {
           <input
             type="range"
             className="explorer-timeline-slider"
-            min={rangeMinMs}
-            max={rangeMaxMs}
-            step={86_400_000}
-            value={currentMs}
+            min={sliderState.min}
+            max={sliderState.max}
+            step={1}
+            value={sliderState.value}
             onChange={(e) => {
-              const iso = new Date(Number(e.target.value)).toISOString().slice(0, 10)
+              const iso = dayIndexToIsoDate(sliderState.rangeMinMs, Number(e.target.value))
               setSelectedDate(iso)
               if (liveMapLayer) setGibsDate(iso)
             }}
@@ -209,9 +200,9 @@ export function TemporalLegendBar() {
               className="explorer-mini-date"
               value={dateRangeStart}
               min={activeLayer?.availableTimeRange.start ?? '2000-01-01'}
-              max={dateRangeEnd}
+              max={sliderState.effectiveRangeEnd}
               onChange={(e) => {
-                if (e.target.value) setDateRange(e.target.value, dateRangeEnd)
+                if (e.target.value) setDateRange(e.target.value, sliderState.effectiveRangeEnd)
               }}
               aria-label="Range start date"
             />
@@ -219,9 +210,9 @@ export function TemporalLegendBar() {
             <input
               type="date"
               className="explorer-mini-date"
-              value={dateRangeEnd}
+              value={sliderState.effectiveRangeEnd}
               min={dateRangeStart}
-              max={activeLayer?.availableTimeRange.end ?? '2030-12-31'}
+              max={rangeEndMax}
               onChange={(e) => {
                 if (e.target.value) setDateRange(dateRangeStart, e.target.value)
               }}
@@ -239,13 +230,18 @@ export function TemporalLegendBar() {
               <span className="explorer-sr-only">Ingested observation date</span>
               <select
                 className="explorer-mini-select"
-                value={availableDates.includes(selectedDate) ? selectedDate : availableDates[availableDates.length - 1]}
+                value={availableDates.includes(selectedDate) ? selectedDate : ''}
                 onChange={(e) => {
+                  if (!e.target.value) return
                   setSelectedDate(e.target.value)
-                  if (liveMapLayer) setGibsDate(e.target.value)
                 }}
                 aria-label="Select ingested observation date"
               >
+                {!availableDates.includes(selectedDate) && (
+                  <option value="" disabled>
+                    Ingested ({availableDates.length})
+                  </option>
+                )}
                 {availableDates.map((dateStr) => (
                   <option key={dateStr} value={dateStr}>
                     {dateStr}

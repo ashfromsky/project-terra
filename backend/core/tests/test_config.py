@@ -81,7 +81,7 @@ def test_development_defaults_to_file_sqlite_and_ghs_url_when_unset() -> None:
     expected_db = f"sqlite+aiosqlite:///{dev_db_path}"
     assert dev_settings.database_url == expected_db
     assert dev_settings.ghs_base_url == "http://127.0.0.1:8080"
-    assert dev_settings.ghs_timeout_seconds == 30.0
+    assert dev_settings.ghs_timeout_seconds == 60.0
 
     explicit_settings = Settings(
         _env_file=None,

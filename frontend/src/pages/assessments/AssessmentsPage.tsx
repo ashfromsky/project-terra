@@ -130,7 +130,10 @@ function PreparedDatasetPickerField(props: {
   onToggle: (datasetId: string) => void
 }) {
   const datasetsQuery = usePreparedDatasetsQuery(props.enabled)
-  const datasets = datasetsQuery.data ?? []
+  const allDatasets = datasetsQuery.data ?? []
+  const datasets = allDatasets.filter(
+    (ds) => ds.provider !== 'terra_scientific' || props.selectedDatasetIds.includes(ds.datasetId),
+  )
 
   return (
     <div className="sci-field">
@@ -148,7 +151,8 @@ function PreparedDatasetPickerField(props: {
         </p>
       ) : datasets.length === 0 ? (
         <p className="sci-dim-card__note">
-          No GHS datasets ingested yet. Use Data Sources to ingest real NASA observations.
+          No observational GHS datasets ingested yet. Use Data Sources to ingest real NASA
+          observations.
         </p>
       ) : (
         <div className="sci-dataset-picker" role="group" aria-label="Prepared GHS datasets">
@@ -186,8 +190,9 @@ function PreparedDatasetPickerField(props: {
 
 function AssessmentVisualizationsSection(props: {
   parsedResult: NonNullable<ReturnType<typeof parseScientificAssessmentResult>>
+  hideCrossVariable?: boolean
 }) {
-  const { parsedResult } = props
+  const { parsedResult, hideCrossVariable = false } = props
   const [selectedVar, setSelectedVar] = useState('')
 
   const availableVars = useMemo(() => {
@@ -231,14 +236,14 @@ function AssessmentVisualizationsSection(props: {
     !seriesOption &&
     !anomalyOption &&
     !activeBaseline &&
-    parsedResult.crossVariable.length === 0
+    (hideCrossVariable || parsedResult.crossVariable.length === 0)
   ) {
     return (
       <div className="sci-banner sci-banner--neutral">
         <strong>No chartable series or baseline outputs</strong>
         <p>
-          Selected datasets did not yield aligned temporal observations or cross-variable pairs for
-          chart rendering. Check quality screening and stage warnings below.
+          Selected datasets did not yield aligned temporal observations for chart rendering.
+          Check quality screening and stage warnings below.
         </p>
       </div>
     )
@@ -362,7 +367,7 @@ function AssessmentVisualizationsSection(props: {
         </div>
       ) : null}
 
-      {parsedResult.crossVariable.length > 0 ? (
+      {!hideCrossVariable && parsedResult.crossVariable.length > 0 ? (
         <div>
           <h3 className="sci-panel__title">Cross-Variable Associations</h3>
           <div className="provenance-table-wrapper">
@@ -401,12 +406,96 @@ function AssessmentVisualizationsSection(props: {
   )
 }
 
+function renderGeographicContext(
+  detail: NonNullable<ReturnType<typeof useAssessmentDetailQuery>['data']>,
+  regions: ReturnType<typeof useRegionsQuery>['data'],
+) {
+  const linkedRegion = regions?.find((reg) => reg.id === detail.regionId) ?? null
+  const config = detail.requestConfig as Record<string, unknown>
+  const requestStart =
+    typeof config.analysis_start === 'string' ? config.analysis_start.slice(0, 10) : null
+  const requestEnd =
+    typeof config.analysis_end === 'string' ? config.analysis_end.slice(0, 10) : null
+  const targetCadence =
+    typeof config.target_cadence === 'string' ? config.target_cadence : null
+
+  return (
+    <section className="sci-panel" aria-label="Selected AOI and analysis period">
+      <div className="sci-panel__header">
+        <div>
+          <h3 className="sci-panel__title">Selected AOI &amp; Analysis Period</h3>
+          <p className="sci-panel__subtitle">
+            Geographic and temporal inputs submitted to the Scientific Core.
+          </p>
+        </div>
+      </div>
+      <div className="sci-kpi-grid">
+        <div className="sci-dim-card">
+          <span className="sci-dim-card__name">Region / AOI</span>
+          <p className="sci-dim-card__value sci-dim-card__value--small">
+            {linkedRegion?.name ?? detail.regionId ?? 'No persisted region'}
+          </p>
+          {linkedRegion ? (
+            <p className="sci-dim-card__note">
+              {linkedRegion.approxAreaKm2.toLocaleString()} km² · {linkedRegion.sourceCrs}
+            </p>
+          ) : null}
+        </div>
+        <div className="sci-dim-card">
+          <span className="sci-dim-card__name">Analysis period</span>
+          <p className="sci-dim-card__value">
+            {requestStart ?? '—'} → {requestEnd ?? '—'}
+          </p>
+          <p className="sci-dim-card__note">Target cadence: {targetCadence ?? 'not recorded'}</p>
+        </div>
+        <div className="sci-dim-card">
+          <span className="sci-dim-card__name">Bounding box (WGS 84)</span>
+          <p className="sci-dim-card__value sci-dim-card__value--small">
+            {linkedRegion
+              ? linkedRegion.bbox.map((v) => v.toFixed(4)).join(', ')
+              : 'Not linked to a saved region'}
+          </p>
+          <p className="sci-dim-card__note">EPSG:4326 · [west, south, east, north]</p>
+        </div>
+        <div className="sci-dim-card">
+          <span className="sci-dim-card__name">Centroid (WGS 84)</span>
+          <p className="sci-dim-card__value">
+            {linkedRegion
+              ? `${linkedRegion.centroid[1].toFixed(4)}°, ${linkedRegion.centroid[0].toFixed(4)}°`
+              : '—'}
+          </p>
+          <p className="sci-dim-card__note">lat, lon · EPSG:4326</p>
+        </div>
+      </div>
+      {linkedRegion ? (
+        <details className="sci-geojson-details">
+          <summary>GeoJSON Polygon coordinates (EPSG:4326)</summary>
+          <pre>{JSON.stringify(linkedRegion.geometry, null, 2)}</pre>
+        </details>
+      ) : null}
+      <p className="sci-dim-card__note">
+        Prepared GHS datasets:{' '}
+        {detail.ghsDatasetIds.length > 0 ? detail.ghsDatasetIds.join(', ') : 'none linked'}
+      </p>
+    </section>
+  )
+}
+
 export default function AssessmentsPage() {
   const [searchParams] = useSearchParams()
   const [activeTab, setActiveTab] = useState<WorkspaceTab>('results')
   const [selectedId, setSelectedId] = useState<string | null>(
     () => searchParams.get('assessmentId') ?? null,
   )
+  const [railMode, setRailMode] = useState<'saved' | 'create'>(() => {
+    if (
+      searchParams.get('create') === 'true' ||
+      (searchParams.get('regionId') && !searchParams.get('assessmentId'))
+    ) {
+      return 'create'
+    }
+    return 'saved'
+  })
   const [title, setTitle] = useState('')
   const [regionId, setRegionId] = useState(() => searchParams.get('regionId') ?? '')
   const [analysisProfile, setAnalysisProfile] = useState<
@@ -590,8 +679,9 @@ export default function AssessmentsPage() {
 
       const startYear = Number(minStart.slice(0, 4))
       const endYear = Number(maxEnd.slice(0, 4))
-      if (Number.isFinite(startYear) && Number.isFinite(endYear) && endYear - startYear >= 3) {
-        const splitYear = Math.min(startYear + 2, endYear - 1)
+      const yearLead = minStart.slice(5, 10) === '01-01' ? 2 : 3
+      if (Number.isFinite(startYear) && Number.isFinite(endYear) && endYear - startYear >= yearLead + 1) {
+        const splitYear = Math.min(startYear + yearLead, endYear - 1)
         setBaselineStart(minStart)
         setBaselineEnd(`${splitYear}-12-31`)
         setAnalysisStart(`${splitYear + 1}-01-01`)
@@ -717,6 +807,7 @@ export default function AssessmentsPage() {
       })
       setSelectedId(created.id)
       setActiveTab('results')
+      setRailMode('saved')
       setTitle('')
     } catch (cause) {
       const msg = cause instanceof ApiError ? cause.message : String(cause)
@@ -761,349 +852,442 @@ export default function AssessmentsPage() {
 
       <div className="sci-workspace-shell">
         <aside className="sci-rail" aria-label="Assessment configuration and run history">
-          <div>
-            <h2 className="workspace-config-rail__title">Create &amp; Run Assessment</h2>
-            <p className="workspace-config-rail__subtitle">
-              Persists to Core API and executes Scientific Core P0/P1 pipeline without composite TRI pooling.
-            </p>
+          <div className="sci-rail__header">
+            <div className="sci-rail__tabs" role="tablist" aria-label="Rail navigation">
+              <button
+                type="button"
+                role="tab"
+                aria-selected={railMode === 'saved'}
+                className={`sci-rail__tab ${railMode === 'saved' ? 'sci-rail__tab--active' : ''}`.trim()}
+                onClick={() => setRailMode('saved')}
+              >
+                Saved Runs
+                <span className="sci-rail__tab-count">
+                  {assessmentsQuery.data?.length ?? 0}
+                </span>
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={railMode === 'create'}
+                className={`sci-rail__tab ${railMode === 'create' ? 'sci-rail__tab--active' : ''}`.trim()}
+                onClick={() => setRailMode('create')}
+              >
+                + New Assessment
+              </button>
+            </div>
           </div>
 
-          {currentUserQuery.isPending ? (
-            <div className="sci-banner sci-banner--neutral" aria-live="polite">
-              Checking session status…
-            </div>
-          ) : !isAuthenticated ? (
-            <AuthActionBanner
-              returnTo={APP_ROUTES.assessments}
-              title="Authentication required"
-              description="Sign in to select prepared GHS datasets, create assessments, and run Scientific Core pipelines."
-            />
-          ) : (
-            <form className="sci-form" onSubmit={handleCreateSubmit}>
-              <div className="sci-field">
-                <label className="sci-label">Analysis Profile</label>
-                <div style={{ display: 'flex', gap: '8px', marginBottom: '8px', flexWrap: 'wrap' }}>
-                  <Button
-                    type="button"
-                    variant={analysisProfile === 'quick' ? 'primary' : 'secondary'}
-                    onClick={() => applyProfile('quick')}
-                  >
-                    Quick Assessment
-                  </Button>
-                  <Button
-                    type="button"
-                    variant={analysisProfile === 'seasonal' ? 'primary' : 'secondary'}
-                    onClick={() => applyProfile('seasonal')}
-                  >
-                    Seasonal Assessment
-                  </Button>
-                  <Button
-                    type="button"
-                    variant={analysisProfile === 'historical' ? 'primary' : 'secondary'}
-                    onClick={() => applyProfile('historical')}
-                  >
-                    Historical Resilience
-                  </Button>
-                </div>
-                <p className="sci-dim-card__note">
-                  {analysisProfile === 'quick'
-                    ? 'Quick Profile: 1-year window, full-period baseline (min 1 yr). Fast diagnostic avoiding multi-year archive blocks.'
-                    : analysisProfile === 'seasonal'
-                      ? 'Seasonal Profile: 1–2 annual cycles evaluating seasonal anomalies and vegetative trend departures.'
-                      : analysisProfile === 'historical'
-                        ? 'Historical Profile: 3+ year window with fixed 3-year baseline for 4-dimension resilience scoring.'
-                        : 'Custom Profile: Custom baseline and temporal window parameters.'}
-                </p>
-              </div>
-
-              <div className="sci-field">
-                <label className="sci-label" htmlFor="assessment-title">
-                  Title
-                </label>
-                <input
-                  id="assessment-title"
-                  className="sci-input"
-                  type="text"
-                  value={title}
-                  onChange={(e) => setTitle(e.target.value)}
-                  placeholder="e.g. Carpathian NDVI 2021–2024"
-                  maxLength={255}
-                />
-              </div>
-
-              <div className="sci-field">
-                <label className="sci-label" htmlFor="assessment-region">
-                  Region / AOI (optional)
-                </label>
-                <select
-                  id="assessment-region"
-                  className="sci-select"
-                  value={regionId}
-                  onChange={(e) => setRegionId(e.target.value)}
-                >
-                  <option value="">No persisted region linked</option>
-                  {(regionsQuery.data ?? []).map((reg) => (
-                    <option key={reg.id} value={reg.id}>
-                      {reg.name} ({reg.role})
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div className="sci-field-row">
-                <div className="sci-field">
-                  <label className="sci-label" htmlFor="analysis-start">
-                    Analysis start
-                  </label>
-                  <input
-                    id="analysis-start"
-                    className="sci-input"
-                    type="date"
-                    value={analysisStart}
-                    onChange={(e) => setAnalysisStart(e.target.value)}
-                  />
-                </div>
-                <div className="sci-field">
-                  <label className="sci-label" htmlFor="analysis-end">
-                    Analysis end
-                  </label>
-                  <input
-                    id="analysis-end"
-                    className="sci-input"
-                    type="date"
-                    value={analysisEnd}
-                    onChange={(e) => setAnalysisEnd(e.target.value)}
-                  />
-                </div>
-              </div>
-
-              <div className="sci-field">
-                <label className="sci-label" htmlFor="baseline-type">
-                  Baseline methodology
-                </label>
-                <select
-                  id="baseline-type"
-                  className="sci-select"
-                  value={baselineType}
-                  onChange={(e) =>
-                    setBaselineType(
-                      e.target.value as 'fixed_reference' | 'full_period_explicit',
-                    )
-                  }
-                >
-                  <option value="fixed_reference">Fixed reference (historical window)</option>
-                  <option value="full_period_explicit">
-                    Full period (explicit — includes assessment period)
-                  </option>
-                </select>
-                {baselineType === 'fixed_reference' && (!baselineStart || !baselineEnd) ? (
-                  <p className="sci-dim-card__note">
-                    Selected datasets span fewer than 3 years; ingest historical reference data or
-                    switch to Full period (explicit) to compute exploratory anomalies.
+          {railMode === 'saved' ? (
+            <div>
+              <div className="sci-panel__header" style={{ marginBottom: 12 }}>
+                <div>
+                  <h2 className="workspace-config-rail__title">Assessment Runs</h2>
+                  <p className="workspace-config-rail__subtitle">
+                    User-owned runs from <code className="sci-code-chip">GET /api/v1/assessments</code>
                   </p>
-                ) : null}
-              </div>
-
-              {baselineType === 'fixed_reference' ? (
-                <div className="sci-field-row">
-                  <div className="sci-field">
-                    <label className="sci-label" htmlFor="baseline-start">
-                      Baseline start
-                    </label>
-                    <input
-                      id="baseline-start"
-                      className="sci-input"
-                      type="date"
-                      value={baselineStart}
-                      onChange={(e) => setBaselineStart(e.target.value)}
-                    />
-                  </div>
-                  <div className="sci-field">
-                    <label className="sci-label" htmlFor="baseline-end">
-                      Baseline end
-                    </label>
-                    <input
-                      id="baseline-end"
-                      className="sci-input"
-                      type="date"
-                      value={baselineEnd}
-                      onChange={(e) => setBaselineEnd(e.target.value)}
-                    />
-                  </div>
                 </div>
-              ) : null}
-
-              <div className="sci-field-row">
-                <div className="sci-field">
-                  <label className="sci-label" htmlFor="target-cadence">
-                    Target cadence
-                  </label>
-                  <select
-                    id="target-cadence"
-                    className="sci-select"
-                    value={targetCadence}
-                    onChange={(e) =>
-                      setTargetCadence(e.target.value as 'monthly' | 'daily' | 'sixteen_day')
-                    }
-                  >
-                    <option value="monthly">Monthly</option>
-                    <option value="sixteen_day">16-Day</option>
-                    <option value="daily">Daily</option>
-                  </select>
-                </div>
-                <div className="sci-field">
-                  <label className="sci-label" htmlFor="qa-policy">
-                    QA screening level
-                  </label>
-                  <select
-                    id="qa-policy"
-                    className="sci-select"
-                    value={qaLevel}
-                    onChange={(e) => setQaLevel(e.target.value as 'strict' | 'permissive')}
-                  >
-                    <option value="strict">Strict (high-confidence QA only)</option>
-                    <option value="permissive">Permissive (retain marginal QA)</option>
-                  </select>
-                </div>
-              </div>
-
-              <div className="sci-field">
-                <label className="sci-label" htmlFor="min-baseline-years">
-                  Min baseline years
-                </label>
-                <input
-                  id="min-baseline-years"
-                  className="sci-input"
-                  type="number"
-                  min={1}
-                  max={10}
-                  value={minYearsRequired}
-                  onChange={(e) =>
-                    setMinYearsRequired(Math.max(1, Math.min(10, Number(e.target.value) || 1)))
-                  }
-                />
-              </div>
-
-              <PreparedDatasetPickerField
-                enabled={isAuthenticated}
-                selectedDatasetIds={selectedDatasetIds}
-                onToggle={(dsId) => {
-                  const next = selectedDatasetIds.includes(dsId)
-                    ? selectedDatasetIds.filter((id) => id !== dsId)
-                    : [...selectedDatasetIds, dsId]
-                  setSelectedDatasetIds(next)
-                  syncDatesFromDatasetIds(next)
-                }}
-              />
-
-              <div className="sci-field">
-                <label className="sci-label" htmlFor="ghs-dataset-ids">
-                  Additional GHS dataset IDs (comma-separated, optional)
-                </label>
-                <input
-                  id="ghs-dataset-ids"
-                  className="sci-input"
-                  type="text"
-                  value={ghsDatasetIdsText}
-                  onChange={(e) => setGhsDatasetIdsText(e.target.value)}
-                  placeholder="Optional manual IDs"
-                />
-              </div>
-
-              <label className="sci-checkbox-row">
-                <input
-                  type="checkbox"
-                  checked={executeNow}
-                  onChange={(e) => setExecuteNow(e.target.checked)}
-                />
-                Execute immediately on creation
-              </label>
-
-              {formError ? (
-                <div className="sci-banner sci-banner--error" role="alert">
-                  {formError}
-                </div>
-              ) : null}
-
-              <div className="sci-btn-row">
                 <Button
                   type="button"
                   variant="secondary"
-                  disabled={autoProvisionMutation.isPending}
-                  onClick={() => void handleAutoProvision()}
+                  onClick={() => setRailMode('create')}
                 >
-                  {autoProvisionMutation.isPending
-                    ? 'Provisioning data…'
-                    : 'Auto-Provision Missing Data'}
-                </Button>
-                <Button
-                  type="submit"
-                  variant="primary"
-                  disabled={createMutation.isPending}
-                >
-                  {createMutation.isPending ? 'Submitting assessment…' : 'Create assessment'}
+                  + New Run
                 </Button>
               </div>
-            </form>
-          )}
 
-          <hr className="workspace-divider" />
-
-          <div>
-            <h2 className="workspace-config-rail__title">Saved Assessments</h2>
-            <p className="workspace-config-rail__subtitle">
-              User-owned runs from <code className="sci-code-chip">GET /api/v1/assessments</code>
-            </p>
-          </div>
-
-          {!isAuthenticated ? (
-            <p className="sci-dim-card__note">Sign in to load your persisted assessments.</p>
-          ) : assessmentsQuery.isPending ? (
-            <p className="sci-dim-card__note" aria-live="polite">
-              Loading assessments…
-            </p>
-          ) : assessmentsQuery.isError ? (
-            <div className="sci-banner sci-banner--error" role="alert">
-              Failed to list assessments:{' '}
-              {assessmentsQuery.error instanceof ApiError
-                ? assessmentsQuery.error.message
-                : String(assessmentsQuery.error)}
+              {!isAuthenticated ? (
+                <AuthActionBanner
+                  returnTo={APP_ROUTES.assessments}
+                  title="Authentication required"
+                  description="Sign in to view your saved runs or submit new resilience assessments."
+                />
+              ) : assessmentsQuery.isPending ? (
+                <p className="sci-dim-card__note" aria-live="polite">
+                  Loading assessments…
+                </p>
+              ) : assessmentsQuery.isError ? (
+                <div className="sci-banner sci-banner--error" role="alert">
+                  Failed to list assessments:{' '}
+                  {assessmentsQuery.error instanceof ApiError
+                    ? assessmentsQuery.error.message
+                    : String(assessmentsQuery.error)}
+                </div>
+              ) : (assessmentsQuery.data ?? []).length === 0 ? (
+                <div className="sci-empty-guide" style={{ padding: '24px 8px' }}>
+                  <p className="sci-empty-guide__title">No assessments yet</p>
+                  <p className="sci-empty-guide__desc">
+                    Run your first ecosystem resilience assessment on a region or AOI.
+                  </p>
+                  <Button
+                    type="button"
+                    variant="primary"
+                    onClick={() => setRailMode('create')}
+                  >
+                    Create First Assessment
+                  </Button>
+                </div>
+              ) : (
+                <ul className="sci-run-list">
+                  {(assessmentsQuery.data ?? []).map((item) => {
+                    const isSelected = item.id === activeAssessmentId
+                    const linkedRegion = regionsQuery.data?.find((reg) => reg.id === item.regionId)
+                    return (
+                      <li key={item.id}>
+                        <button
+                          type="button"
+                          className={`sci-run-item ${isSelected ? 'sci-run-item--active' : ''}`.trim()}
+                          onClick={() => {
+                            setSelectedId(item.id)
+                            setActiveTab('results')
+                          }}
+                        >
+                          <div className="sci-run-item__top">
+                            <span className="sci-run-item__title">{item.title}</span>
+                            <StatusBadge tone={statusTone(item.status)}>{item.status}</StatusBadge>
+                          </div>
+                          <span className="sci-run-item__meta">
+                            {linkedRegion ? `${linkedRegion.name} · ` : ''}
+                            Created {formatDate(item.createdAt)}
+                          </span>
+                        </button>
+                      </li>
+                    )
+                  })}
+                </ul>
+              )}
             </div>
-          ) : (assessmentsQuery.data ?? []).length === 0 ? (
-            <p className="sci-dim-card__note">
-              No assessments created yet. Submit a configuration above to run or queue one.
-            </p>
           ) : (
-            <ul className="sci-run-list">
-              {(assessmentsQuery.data ?? []).map((item) => {
-                const isSelected = item.id === activeAssessmentId
-                return (
-                  <li key={item.id}>
-                    <button
-                      type="button"
-                      className={`sci-run-item ${isSelected ? 'sci-run-item--active' : ''}`.trim()}
-                      onClick={() => {
-                        setSelectedId(item.id)
-                        setActiveTab('results')
+            <div>
+              <div className="sci-panel__header" style={{ marginBottom: 12 }}>
+                <div>
+                  <h2 className="workspace-config-rail__title">New Assessment</h2>
+                  <p className="workspace-config-rail__subtitle">
+                    Execute Scientific Core P0/P1 pipeline with separated resilience dimensions.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  className="sci-dim-card__note"
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    cursor: 'pointer',
+                    textDecoration: 'underline',
+                    padding: 0,
+                  }}
+                  onClick={() => setRailMode('saved')}
+                >
+                  View saved runs
+                </button>
+              </div>
+
+              {currentUserQuery.isPending ? (
+                <div className="sci-banner sci-banner--neutral" aria-live="polite">
+                  Checking session status…
+                </div>
+              ) : !isAuthenticated ? (
+                <AuthActionBanner
+                  returnTo={APP_ROUTES.assessments}
+                  title="Authentication required"
+                  description="Sign in to select prepared GHS datasets, create assessments, and run Scientific Core pipelines."
+                />
+              ) : (
+                <form className="sci-form" onSubmit={handleCreateSubmit}>
+                  {/* Step 1: Target & Region */}
+                  <div>
+                    <div className="sci-step-header">
+                      <span className="sci-step-badge">1</span>
+                      Target &amp; Region
+                    </div>
+                    <div className="sci-field">
+                      <label className="sci-label" htmlFor="assessment-title">
+                        Assessment Title
+                      </label>
+                      <input
+                        id="assessment-title"
+                        className="sci-input"
+                        type="text"
+                        value={title}
+                        onChange={(e) => setTitle(e.target.value)}
+                        placeholder="e.g. Carpathian NDVI 2021–2024"
+                        maxLength={255}
+                      />
+                    </div>
+                    <div className="sci-field" style={{ marginTop: 8 }}>
+                      <label className="sci-label" htmlFor="assessment-region">
+                        Region / AOI (optional)
+                      </label>
+                      <select
+                        id="assessment-region"
+                        className="sci-select"
+                        value={regionId}
+                        onChange={(e) => setRegionId(e.target.value)}
+                      >
+                        <option value="">No persisted region linked</option>
+                        {(regionsQuery.data ?? []).map((reg) => (
+                          <option key={reg.id} value={reg.id}>
+                            {reg.name} ({reg.role})
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+
+                  {/* Step 2: Analysis Profile */}
+                  <div style={{ marginTop: 8 }}>
+                    <div className="sci-step-header">
+                      <span className="sci-step-badge">2</span>
+                      Analysis Profile Preset
+                    </div>
+                    <div className="sci-profile-btn-group">
+                      <button
+                        type="button"
+                        className={`sci-profile-btn ${analysisProfile === 'quick' ? 'sci-profile-btn--active' : ''}`.trim()}
+                        onClick={() => applyProfile('quick')}
+                      >
+                        <span className="sci-profile-btn__label">Quick</span>
+                        <span className="sci-profile-btn__sub">1 Year</span>
+                      </button>
+                      <button
+                        type="button"
+                        className={`sci-profile-btn ${analysisProfile === 'seasonal' ? 'sci-profile-btn--active' : ''}`.trim()}
+                        onClick={() => applyProfile('seasonal')}
+                      >
+                        <span className="sci-profile-btn__label">Seasonal</span>
+                        <span className="sci-profile-btn__sub">2 Years</span>
+                      </button>
+                      <button
+                        type="button"
+                        className={`sci-profile-btn ${analysisProfile === 'historical' ? 'sci-profile-btn--active' : ''}`.trim()}
+                        onClick={() => applyProfile('historical')}
+                      >
+                        <span className="sci-profile-btn__label">Historical</span>
+                        <span className="sci-profile-btn__sub">3+ Years</span>
+                      </button>
+                    </div>
+                    <p className="sci-dim-card__note" style={{ marginTop: 4 }}>
+                      {analysisProfile === 'quick'
+                        ? '1-year window, full-period baseline (min 1 yr). Fast exploratory diagnostic.'
+                        : analysisProfile === 'seasonal'
+                          ? '2-year window (2023–2024), full-period baseline. Evaluates seasonal departures.'
+                          : '3+ year window (2021–2024), fixed 3-yr reference baseline. Evaluates full 4-dimension resilience.'}
+                    </p>
+                  </div>
+
+                  {/* Step 3: Datasets & Execution */}
+                  <div style={{ marginTop: 8 }}>
+                    <div className="sci-step-header">
+                      <span className="sci-step-badge">3</span>
+                      Datasets &amp; Execution
+                    </div>
+                    <PreparedDatasetPickerField
+                      enabled={isAuthenticated}
+                      selectedDatasetIds={selectedDatasetIds}
+                      onToggle={(dsId) => {
+                        const next = selectedDatasetIds.includes(dsId)
+                          ? selectedDatasetIds.filter((id) => id !== dsId)
+                          : [...selectedDatasetIds, dsId]
+                        setSelectedDatasetIds(next)
+                        syncDatesFromDatasetIds(next)
                       }}
-                    >
-                      <div className="sci-run-item__top">
-                        <span className="sci-run-item__title">{item.title}</span>
-                        <StatusBadge tone={statusTone(item.status)}>{item.status}</StatusBadge>
+                    />
+                    <div style={{ marginTop: 8 }}>
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        disabled={autoProvisionMutation.isPending}
+                        onClick={() => void handleAutoProvision()}
+                        style={{ width: '100%' }}
+                      >
+                        {autoProvisionMutation.isPending
+                          ? 'Provisioning NASA Data…'
+                          : 'Auto-Provision Missing Data'}
+                      </Button>
+                    </div>
+                  </div>
+
+                  {/* Collapsible Advanced Parameters */}
+                  <details className="sci-advanced-details" style={{ marginTop: 8 }}>
+                    <summary>Advanced Parameters &amp; Fine-Tuning</summary>
+                    <div className="sci-advanced-content">
+                      <div className="sci-field-row">
+                        <div className="sci-field">
+                          <label className="sci-label" htmlFor="analysis-start">
+                            Analysis start
+                          </label>
+                          <input
+                            id="analysis-start"
+                            className="sci-input"
+                            type="date"
+                            value={analysisStart}
+                            onChange={(e) => setAnalysisStart(e.target.value)}
+                          />
+                        </div>
+                        <div className="sci-field">
+                          <label className="sci-label" htmlFor="analysis-end">
+                            Analysis end
+                          </label>
+                          <input
+                            id="analysis-end"
+                            className="sci-input"
+                            type="date"
+                            value={analysisEnd}
+                            onChange={(e) => setAnalysisEnd(e.target.value)}
+                          />
+                        </div>
                       </div>
-                      <span className="sci-run-item__meta">
-                        Created {formatDate(item.createdAt)} · Updated {formatDate(item.updatedAt)}
-                      </span>
-                    </button>
-                  </li>
-                )
-              })}
-            </ul>
+
+                      <div className="sci-field">
+                        <label className="sci-label" htmlFor="baseline-type">
+                          Baseline methodology
+                        </label>
+                        <select
+                          id="baseline-type"
+                          className="sci-select"
+                          value={baselineType}
+                          onChange={(e) =>
+                            setBaselineType(
+                              e.target.value as 'fixed_reference' | 'full_period_explicit',
+                            )
+                          }
+                        >
+                          <option value="fixed_reference">Fixed reference (historical window)</option>
+                          <option value="full_period_explicit">
+                            Full period (explicit — includes assessment period)
+                          </option>
+                        </select>
+                      </div>
+
+                      {baselineType === 'fixed_reference' ? (
+                        <div className="sci-field-row">
+                          <div className="sci-field">
+                            <label className="sci-label" htmlFor="baseline-start">
+                              Baseline start
+                            </label>
+                            <input
+                              id="baseline-start"
+                              className="sci-input"
+                              type="date"
+                              value={baselineStart}
+                              onChange={(e) => setBaselineStart(e.target.value)}
+                            />
+                          </div>
+                          <div className="sci-field">
+                            <label className="sci-label" htmlFor="baseline-end">
+                              Baseline end
+                            </label>
+                            <input
+                              id="baseline-end"
+                              className="sci-input"
+                              type="date"
+                              value={baselineEnd}
+                              onChange={(e) => setBaselineEnd(e.target.value)}
+                            />
+                          </div>
+                        </div>
+                      ) : null}
+
+                      <div className="sci-field-row">
+                        <div className="sci-field">
+                          <label className="sci-label" htmlFor="target-cadence">
+                            Target cadence
+                          </label>
+                          <select
+                            id="target-cadence"
+                            className="sci-select"
+                            value={targetCadence}
+                            onChange={(e) =>
+                              setTargetCadence(e.target.value as 'monthly' | 'daily' | 'sixteen_day')
+                            }
+                          >
+                            <option value="monthly">Monthly</option>
+                            <option value="sixteen_day">16-Day</option>
+                            <option value="daily">Daily</option>
+                          </select>
+                        </div>
+                        <div className="sci-field">
+                          <label className="sci-label" htmlFor="qa-policy">
+                            QA screening level
+                          </label>
+                          <select
+                            id="qa-policy"
+                            className="sci-select"
+                            value={qaLevel}
+                            onChange={(e) => setQaLevel(e.target.value as 'strict' | 'permissive')}
+                          >
+                            <option value="strict">Strict (high-confidence QA only)</option>
+                            <option value="permissive">Permissive (retain marginal QA)</option>
+                          </select>
+                        </div>
+                      </div>
+
+                      <div className="sci-field">
+                        <label className="sci-label" htmlFor="min-baseline-years">
+                          Min baseline years
+                        </label>
+                        <input
+                          id="min-baseline-years"
+                          className="sci-input"
+                          type="number"
+                          min={1}
+                          max={10}
+                          value={minYearsRequired}
+                          onChange={(e) =>
+                            setMinYearsRequired(Math.max(1, Math.min(10, Number(e.target.value) || 1)))
+                          }
+                        />
+                      </div>
+
+                      <div className="sci-field">
+                        <label className="sci-label" htmlFor="ghs-dataset-ids">
+                          Additional manual GHS dataset IDs
+                        </label>
+                        <input
+                          id="ghs-dataset-ids"
+                          className="sci-input"
+                          type="text"
+                          value={ghsDatasetIdsText}
+                          onChange={(e) => setGhsDatasetIdsText(e.target.value)}
+                          placeholder="Optional manual IDs"
+                        />
+                      </div>
+                    </div>
+                  </details>
+
+                  <label className="sci-checkbox-row" style={{ marginTop: 8 }}>
+                    <input
+                      type="checkbox"
+                      checked={executeNow}
+                      onChange={(e) => setExecuteNow(e.target.checked)}
+                    />
+                    Execute immediately on creation
+                  </label>
+
+                  {formError ? (
+                    <div className="sci-banner sci-banner--error" role="alert">
+                      {formError}
+                    </div>
+                  ) : null}
+
+                  <div style={{ marginTop: 8 }}>
+                    <Button
+                      type="submit"
+                      variant="primary"
+                      disabled={createMutation.isPending}
+                      style={{ width: '100%' }}
+                    >
+                      {createMutation.isPending ? 'Submitting assessment…' : 'Create & Run Assessment'}
+                    </Button>
+                  </div>
+                </form>
+              )}
+            </div>
           )}
         </aside>
 
         <main className="sci-main-stack">
-          {isAuthenticated ? (
+          {isAuthenticated && (railMode === 'create' || !activeAssessmentId) ? (
             <>
               {!isReadinessConfigValid ? (
                 <section className="sci-panel" aria-label="Pre-run readiness configuration warning">
@@ -1147,9 +1331,11 @@ export default function AssessmentsPage() {
                     </Button>
                   }
                   onApplySuggestedWindow={(startDate, endDate) => {
+                    const dayBeforeAnalysis = shiftIsoDateDays(analysisStart, -1)
+                    const clampedEnd = endDate >= analysisStart ? dayBeforeAnalysis : endDate
                     setBaselineType('fixed_reference')
                     setBaselineStart(startDate)
-                    setBaselineEnd(endDate)
+                    setBaselineEnd(clampedEnd)
                   }}
                 />
               ) : null}
@@ -1411,118 +1597,9 @@ export default function AssessmentsPage() {
                       </div>
                     )}
 
-                    {(() => {
-                      const linkedRegion =
-                        regionsQuery.data?.find((reg) => reg.id === detail.regionId) ?? null
-                      const config = detail.requestConfig as Record<string, unknown>
-                      const requestStart =
-                        typeof config.analysis_start === 'string'
-                          ? config.analysis_start.slice(0, 10)
-                          : null
-                      const requestEnd =
-                        typeof config.analysis_end === 'string'
-                          ? config.analysis_end.slice(0, 10)
-                          : null
-                      const targetCadence =
-                        typeof config.target_cadence === 'string'
-                          ? config.target_cadence
-                          : null
-                      return (
-                        <section
-                          className="sci-panel"
-                          aria-label="Selected AOI and analysis period"
-                        >
-                          <div className="sci-panel__header">
-                            <div>
-                              <h3 className="sci-panel__title">
-                                Selected AOI &amp; Analysis Period
-                              </h3>
-                              <p className="sci-panel__subtitle">
-                                Geographic and temporal inputs submitted to the Scientific Core.
-                              </p>
-                            </div>
-                          </div>
-                          <div className="sci-kpi-grid">
-                            <div className="sci-dim-card">
-                              <span className="sci-dim-card__name">Region / AOI</span>
-                              <p className="sci-dim-card__value sci-dim-card__value--small">
-                                {linkedRegion?.name ?? detail.regionId ?? 'No persisted region'}
-                              </p>
-                              {linkedRegion ? (
-                                <p className="sci-dim-card__note">
-                                  {linkedRegion.approxAreaKm2.toLocaleString()} km² ·{' '}
-                                  {linkedRegion.sourceCrs}
-                                </p>
-                              ) : null}
-                            </div>
-                            <div className="sci-dim-card">
-                              <span className="sci-dim-card__name">Analysis period</span>
-                              <p className="sci-dim-card__value">
-                                {requestStart ?? '—'} → {requestEnd ?? '—'}
-                              </p>
-                              <p className="sci-dim-card__note">
-                                Target cadence: {targetCadence ?? 'not recorded'}
-                              </p>
-                            </div>
-                            <div className="sci-dim-card">
-                              <span className="sci-dim-card__name">Bounding box (WGS 84)</span>
-                              <p className="sci-dim-card__value sci-dim-card__value--small">
-                                {linkedRegion
-                                  ? linkedRegion.bbox.map((v) => v.toFixed(4)).join(', ')
-                                  : 'Not linked to a saved region'}
-                              </p>
-                              <p className="sci-dim-card__note">
-                                EPSG:4326 · [west, south, east, north]
-                              </p>
-                            </div>
-                            <div className="sci-dim-card">
-                              <span className="sci-dim-card__name">Centroid (WGS 84)</span>
-                              <p className="sci-dim-card__value">
-                                {linkedRegion
-                                  ? `${linkedRegion.centroid[1].toFixed(4)}°, ${linkedRegion.centroid[0].toFixed(4)}°`
-                                  : '—'}
-                              </p>
-                              <p className="sci-dim-card__note">lat, lon · EPSG:4326</p>
-                            </div>
-                          </div>
-                          {linkedRegion ? (
-                            <details className="sci-geojson-details">
-                              <summary>GeoJSON Polygon coordinates (EPSG:4326)</summary>
-                              <pre>{JSON.stringify(linkedRegion.geometry, null, 2)}</pre>
-                            </details>
-                          ) : null}
-                          <p className="sci-dim-card__note">
-                            Prepared GHS datasets:{' '}
-                            {detail.ghsDatasetIds.length > 0
-                              ? detail.ghsDatasetIds.join(', ')
-                              : 'none linked'}
-                          </p>
-                        </section>
-                      )
-                    })()}
-
                     {parsedResult ? (
                       <>
-                        {parsedResult.readiness ? (
-                          <ReadinessDiagnosticsPanel
-                            readiness={parsedResult.readiness}
-                            mode="post_run"
-                          />
-                        ) : null}
-
-                        {parsedResult.warnings.length > 0 ? (
-                          <div className="sci-banner sci-banner--warning">
-                            <strong>Scientific warnings</strong>
-                            <ul>
-                              {parsedResult.warnings.map((w) => (
-                                <li key={w}>{w}</li>
-                              ))}
-                            </ul>
-                          </div>
-                        ) : null}
-
-                        <AssessmentVisualizationsSection parsedResult={parsedResult} />
-
+                        {/* 1. PRIMARY METRICS & CALCULATIONS (В ПЕРВУЮ ОЧЕРЕДЬ) */}
                         {parsedResult.resilience.map((resBlock) => (
                           <section
                             key={`${resBlock.datasetId}-${resBlock.variableName}`}
@@ -1530,9 +1607,14 @@ export default function AssessmentsPage() {
                             aria-label={`Resilience dimensions for ${resBlock.variableName}`}
                           >
                             <div className="sci-panel__header">
-                              <h3 className="sci-panel__title">
-                                Separated Resilience Dimensions · {resBlock.variableName}
-                              </h3>
+                              <div>
+                                <h3 className="sci-panel__title">
+                                  Resilience Dimensions · {resBlock.variableName}
+                                </h3>
+                                <p className="sci-panel__subtitle">
+                                  Calculated mathematical dimensions: Resistance, Recovery, Stability, Sensitivity
+                                </p>
+                              </div>
                               <StatusBadge tone="experimental">
                                 Composite TRI: {resBlock.compositeTriStatus}
                               </StatusBadge>
@@ -1549,9 +1631,19 @@ export default function AssessmentsPage() {
                           </section>
                         ))}
 
+                        {/* 2. Calculated Monotonic Trends (Mann-Kendall / Sen's slope) */}
                         {parsedResult.trends.length > 0 ? (
                           <section aria-label="Monotonic trend estimates">
-                            <h3 className="sci-panel__title">Trends (Mann-Kendall / Sen&apos;s Slope)</h3>
+                            <div className="sci-panel__header">
+                              <div>
+                                <h3 className="sci-panel__title">
+                                  Trends (Mann-Kendall / Sen&apos;s Slope)
+                                </h3>
+                                <p className="sci-panel__subtitle">
+                                  Directional rate of change and statistical significance.
+                                </p>
+                              </div>
+                            </div>
                             <div className="provenance-table-wrapper">
                               <table className="provenance-table">
                                 <thead>
@@ -1574,7 +1666,19 @@ export default function AssessmentsPage() {
                                       <td>
                                         {tr.validCount} / {tr.sampleCount}
                                       </td>
-                                      <td>{tr.direction}</td>
+                                      <td>
+                                        <StatusBadge
+                                          tone={
+                                            tr.direction === 'increasing'
+                                              ? 'success'
+                                              : tr.direction === 'decreasing'
+                                                ? 'warning'
+                                                : 'neutral'
+                                          }
+                                        >
+                                          {tr.direction}
+                                        </StatusBadge>
+                                      </td>
                                       <td>
                                         {formatNumber(tr.sensSlope, 4)} {tr.slopeUnit}
                                       </td>
@@ -1587,6 +1691,56 @@ export default function AssessmentsPage() {
                           </section>
                         ) : null}
 
+                        {/* 3. Cross-Variable Lag Associations */}
+                        {parsedResult.crossVariable.length > 0 ? (
+                          <section aria-label="Cross-variable associations">
+                            <div className="sci-panel__header">
+                              <div>
+                                <h3 className="sci-panel__title">Cross-Variable Associations</h3>
+                                <p className="sci-panel__subtitle">
+                                  Calculated Pearson &amp; Spearman correlations across drivers.
+                                </p>
+                              </div>
+                            </div>
+                            <div className="provenance-table-wrapper">
+                              <table className="provenance-table">
+                                <thead>
+                                  <tr>
+                                    <th scope="col">Variables (X ↔ Y)</th>
+                                    <th scope="col">Pearson r</th>
+                                    <th scope="col">Spearman ρ</th>
+                                    <th scope="col">Lag</th>
+                                    <th scope="col">p-value (n)</th>
+                                    <th scope="col">Epistemic Caveat</th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {parsedResult.crossVariable.map((cv) => (
+                                    <tr key={`${cv.xVariable}-${cv.yVariable}-${cv.lagSteps}`}>
+                                      <td className="provenance-table__primary">
+                                        {cv.xVariable} ↔ {cv.yVariable}
+                                      </td>
+                                      <td>{formatNumber(cv.pearsonR, 3)}</td>
+                                      <td>{formatNumber(cv.spearmanRho, 3)}</td>
+                                      <td>{cv.lagSteps}</td>
+                                      <td>
+                                        {formatNumber(cv.pValue, 4)} (n={cv.sampleCount})
+                                      </td>
+                                      <td style={{ whiteSpace: 'normal', minWidth: 220 }}>
+                                        {cv.caveat}
+                                      </td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            </div>
+                          </section>
+                        ) : null}
+
+                        {/* 4. Temporal Trajectory & Standardized Anomalies Charts */}
+                        <AssessmentVisualizationsSection parsedResult={parsedResult} hideCrossVariable={true} />
+
+                        {/* 5. Input Quality Screening */}
                         {parsedResult.qualityReports.length > 0 ? (
                           <section aria-label="Dataset quality reports">
                             <h3 className="sci-panel__title">Input Quality Screening</h3>
@@ -1621,9 +1775,15 @@ export default function AssessmentsPage() {
                           </section>
                         ) : null}
 
+                        {/* 6. Geographic Context & Selected AOI */}
+                        {renderGeographicContext(detail, regionsQuery.data)}
+
+                        {/* 7. Methodology Uncertainty, Limitations & Provenance */}
                         {parsedResult.uncertainty ? (
                           <section aria-label="Uncertainty and limitations">
-                            <h3 className="sci-panel__title">Uncertainty &amp; Methodological Limitations</h3>
+                            <h3 className="sci-panel__title">
+                              Uncertainty &amp; Methodological Limitations
+                            </h3>
                             <div className="sci-uncertainty-grid">
                               <article className="sci-dim-card">
                                 <span className="sci-dim-card__name">Data Quality Confidence</span>
@@ -1663,6 +1823,24 @@ export default function AssessmentsPage() {
                           </section>
                         ) : null}
 
+                        {parsedResult.warnings.length > 0 ? (
+                          <div className="sci-banner sci-banner--warning">
+                            <strong>Scientific warnings</strong>
+                            <ul>
+                              {parsedResult.warnings.map((w) => (
+                                <li key={w}>{w}</li>
+                              ))}
+                            </ul>
+                          </div>
+                        ) : null}
+
+                        {parsedResult.readiness ? (
+                          <ReadinessDiagnosticsPanel
+                            readiness={parsedResult.readiness}
+                            mode="post_run"
+                          />
+                        ) : null}
+
                         {parsedResult.provenance ? (
                           <section aria-label="Reproducibility provenance">
                             <h3 className="sci-panel__title">Provenance &amp; Reproducibility</h3>
@@ -1688,7 +1866,9 @@ export default function AssessmentsPage() {
                           </section>
                         ) : null}
                       </>
-                    ) : null}
+                    ) : (
+                      renderGeographicContext(detail, regionsQuery.data)
+                    )}
                   </div>
                 )
               })()

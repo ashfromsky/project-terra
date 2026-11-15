@@ -17,7 +17,7 @@ import {
   buildHistogramChartOption,
   buildTimeSeriesChartOption,
 } from '../../../shared/lib/scientific-charts'
-import type { AoiFeature, AoiRole } from '../../../shared/types/geospatial'
+import type { AoiFeature, AoiRole, MapLayerDefinition } from '../../../shared/types/geospatial'
 import {
   Check,
   Download,
@@ -27,6 +27,7 @@ import {
   X,
 } from '../../../shared/ui/explorer-icons'
 import { Chart } from '../../../shared/ui/chart'
+import { resolveZonalObservation } from '../lib/zonal-observation'
 import { useAoiAssessmentRun } from '../model/use-aoi-assessment-run'
 import { useAoiWorkspace } from '../model/use-aoi-workspace'
 import { useExploreStore } from '../model/use-explore-store'
@@ -167,7 +168,13 @@ function AoiCard({
   )
 }
 
-export function InspectorAoiTab() {
+export function InspectorAoiTab({
+  activeLayer,
+  catalogLoading,
+}: {
+  activeLayer: MapLayerDefinition | null
+  catalogLoading: boolean
+}) {
   const [copiedStatus, setCopiedStatus] = useState<'coords' | 'bounds' | null>(null)
   const interactionMode = useExploreStore((s) => s.interactionMode)
   const setInteractionMode = useExploreStore((s) => s.setInteractionMode)
@@ -201,23 +208,29 @@ export function InspectorAoiTab() {
 
   const primaryLayerId = useExploreStore((s) => s.primaryLayerId)
   const selectedDate = useExploreStore((s) => s.selectedDate)
+  const observation = resolveZonalObservation(activeLayer, selectedDate)
 
   const zonalStatsQuery = useZonalStatisticsQuery({
     metricId: primaryLayerId,
-    date: selectedDate,
+    date: observation.date,
     geometry: selectedAoi ? toRegionGeometryInput(selectedAoi.geometry) : undefined,
     regionId: isAuthenticated ? selectedAoi?.properties.id : undefined,
-    enabled: Boolean(selectedAoi),
-    cacheKey: selectedAoi ? `${selectedAoi.properties.id}-${selectedDate}` : undefined,
+    enabled: Boolean(selectedAoi) && observation.hasIngestedDataset,
+    cacheKey: selectedAoi
+      ? `${selectedAoi.properties.id}-${observation.date ?? 'latest'}`
+      : undefined,
   })
 
   const timeseriesQuery = useZonalTimeseriesQuery({
     metricId: primaryLayerId,
     geometry: selectedAoi ? toRegionGeometryInput(selectedAoi.geometry) : undefined,
     regionId: isAuthenticated ? selectedAoi?.properties.id : undefined,
-    enabled: Boolean(selectedAoi),
+    enabled: Boolean(selectedAoi) && observation.hasIngestedDataset,
     cacheKey: selectedAoi?.properties.id,
   })
+
+  const zonalData = zonalStatsQuery.data
+  const displayDate = zonalData?.date ?? observation.displayDate
 
   const isDrawing = interactionMode === 'draw-polygon' || interactionMode === 'draw-rectangle'
 
@@ -405,59 +418,157 @@ export function InspectorAoiTab() {
           {selectedAoi && (
             <>
               <div className="explorer-inspector-card">
-                <span className="explorer-overline">Region Geometry &amp; Boundaries</span>
-                <dl className="explorer-kv-list explorer-kv-list--dense">
-                  <div>
-                    <dt>Source CRS</dt>
-                    <dd>{selectedAoi.properties.sourceCrs}</dd>
-                  </div>
-                  <div>
-                    <dt>Area (WGS 84)</dt>
-                    <dd>{selectedAoi.properties.approxAreaKm2.toLocaleString()} km²</dd>
-                  </div>
-                  <div>
-                    <dt>Centroid</dt>
-                    <dd>
-                      {formatCoordinatePair(
-                        selectedAoi.properties.centroid[0],
-                        selectedAoi.properties.centroid[1],
-                      )}
-                    </dd>
-                  </div>
-                </dl>
-                <div className="explorer-draw-guide__actions" style={{ marginTop: '8px' }}>
-                  <button
-                    type="button"
-                    className="explorer-action-btn"
-                    onClick={() => {
-                      const text = JSON.stringify(selectedAoi.geometry)
-                      void navigator.clipboard.writeText(text)
-                      setCopiedStatus('coords')
-                      setTimeout(() => setCopiedStatus(null), 2000)
-                    }}
-                  >
-                    <span>{copiedStatus === 'coords' ? 'Coordinates Copied!' : 'Copy Coordinates (WGS 84)'}</span>
-                  </button>
-                  <button
-                    type="button"
-                    className="explorer-action-btn"
-                    onClick={() => {
-                      const text = JSON.stringify(selectedAoi.properties.bbox)
-                      void navigator.clipboard.writeText(text)
-                      setCopiedStatus('bounds')
-                      setTimeout(() => setCopiedStatus(null), 2000)
-                    }}
-                  >
-                    <span>{copiedStatus === 'bounds' ? 'Bounds Copied!' : 'Copy Bounds'}</span>
-                  </button>
+                <div className="flex items-center justify-between mb-2">
+                  <span className="explorer-overline">Physical Zonal Statistics</span>
+                  <span className="text-xs px-2 py-0.5 rounded bg-emerald-950/40 text-emerald-300 font-mono">
+                    {displayDate}
+                  </span>
                 </div>
+                {observation.dateWasAdjusted && (
+                  <p className="explorer-resolution-note">
+                    No ingested observation exists for {selectedDate}. Using the latest ingested
+                    observation: {observation.date}.
+                  </p>
+                )}
+                {!activeLayer ? (
+                  <div className="explorer-status-banner is-unavailable">
+                    <strong>
+                      {catalogLoading ? 'Loading layer catalog…' : 'Layer catalog unavailable'}
+                    </strong>
+                    <p>Connect to TERRA Core API to compute physical zonal statistics.</p>
+                  </div>
+                ) : !observation.hasIngestedDataset ? (
+                  <div className="explorer-status-banner is-unavailable">
+                    <strong>No ingested raster available</strong>
+                    <p>
+                      {activeLayer.unavailableReason ??
+                        `No physical raster dataset is registered for ${activeLayer.shortName}.`}
+                    </p>
+                  </div>
+                ) : zonalStatsQuery.isPending ? (
+                  <p className="explorer-muted-copy">Computing physical raster statistics from COG assets…</p>
+                ) : zonalStatsQuery.isError ? (
+                  <div className="explorer-status-banner is-error" role="alert">
+                    <strong>Zonal aggregation unavailable</strong>
+                    <p>{zonalStatsQuery.error.message}</p>
+                    <button
+                      type="button"
+                      className="explorer-inline-reset"
+                      onClick={() => void zonalStatsQuery.refetch()}
+                    >
+                      Retry
+                    </button>
+                  </div>
+                ) : zonalData ? (
+                  <>
+                    {zonalData.validPixelCount === 0 ? (
+                      <div className="explorer-status-banner is-unavailable" role="status">
+                        <strong>No valid observations inside this AOI</strong>
+                        <p>
+                          {zonalData.totalPixelCount === 0
+                            ? `The ingested ${activeLayer.shortName} raster for ${zonalData.date} does not intersect this AOI.`
+                            : `All ${zonalData.totalPixelCount.toLocaleString()} raster pixels inside this AOI are NoData or masked for ${zonalData.date}.`}
+                        </p>
+                      </div>
+                    ) : (
+                      <dl className="explorer-kv-list explorer-kv-list--dense">
+                        <div>
+                          <dt>Mean</dt>
+                          <dd className="font-semibold text-emerald-400">
+                            {zonalData.mean != null
+                              ? `${zonalData.mean.toFixed(3)} ${zonalData.units ?? ''}`
+                              : 'N/A'}
+                          </dd>
+                        </div>
+                        <div>
+                          <dt>Median</dt>
+                          <dd>
+                            {zonalData.median != null
+                              ? `${zonalData.median.toFixed(3)} ${zonalData.units ?? ''}`
+                              : 'N/A'}
+                          </dd>
+                        </div>
+                        <div>
+                          <dt>Min / Max</dt>
+                          <dd>
+                            {zonalData.min != null && zonalData.max != null
+                              ? `[${zonalData.min.toFixed(2)}, ${zonalData.max.toFixed(2)}]`
+                              : 'N/A'}
+                          </dd>
+                        </div>
+                        <div>
+                          <dt>Std Deviation</dt>
+                          <dd>
+                            {zonalData.std != null ? zonalData.std.toFixed(3) : 'N/A'}
+                          </dd>
+                        </div>
+                        <div>
+                          <dt>P10 / P90</dt>
+                          <dd>
+                            {zonalData.q10 != null && zonalData.q90 != null
+                              ? `${zonalData.q10.toFixed(2)} / ${zonalData.q90.toFixed(2)}`
+                              : 'N/A'}
+                          </dd>
+                        </div>
+                        <div>
+                          <dt>Valid Coverage</dt>
+                          <dd>
+                            {(zonalData.validDataCoverage * 100).toFixed(1)}% (
+                            {zonalData.validPixelCount.toLocaleString()} px)
+                          </dd>
+                        </div>
+                      </dl>
+                    )}
+
+                    {zonalData.histogram.counts.length > 0 && (
+                      <div className="live-science-section">
+                        <span className="explorer-overline">Pixel Value Distribution</span>
+                        <Chart
+                          className="live-science-chart live-science-chart--short"
+                          option={buildHistogramChartOption({
+                            bins: zonalData.histogram.bins,
+                            counts: zonalData.histogram.counts,
+                            variableName: primaryLayerId,
+                            units: zonalData.units ?? undefined,
+                          })}
+                        />
+                      </div>
+                    )}
+
+                    {timeseriesQuery.data && timeseriesQuery.data.series.length > 1 && (
+                      <div className="live-science-section">
+                        <span className="explorer-overline">Temporal Observation Trend</span>
+                        <Chart
+                          className="live-science-chart"
+                          option={buildTimeSeriesChartOption({
+                            title: `${primaryLayerId} Multi-temporal`,
+                            variableName: primaryLayerId,
+                            units: timeseriesQuery.data.units ?? undefined,
+                            timestamps: timeseriesQuery.data.series.map((s) => s.date),
+                            values: timeseriesQuery.data.series.map((s) => s.mean ?? null),
+                          })}
+                        />
+                      </div>
+                    )}
+                  </>
+                ) : null}
+
+                {activeLayer && !catalogLoading ? (
+                  <div className="explorer-aoi-footer">
+                    <Link
+                      to={`${APP_ROUTES.dataSources}?regionId=${encodeURIComponent(selectedAoi.properties.id)}`}
+                      className="explorer-action-btn"
+                    >
+                      Inspect Data Ingestion
+                    </Link>
+                  </div>
+                ) : null}
               </div>
 
               <div className="explorer-inspector-card">
-                <span className="explorer-overline">Scientific Assessment</span>
+                <span className="explorer-overline">Full Scientific Assessment</span>
                 <p className="explorer-muted-copy">
-                  Provision bounded real observations for this AOI, then queue the existing
-                  Scientific Core assessment in terra-worker.
+                  Provision bounded multi-source observations for this AOI and run full resilience metrics on TERRA Core.
                 </p>
                 <div className="explorer-analysis-grid">
                   <label className="explorer-analysis-field" htmlFor="aoi-analysis-start">
@@ -498,8 +609,7 @@ export function InspectorAoiTab() {
                   </label>
                 </div>
                 <p className="explorer-resolution-note">
-                  Climate uses NASA POWER (MERRA-2 / CERES). Optional MODIS or SMAP domains
-                  ingest bounded granules and can take several minutes.
+                  Climate uses NASA POWER (MERRA-2 / CERES). Ingests real bounded granules into GHS and runs assessment pipeline.
                 </p>
                 <button
                   type="button"
@@ -562,119 +672,52 @@ export function InspectorAoiTab() {
               </div>
 
               <div className="explorer-inspector-card">
-                <div className="flex items-center justify-between mb-2">
-                  <span className="explorer-overline">Physical Zonal Statistics</span>
-                  <span className="text-xs px-2 py-0.5 rounded bg-emerald-950/40 text-emerald-300 font-mono">
-                    {selectedDate}
-                  </span>
-                </div>
-                {zonalStatsQuery.isPending ? (
-                  <p className="explorer-muted-copy">Computing physical raster statistics from COG assets…</p>
-                ) : zonalStatsQuery.isError ? (
-                  <div className="explorer-status-banner is-error" role="alert">
-                    <strong>Zonal aggregation unavailable</strong>
-                    <p>{zonalStatsQuery.error.message}</p>
-                    <button
-                      type="button"
-                      className="explorer-inline-reset"
-                      onClick={() => void zonalStatsQuery.refetch()}
-                    >
-                      Retry
-                    </button>
+                <span className="explorer-overline">Region Geometry &amp; Boundaries</span>
+                <dl className="explorer-kv-list explorer-kv-list--dense">
+                  <div>
+                    <dt>Source CRS</dt>
+                    <dd>{selectedAoi.properties.sourceCrs}</dd>
                   </div>
-                ) : zonalStatsQuery.data ? (
-                  <>
-                    <dl className="explorer-kv-list explorer-kv-list--dense">
-                      <div>
-                        <dt>Mean</dt>
-                        <dd className="font-semibold text-emerald-400">
-                          {zonalStatsQuery.data.mean != null
-                            ? `${zonalStatsQuery.data.mean.toFixed(3)} ${zonalStatsQuery.data.units ?? ''}`
-                            : 'N/A'}
-                        </dd>
-                      </div>
-                      <div>
-                        <dt>Median</dt>
-                        <dd>
-                          {zonalStatsQuery.data.median != null
-                            ? `${zonalStatsQuery.data.median.toFixed(3)} ${zonalStatsQuery.data.units ?? ''}`
-                            : 'N/A'}
-                        </dd>
-                      </div>
-                      <div>
-                        <dt>Min / Max</dt>
-                        <dd>
-                          {zonalStatsQuery.data.min != null && zonalStatsQuery.data.max != null
-                            ? `[${zonalStatsQuery.data.min.toFixed(2)}, ${zonalStatsQuery.data.max.toFixed(2)}]`
-                            : 'N/A'}
-                        </dd>
-                      </div>
-                      <div>
-                        <dt>Std Deviation</dt>
-                        <dd>
-                          {zonalStatsQuery.data.std != null
-                            ? zonalStatsQuery.data.std.toFixed(3)
-                            : 'N/A'}
-                        </dd>
-                      </div>
-                      <div>
-                        <dt>P10 / P90</dt>
-                        <dd>
-                          {zonalStatsQuery.data.q10 != null && zonalStatsQuery.data.q90 != null
-                            ? `${zonalStatsQuery.data.q10.toFixed(2)} / ${zonalStatsQuery.data.q90.toFixed(2)}`
-                            : 'N/A'}
-                        </dd>
-                      </div>
-                      <div>
-                        <dt>Valid Coverage</dt>
-                        <dd>
-                          {(zonalStatsQuery.data.validDataCoverage * 100).toFixed(1)}% (
-                          {zonalStatsQuery.data.validPixelCount.toLocaleString()} px)
-                        </dd>
-                      </div>
-                    </dl>
-
-                    {zonalStatsQuery.data.histogram.counts.length > 0 && (
-                      <div className="mt-3 pt-2 border-t border-slate-700/50">
-                        <span className="explorer-overline mb-1 block">Pixel Value Distribution</span>
-                        <Chart
-                          className="w-full h-32"
-                          option={buildHistogramChartOption({
-                            bins: zonalStatsQuery.data.histogram.bins,
-                            counts: zonalStatsQuery.data.histogram.counts,
-                            variableName: primaryLayerId,
-                            units: zonalStatsQuery.data.units ?? undefined,
-                          })}
-                        />
-                      </div>
-                    )}
-
-                    {timeseriesQuery.data && timeseriesQuery.data.series.length > 1 && (
-                      <div className="mt-3 pt-2 border-t border-slate-700/50">
-                        <span className="explorer-overline mb-1 block">Temporal Observation Trend</span>
-                        <Chart
-                          className="w-full h-36"
-                          option={buildTimeSeriesChartOption({
-                            title: `${primaryLayerId} Multi-temporal`,
-                            variableName: primaryLayerId,
-                            units: timeseriesQuery.data.units ?? undefined,
-                            timestamps: timeseriesQuery.data.series.map((s) => s.date),
-                            values: timeseriesQuery.data.series.map((s) => s.mean ?? null),
-                          })}
-                        />
-                      </div>
-                    )}
-
-                    <div className="explorer-aoi-footer">
-                      <Link
-                        to={`${APP_ROUTES.dataSources}?regionId=${encodeURIComponent(selectedAoi.properties.id)}`}
-                        className="explorer-action-btn"
-                      >
-                        Inspect Data Ingestion
-                      </Link>
-                    </div>
-                  </>
-                ) : null}
+                  <div>
+                    <dt>Area (WGS 84)</dt>
+                    <dd>{selectedAoi.properties.approxAreaKm2.toLocaleString()} km²</dd>
+                  </div>
+                  <div>
+                    <dt>Centroid</dt>
+                    <dd>
+                      {formatCoordinatePair(
+                        selectedAoi.properties.centroid[0],
+                        selectedAoi.properties.centroid[1],
+                      )}
+                    </dd>
+                  </div>
+                </dl>
+                <div className="explorer-draw-guide__actions" style={{ marginTop: '8px' }}>
+                  <button
+                    type="button"
+                    className="explorer-action-btn"
+                    onClick={() => {
+                      const text = JSON.stringify(selectedAoi.geometry)
+                      void navigator.clipboard.writeText(text)
+                      setCopiedStatus('coords')
+                      setTimeout(() => setCopiedStatus(null), 2000)
+                    }}
+                  >
+                    <span>{copiedStatus === 'coords' ? 'Coordinates Copied!' : 'Copy Coordinates (WGS 84)'}</span>
+                  </button>
+                  <button
+                    type="button"
+                    className="explorer-action-btn"
+                    onClick={() => {
+                      const text = JSON.stringify(selectedAoi.properties.bbox)
+                      void navigator.clipboard.writeText(text)
+                      setCopiedStatus('bounds')
+                      setTimeout(() => setCopiedStatus(null), 2000)
+                    }}
+                  >
+                    <span>{copiedStatus === 'bounds' ? 'Bounds Copied!' : 'Copy Bounds'}</span>
+                  </button>
+                </div>
               </div>
             </>
           )}

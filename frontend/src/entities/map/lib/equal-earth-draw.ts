@@ -256,33 +256,6 @@ export function drawEqualEarthSvgVectors(params: {
     }
   }
 
-  const dsBbox = state.activeLayer?.visible ? state.activeLayer.layer.datasetBbox : null
-  if (dsBbox && dsBbox.length === 4) {
-    const [minLon, minLat, maxLon, maxLat] = dsBbox
-    const extentFeature: Feature<Geometry> = {
-      type: 'Feature',
-      properties: {},
-      geometry: {
-        type: 'Polygon',
-        coordinates: [
-          [
-            [minLon, minLat],
-            [maxLon, minLat],
-            [maxLon, maxLat],
-            [minLon, maxLat],
-            [minLon, minLat],
-          ],
-        ],
-      },
-    }
-    const extentD = pathGen(extentFeature as GeoPermissibleObjects)
-    if (extentD) {
-      fragments.push(
-        `<path d="${extentD}" fill="none" stroke="#159b91" stroke-width="1.5" stroke-dasharray="4 2" pointer-events="none" />`,
-      )
-    }
-  }
-
   for (const aoi of state.aois) {
     const normalizedGeom = normalizeGeometryForD3(aoi.geometry)
     const d = pathGen({ type: 'Feature', properties: {}, geometry: normalizedGeom } as GeoPermissibleObjects)

@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react'
 import { useSearchParams } from 'react-router'
 import { useLayerCatalogQuery } from '../../../shared/api/layers'
 import { BASEMAP_PROVIDER_REGISTRY, PROJECTION_REGISTRY } from '../../../shared/config/geospatial'
+import { findLiveLayer } from '../../../shared/config/live-environment'
 import type { BasemapId, ProjectionId } from '../../../shared/types/geospatial'
 import { useExploreStore } from '../model/use-explore-store'
 
@@ -15,6 +16,8 @@ export function useExploreUrlSync() {
   const basemap = useExploreStore((s) => s.basemap)
   const primaryLayerId = useExploreStore((s) => s.primaryLayerId)
   const selectedDate = useExploreStore((s) => s.selectedDate)
+  const gibsLayerId = useExploreStore((s) => s.gibsLayerId)
+  const gibsDate = useExploreStore((s) => s.gibsDate)
   const comparisonMode = useExploreStore((s) => s.comparisonMode)
   const analysisStart = useExploreStore((s) => s.analysisStart)
   const analysisEnd = useExploreStore((s) => s.analysisEnd)
@@ -25,6 +28,8 @@ export function useExploreUrlSync() {
   const setSelectedDate = useExploreStore((s) => s.setSelectedDate)
   const setComparisonMode = useExploreStore((s) => s.setComparisonMode)
   const setAnalysisPeriod = useExploreStore((s) => s.setAnalysisPeriod)
+  const setGibsLayer = useExploreStore((s) => s.setGibsLayer)
+  const setGibsDate = useExploreStore((s) => s.setGibsDate)
 
   useEffect(() => {
     if (initializedRef.current) return
@@ -40,14 +45,25 @@ export function useExploreUrlSync() {
       setBasemap(urlBasemap)
     }
 
+    const urlGibs = searchParams.get('gibs')
+    if (urlGibs && findLiveLayer(urlGibs)) {
+      setGibsLayer(urlGibs)
+    }
+
     const urlLayer = searchParams.get('layer')
     if (urlLayer) {
-      setPrimaryLayerId(urlLayer)
+      if (findLiveLayer(urlLayer)) {
+        setGibsLayer(urlLayer)
+      } else {
+        setPrimaryLayerId(urlLayer)
+        setGibsLayer(null)
+      }
     }
 
     const urlDate = searchParams.get('date')
     if (urlDate && /^\d{4}-\d{2}-\d{2}$/.test(urlDate)) {
       setSelectedDate(urlDate)
+      setGibsDate(urlDate)
     }
 
     const urlCmp = searchParams.get('cmp')
@@ -70,6 +86,8 @@ export function useExploreUrlSync() {
     setAnalysisPeriod,
     setBasemap,
     setComparisonMode,
+    setGibsDate,
+    setGibsLayer,
     setPrimaryLayerId,
     setProjection,
     setSelectedDate,
@@ -86,11 +104,12 @@ export function useExploreUrlSync() {
 
   useEffect(() => {
     if (!initializedRef.current) return
+    const activeDisplayDate = gibsLayerId ? gibsDate : selectedDate
     const next = new URLSearchParams(searchParams)
     next.set('proj', projection)
     next.set('basemap', basemap)
     next.set('layer', primaryLayerId)
-    next.set('date', selectedDate)
+    next.set('date', activeDisplayDate)
     next.set('start', analysisStart)
     next.set('end', analysisEnd)
     if (comparisonMode) {
@@ -106,6 +125,8 @@ export function useExploreUrlSync() {
     analysisStart,
     basemap,
     comparisonMode,
+    gibsDate,
+    gibsLayerId,
     primaryLayerId,
     projection,
     searchParams,

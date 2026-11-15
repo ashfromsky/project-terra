@@ -251,9 +251,11 @@ function buildAssessmentMarkdown(
       '',
       '## 5. Reproducibility & Provenance Manifest',
       '',
-      `- **Input Digest (SHA-256)**: \`${parsed.provenance.inputDigestSha256}\``,
-      `- **Config Digest (SHA-256)**: \`${parsed.provenance.configDigestSha256}\``,
-      `- **Generated At (UTC)**: ${parsed.provenance.generatedAtUtc}`,
+      `- **Input Digest (SHA-256)**: \`${parsed.provenance.inputDigestSha256 || '—'}\``,
+      parsed.provenance.configDigestSha256
+        ? `- **Config Digest (SHA-256)**: \`${parsed.provenance.configDigestSha256}\``
+        : `- **Provenance Trace ID**: \`${parsed.provenance.traceId || '—'}\``,
+      `- **Generated At (UTC)**: ${parsed.provenance.generatedAtUtc || '—'}`,
       '',
       '### Methods Invoked',
       ...parsed.provenance.methodsInvoked.map(
@@ -769,13 +771,19 @@ export default function ReportsPage() {
                     {parsedResult.provenance ? (
                       <div className="sci-btn-row">
                         <span className="sci-code-chip">
-                          Input SHA-256: {parsedResult.provenance.inputDigestSha256}
+                          Input SHA-256: {parsedResult.provenance.inputDigestSha256 || '—'}
                         </span>
+                        {parsedResult.provenance.configDigestSha256 ? (
+                          <span className="sci-code-chip">
+                            Config SHA-256: {parsedResult.provenance.configDigestSha256}
+                          </span>
+                        ) : (
+                          <span className="sci-code-chip">
+                            Trace ID: {parsedResult.provenance.traceId || '—'}
+                          </span>
+                        )}
                         <span className="sci-code-chip">
-                          Config SHA-256: {parsedResult.provenance.configDigestSha256}
-                        </span>
-                        <span className="sci-code-chip">
-                          Generated UTC: {parsedResult.provenance.generatedAtUtc}
+                          Generated UTC: {parsedResult.provenance.generatedAtUtc || '—'}
                         </span>
                       </div>
                     ) : null}

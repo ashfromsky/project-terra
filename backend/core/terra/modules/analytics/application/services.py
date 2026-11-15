@@ -179,10 +179,18 @@ class AnalyticsService:
             q25=data.get("q25"),
             q75=data.get("q75"),
             q90=data.get("q90"),
-            valid_pixel_count=data.get("valid_pixel_count", 0),
-            total_pixel_count=data.get("total_pixel_count", 0),
-            valid_data_coverage=data.get("valid_data_coverage", 0.0),
-            approx_area_km2=data.get("approx_area_km2", 0.0),
+            valid_pixel_count=data.get("valid_pixel_count")
+            if "valid_pixel_count" in data
+            else data.get("validPixelCount", 0),
+            total_pixel_count=data.get("total_pixel_count")
+            if "total_pixel_count" in data
+            else data.get("totalPixelCount", 0),
+            valid_data_coverage=data.get("valid_data_coverage")
+            if "valid_data_coverage" in data
+            else data.get("validDataCoverage", 0.0),
+            approx_area_km2=data.get("approx_area_km2")
+            if "approx_area_km2" in data
+            else data.get("approxAreaKm2", 0.0),
             units=layer.unit,
             histogram=histogram,
         )

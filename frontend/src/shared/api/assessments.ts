@@ -135,6 +135,7 @@ export interface ParsedUncertaintySummary {
 }
 
 export interface ParsedProvenanceRecord {
+  traceId: string
   inputDigestSha256: string
   configDigestSha256: string
   generatedAtUtc: string
@@ -494,24 +495,57 @@ export function parseScientificAssessmentResult(
     })
     .filter((item): item is ParsedStageReport => item !== null)
 
-  const qualityReports = asArray(root.quality_reports ?? root.qualityReports)
-    .map((item): ParsedQualityReport | null => {
-      const qr = asRecord(item)
-      if (!qr) return null
-      return {
-        datasetId: asString(qr.dataset_id ?? qr.datasetId),
-        variableName: asString(qr.variable_name ?? qr.variableName),
-        totalSteps: asNumber(qr.total_steps ?? qr.totalSteps) ?? 0,
-        validSteps: asNumber(qr.valid_steps ?? qr.validSteps) ?? 0,
-        missingSteps: asNumber(qr.missing_steps ?? qr.missingSteps) ?? 0,
-        validFraction: asNumber(qr.valid_fraction ?? qr.validFraction) ?? 0,
-        missingFraction: asNumber(qr.missing_fraction ?? qr.missingFraction) ?? 0,
-        qaScreenedOutCount: asNumber(qr.qa_screened_out_count ?? qr.qaScreenedOutCount) ?? 0,
-        outOfRangeCount: asNumber(qr.out_of_range_count ?? qr.outOfRangeCount) ?? 0,
-        warnings: asStringList(qr.warnings),
-      }
-    })
-    .filter((item): item is ParsedQualityReport => item !== null)
+  const rawQualityReports = root.quality_reports ?? root.qualityReports
+  const qualityReports: ParsedQualityReport[] = Array.isArray(rawQualityReports)
+    ? rawQualityReports
+        .map((item): ParsedQualityReport | null => {
+          const qr = asRecord(item)
+          if (!qr) return null
+          const validFraction = asNumber(qr.valid_fraction ?? qr.validFraction) ?? 0
+          return {
+            datasetId: asString(qr.dataset_id ?? qr.datasetId),
+            variableName: asString(qr.variable_name ?? qr.variableName),
+            totalSteps: asNumber(qr.total_steps ?? qr.totalSteps ?? qr.total_observations ?? qr.totalObservations) ?? 0,
+            validSteps: asNumber(qr.valid_steps ?? qr.validSteps ?? qr.valid_observations ?? qr.validObservations) ?? 0,
+            missingSteps: asNumber(qr.missing_steps ?? qr.missingSteps ?? qr.missing_or_fill ?? qr.missingOrFill) ?? 0,
+            validFraction,
+            missingFraction:
+              asNumber(qr.missing_fraction ?? qr.missingFraction) ??
+              Math.max(0, 1 - validFraction),
+            qaScreenedOutCount:
+              asNumber(qr.qa_screened_out_count ?? qr.qaScreenedOutCount ?? qr.filtered_by_qa ?? qr.filteredByQa) ?? 0,
+            outOfRangeCount:
+              asNumber(qr.out_of_range_count ?? qr.outOfRangeCount ?? qr.out_of_physical_range ?? qr.outOfPhysicalRange) ?? 0,
+            warnings: asStringList(qr.warnings),
+          }
+        })
+        .filter((item): item is ParsedQualityReport => item !== null)
+    : Object.entries(asRecord(rawQualityReports) ?? {})
+        .map(([compositeKey, item]): ParsedQualityReport | null => {
+          const qr = asRecord(item)
+          if (!qr) return null
+          const sepIdx = compositeKey.indexOf(':')
+          const keyDatasetId = sepIdx >= 0 ? compositeKey.slice(0, sepIdx) : compositeKey
+          const keyVariableName = sepIdx >= 0 ? compositeKey.slice(sepIdx + 1) : ''
+          const validFraction = asNumber(qr.valid_fraction ?? qr.validFraction) ?? 0
+          return {
+            datasetId: asString(qr.dataset_id ?? qr.datasetId, keyDatasetId),
+            variableName: asString(qr.variable_name ?? qr.variableName, keyVariableName),
+            totalSteps: asNumber(qr.total_steps ?? qr.totalSteps ?? qr.total_observations ?? qr.totalObservations) ?? 0,
+            validSteps: asNumber(qr.valid_steps ?? qr.validSteps ?? qr.valid_observations ?? qr.validObservations) ?? 0,
+            missingSteps: asNumber(qr.missing_steps ?? qr.missingSteps ?? qr.missing_or_fill ?? qr.missingOrFill) ?? 0,
+            validFraction,
+            missingFraction:
+              asNumber(qr.missing_fraction ?? qr.missingFraction) ??
+              Math.max(0, 1 - validFraction),
+            qaScreenedOutCount:
+              asNumber(qr.qa_screened_out_count ?? qr.qaScreenedOutCount ?? qr.filtered_by_qa ?? qr.filteredByQa) ?? 0,
+            outOfRangeCount:
+              asNumber(qr.out_of_range_count ?? qr.outOfRangeCount ?? qr.out_of_physical_range ?? qr.outOfPhysicalRange) ?? 0,
+            warnings: asStringList(qr.warnings),
+          }
+        })
+        .filter((item): item is ParsedQualityReport => item !== null)
 
   const temporalSeries = asArray(root.temporal_series ?? root.temporalSeries)
     .map((item): ParsedTemporalSeries | null => {
@@ -739,9 +773,17 @@ export function parseScientificAssessmentResult(
   const prov = asRecord(root.provenance)
   const provenance: ParsedProvenanceRecord | null = prov
     ? {
+        traceId: asString(prov.trace_id ?? prov.traceId),
         inputDigestSha256: asString(prov.input_digest_sha256 ?? prov.inputDigestSha256),
         configDigestSha256: asString(prov.config_digest_sha256 ?? prov.configDigestSha256),
-        generatedAtUtc: asString(prov.generated_at_utc ?? prov.generatedAtUtc),
+        generatedAtUtc: asString(
+          prov.generated_at_utc ??
+            prov.generatedAtUtc ??
+            prov.created_at_utc ??
+            prov.createdAtUtc ??
+            root.created_at_utc ??
+            root.createdAtUtc,
+        ),
         datasetLineage: asArray(prov.dataset_lineage ?? prov.datasetLineage)
           .map((item) => asRecord(item))
           .filter((item): item is Record<string, unknown> => item !== null),
@@ -757,9 +799,9 @@ export function parseScientificAssessmentResult(
           })
           .filter((item): item is { methodId: string; version: string; name: string } => item !== null),
         packageVersions: Object.fromEntries(
-          Object.entries(asRecord(prov.package_versions ?? prov.packageVersions) ?? {}).filter(
-            (entry): entry is [string, string] => typeof entry[1] === 'string',
-          ),
+          Object.entries(
+            asRecord(prov.package_versions ?? prov.packageVersions ?? prov.software_versions ?? prov.softwareVersions) ?? {},
+          ).filter((entry): entry is [string, string] => typeof entry[1] === 'string'),
         ),
       }
     : null

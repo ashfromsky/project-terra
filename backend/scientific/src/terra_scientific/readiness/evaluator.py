@@ -470,14 +470,27 @@ def evaluate_assessment_readiness(
                     ref_bins[gk] += 1
 
             n_ref_years = len(ref_years)
-            suff_bins = sum(1 for c in ref_bins.values() if c >= min_bin_samples_req)
-            base_ok = n_ref_years >= min_years_req and suff_bins >= 1
+            expected_bins = set(bkeys)
+            suff_bins = sum(1 for gk in expected_bins if ref_bins.get(gk, 0) >= min_bin_samples_req)
+            base_ok = (
+                n_ref_years >= min_years_req
+                and len(expected_bins) > 0
+                and suff_bins == len(expected_bins)
+            )
             base_gap: str | None = None
             base_rem: str | None = None
             if not base_ok:
                 deficit_yrs = max(0, min_years_req - n_ref_years)
+                if deficit_yrs == 0 and len(expected_bins) > suff_bins:
+                    deficit_yrs = 1
+                anchor_dt = (
+                    request.analysis_start
+                    if request.baseline.baseline_type
+                    in {BaselineType.FIXED_REFERENCE, BaselineType.OUT_OF_SAMPLE}
+                    else (min(valid_ts) if valid_ts else request.analysis_start)
+                )
                 target_start = _subtract_years(
-                    min(valid_ts) if valid_ts else request.analysis_start,
+                    anchor_dt,
                     max(deficit_yrs, min_years_req),
                 )
                 earliest_dt = datetime(profile.earliest_archive_year, 1, 1, tzinfo=UTC)
@@ -500,7 +513,8 @@ def evaluate_assessment_readiness(
                 else:
                     base_gap = (
                         f"Reference has {n_ref_years} year(s) (need >= {min_years_req}); "
-                        f"{suff_bins} bin(s) reach >= {min_bin_samples_req} samples."
+                        f"{suff_bins}/{len(expected_bins)} bin(s) reach "
+                        f">= {min_bin_samples_req} samples."
                     )
                     base_rem = (
                         f"Expand period start to <= {eff_suggest:%Y-%m-%d} for "
@@ -523,7 +537,8 @@ def evaluate_assessment_readiness(
                         f"samples/stratum ({eff_base_grp.value})"
                     ),
                     actual_summary=(
-                        f"{n_ref_years} year(s), {suff_bins} sufficient {eff_base_grp.value} strata"
+                        f"{n_ref_years} year(s), {suff_bins}/{len(expected_bins)} sufficient "
+                        f"{eff_base_grp.value} strata"
                     ),
                     required_value=min_years_req,
                     actual_value=n_ref_years,

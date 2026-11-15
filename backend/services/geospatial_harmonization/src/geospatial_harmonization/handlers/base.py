@@ -264,6 +264,38 @@ def _raise_for_status(url: str, status_code: int, *, detail: str | None = None) 
             status_code=status_code,
         )
     if status_code == 403:
+        resolution_url: str | None = None
+        error_desc: str | None = None
+        if detail:
+            try:
+                parsed = json.loads(detail)
+                if isinstance(parsed, dict):
+                    resolution_url = parsed.get("resolution_url")
+                    error_desc = parsed.get("error_description") or parsed.get("error")
+            except (json.JSONDecodeError, TypeError):
+                m_res = re.search(
+                    r"https://urs\.earthdata\.nasa\.gov/approve_app[^\s\"'>)]*",
+                    detail,
+                )
+                if m_res:
+                    resolution_url = m_res.group(0).rstrip('"}')
+                if "EULA" in detail:
+                    error_desc = "EULA Acceptance Failure"
+
+        if resolution_url or error_desc:
+            desc_part = f" ({error_desc})" if error_desc else ""
+            res_part = (
+                f" Approve application authorization at: {resolution_url}" if resolution_url else ""
+            )
+            msg = (
+                f"NASA Earthdata authorization rejected (HTTP 403){desc_part} for {url}.{res_part}"
+            )
+            raise ProviderAuthorizationError(
+                msg,
+                status_code=status_code,
+                resolution_url=resolution_url,
+            )
+
         raise ProviderAuthorizationError(
             f"Authorization rejected (HTTP 403) for {url}{suffix}",
             status_code=status_code,
@@ -284,7 +316,7 @@ def _raise_for_status(url: str, status_code: int, *, detail: str | None = None) 
     )
 
 
-def _sanitize_error_snippet(body: bytes, max_chars: int = 240) -> str:
+def _sanitize_error_snippet(body: bytes, max_chars: int = 512) -> str:
     text = body[:1024].decode("utf-8", errors="replace")
     collapsed = re.sub(r"\s+", " ", text).strip()
     if len(collapsed) > max_chars:

@@ -4,6 +4,7 @@
 @import './explorer-stage.css';
 @import './explorer-bottom-compare.css';
 @import './workspace-scientific.css';
+@import './homepage.css';
 
 :root {
   color-scheme: light;
@@ -198,6 +199,9 @@ input:focus-visible,
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
   font-weight: 500;
   line-height: 1;
   white-space: nowrap;
@@ -775,7 +779,34 @@ input:focus-visible,
 .workspace-nav__right {
   display: flex;
   align-items: center;
-  gap: 20px;
+  gap: 16px;
+}
+
+.workspace-nav__github-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 10px;
+  border-radius: 6px;
+  border: 1px solid var(--color-border-subtle);
+  background-color: var(--color-bg-surface);
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  font-weight: 500;
+  text-decoration: none;
+  transition: all 0.15s ease;
+}
+
+.workspace-nav__github-link:hover {
+  background-color: var(--color-bg-mist);
+  color: var(--color-text-primary);
+  border-color: var(--color-border-control);
+}
+
+.workspace-nav__github-link:focus-visible {
+  outline: 2px solid var(--color-brand-teal);
+  outline-offset: 1px;
 }
 
 .workspace-nav__context-label {
@@ -2808,6 +2839,9 @@ input:focus-visible,
 }
 
 .workspace-spec-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
   padding: 10px 11px;
   border-radius: 6px;
   background-color: var(--color-bg-mist);
@@ -2819,7 +2853,6 @@ input:focus-visible,
   font-weight: 600;
   text-transform: uppercase;
   color: var(--color-text-muted);
-  margin-bottom: 4px;
 }
 
 .workspace-spec-item__value {
@@ -3096,6 +3129,8 @@ input:focus-visible,
 }
 
 .provenance-table-wrapper {
+  width: 100%;
+  max-width: 100%;
   overflow-x: auto;
 }
 

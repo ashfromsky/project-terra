@@ -170,7 +170,7 @@ jobs:
           docker compose --env-file .env.prod -f compose.prod.yaml build core ghs-migration
 
           echo "=== 3. Executing Database Migrations ==="
-          docker compose --env-file .env.prod -f compose.prod.yaml run --rm ghs-migration alembic upgrade head
+          docker compose --env-file .env.prod -f compose.prod.yaml run --rm -T ghs-migration alembic upgrade head < /dev/null
 
           echo "=== 4. Starting Production Services ==="
           docker compose --env-file .env.prod -f compose.prod.yaml up -d --remove-orphans postgres ghs-api ghs-worker core core-worker

@@ -145,14 +145,16 @@ export function buildComparisonOverlayChartOption(params: {
     animation: false,
     tooltip: { trigger: 'axis' },
     legend: {
+      type: 'scroll',
       top: 4,
+      left: 12,
       right: 12,
       textStyle: { color: '#536e77', fontSize: 11 },
     },
     grid: {
       left: 56,
       right: 24,
-      top: 42,
+      top: 64,
       bottom: 38,
     },
     xAxis: {
@@ -164,7 +166,9 @@ export function buildComparisonOverlayChartOption(params: {
     yAxis: {
       type: 'value',
       name: `${params.variableName}${unitSuffix}`,
-      nameTextStyle: { color: '#536e77', fontSize: 10 },
+      nameLocation: 'end',
+      nameGap: 14,
+      nameTextStyle: { color: '#536e77', fontSize: 10, align: 'left' },
       axisLabel: { color: '#536e77', fontSize: 10 },
       splitLine: { lineStyle: { color: '#eef3f5' } },
     },

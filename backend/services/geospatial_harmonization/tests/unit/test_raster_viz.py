@@ -576,3 +576,46 @@ def test_curated_scale_overrides_non_cf_hdf4_divisor(tmp_path: Path) -> None:
     merged = _merge_dataset_variable_spec("LST_Day_1km", decoded_spec, dataset)
 
     assert merged.scale_factor == 0.02
+
+
+def test_select_step_index_tolerates_mixed_naive_and_aware_timestamps() -> None:
+    from geospatial_harmonization.application.raster_viz import _select_step_index
+
+    naive_timestamps = ["2024-06-01T00:00:00", "2024-06-17T00:00:00"]
+    aware_timestamps = ["2024-06-01T00:00:00Z", "2024-06-17T00:00:00Z"]
+
+    assert _select_step_index(naive_timestamps, "2024-06-17T00:00:00Z") == 1
+    assert _select_step_index(aware_timestamps, "2024-06-17T00:00:00") == 1
+    assert _select_step_index(aware_timestamps, "2024-06-16T23:59:59Z") == 1
+
+
+def test_candidate_raster_assets_prefers_existing_files_and_falls_back(tmp_path: Path) -> None:
+    from dataclasses import replace
+
+    from geospatial_harmonization.application.raster_viz import _select_candidate_raster_assets
+
+    missing_cog = tmp_path / "missing_cog.tif"
+    existing_raw = tmp_path / "existing_raw.hdf"
+    existing_raw.write_bytes(b"dummy")
+
+    assets = [
+        AssetReference(
+            asset_id="missing-cog",
+            uri=missing_cog.as_uri(),
+            data_format="geotiff",
+            media_type="image/tiff",
+        ),
+        AssetReference(
+            asset_id="existing-raw",
+            uri=existing_raw.as_uri(),
+            data_format="hdf4",
+            media_type="application/x-hdf",
+            zone="raw",
+        ),
+    ]
+    ds = _make_dataset(asset=assets[0])
+    ds = replace(ds, assets=assets)
+
+    candidates = _select_candidate_raster_assets(ds)
+    assert candidates[0][0].asset_id == "existing-raw"
+    assert candidates[1][0].asset_id == "missing-cog"

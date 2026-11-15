@@ -15,7 +15,7 @@ import zlib
 from collections import OrderedDict
 from collections.abc import Mapping
 from dataclasses import replace
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 from urllib.parse import unquote, urlparse
@@ -402,9 +402,9 @@ _COLOR_RAMPS: dict[str, tuple[float, float, tuple[_ColorStop, ...]]] = {
         1.0,
         (
             (0.0, (223, 184, 146)),
-            (0.25, (231, 223, 186)),
-            (0.55, (162, 212, 180)),
-            (0.85, (21, 155, 145)),
+            (0.25, (217, 227, 163)),
+            (0.55, (116, 196, 118)),
+            (0.85, (35, 132, 67)),
             (1.0, (15, 92, 58)),
         ),
     ),
@@ -544,6 +544,16 @@ def _extract_timestamps_list(dataset: SpatialDataset, variable: str | None) -> l
     return []
 
 
+def _parse_utc_datetime(value: str) -> datetime | None:
+    try:
+        parsed = datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=UTC)
+    return parsed.astimezone(UTC)
+
+
 def _select_step_index(timestamps: list[str], timestamp: str | None) -> int:
     if not timestamps or not timestamp:
         return 0
@@ -552,16 +562,14 @@ def _select_step_index(timestamps: list[str], timestamp: str | None) -> int:
     for idx, ts in enumerate(timestamps):
         if ts == target or ts[:10] == target_date:
             return idx
-    try:
-        target_dt = datetime.fromisoformat(target.replace("Z", "+00:00"))
-    except ValueError:
+    target_dt = _parse_utc_datetime(target)
+    if target_dt is None:
         return 0
     best_idx = 0
     best_diff: float | None = None
     for idx, ts in enumerate(timestamps):
-        try:
-            dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
-        except ValueError:
+        dt = _parse_utc_datetime(ts)
+        if dt is None:
             continue
         diff = abs((dt - target_dt).total_seconds())
         if best_diff is None or diff < best_diff:
@@ -570,12 +578,13 @@ def _select_step_index(timestamps: list[str], timestamp: str | None) -> int:
     return best_idx
 
 
-def _select_raster_asset(
+def _select_candidate_raster_assets(
     dataset: SpatialDataset,
     *,
     timestamp: str | None = None,
     variable: str | None = None,
-) -> tuple[AssetReference, int]:
+    prefer_raw: bool = False,
+) -> list[tuple[AssetReference, int]]:
     if not dataset.assets:
         raise RasterAssetUnavailableError(f"Dataset '{dataset.dataset_id}' has no stored assets.")
     raster_assets = [a for a in dataset.assets if a.data_format in _SUPPORTED_RASTER_FORMATS]
@@ -585,16 +594,37 @@ def _select_raster_asset(
             f"Dataset '{dataset.dataset_id}' assets ({formats}) "
             "are not directly renderable raster formats."
         )
-    # Prefer a Cloud-Optimized GeoTIFF when the dataset also carries raw source
-    # granules; TiTiler can only read the former directly.
-    geotiff_assets = [a for a in raster_assets if a.data_format in {"geotiff", "cog"}]
-    if geotiff_assets:
-        raster_assets = geotiff_assets
+
     timestamps = _extract_timestamps_list(dataset, variable)
     step_idx = _select_step_index(timestamps, timestamp)
-    if len(raster_assets) == 1:
-        return raster_assets[0], step_idx
-    if timestamp:
+
+    def _is_asset_file_on_disk(a: AssetReference) -> bool:
+        if a.uri.startswith("file://"):
+            try:
+                p = Path(unquote(urlparse(a.uri).path))
+                return p.is_file()
+            except Exception:
+                return False
+        return True
+
+    def _var_match_score(a: AssetReference) -> int:
+        if not variable:
+            return 1
+        var_tokens = [
+            variable.lower(),
+            variable.lower().replace(" ", "_"),
+            variable.lower().replace(" ", "-"),
+        ]
+        haystack = f"{a.asset_id} {a.storage_key or ''} {a.uri}".lower()
+        if any(tok in haystack for tok in var_tokens):
+            return 2
+        if a.zone == "raw" or a.data_format in {"hdf4", "hdf5", "netcdf", "zarr"}:
+            return 1
+        return 0
+
+    def _time_match_score(a: AssetReference) -> int:
+        if not timestamp:
+            return 1
         date_str = timestamp[:10]
         compact_date = date_str.replace("-", "")
         julian_tokens: tuple[str, ...] = ()
@@ -604,16 +634,77 @@ def _select_raster_asset(
             julian_tokens = (f"A{yyyyddd}", yyyyddd)
         except ValueError:
             pass
-        for asset in raster_assets:
-            haystack = f"{asset.asset_id} {asset.storage_key or ''} {asset.uri}"
-            if (
-                compact_date in haystack
-                or date_str in haystack
-                or any(tok in haystack for tok in julian_tokens)
-            ):
-                return asset, 0
-    asset_idx = min(step_idx, len(raster_assets) - 1)
-    return raster_assets[asset_idx], 0
+        haystack = f"{a.asset_id} {a.storage_key or ''} {a.uri}"
+        if (
+            compact_date in haystack
+            or date_str in haystack
+            or any(tok in haystack for tok in julian_tokens)
+        ):
+            return 2
+        return 1
+
+    geotiff_assets = [a for a in raster_assets if a.data_format in {"geotiff", "cog"}]
+    raw_assets = [
+        a
+        for a in raster_assets
+        if a.zone == "raw" or a.data_format in {"hdf4", "hdf5", "netcdf", "zarr"}
+    ]
+    other_assets = [a for a in raster_assets if a not in geotiff_assets and a not in raw_assets]
+
+    def _sort_key(a: AssetReference) -> tuple[int, int]:
+        return (
+            _var_match_score(a),
+            _time_match_score(a),
+        )
+
+    geotiff_assets.sort(key=_sort_key, reverse=True)
+    raw_assets.sort(key=_sort_key, reverse=True)
+    other_assets.sort(key=_sort_key, reverse=True)
+
+    available_geotiff = [a for a in geotiff_assets if _is_asset_file_on_disk(a)]
+    missing_geotiff = [a for a in geotiff_assets if not _is_asset_file_on_disk(a)]
+
+    available_raw = [a for a in raw_assets if _is_asset_file_on_disk(a)]
+    missing_raw = [a for a in raw_assets if not _is_asset_file_on_disk(a)]
+
+    available_other = [a for a in other_assets if _is_asset_file_on_disk(a)]
+    missing_other = [a for a in other_assets if not _is_asset_file_on_disk(a)]
+
+    if prefer_raw:
+        available = available_raw + available_geotiff + available_other
+        missing = missing_raw + missing_geotiff + missing_other
+    else:
+        available = available_geotiff + available_raw + available_other
+        missing = missing_geotiff + missing_raw + missing_other
+
+    ordered = available + missing
+
+    seen: set[str] = set()
+    unique_candidates: list[tuple[AssetReference, int]] = []
+    for a in ordered:
+        if a.asset_id not in seen:
+            seen.add(a.asset_id)
+            s_idx = 0 if timestamp and _time_match_score(a) == 2 else step_idx
+            unique_candidates.append((a, s_idx))
+
+    if not unique_candidates:
+        raise RasterAssetUnavailableError(
+            f"Dataset '{dataset.dataset_id}' has no matching raster assets."
+        )
+    return unique_candidates
+
+
+def _select_raster_asset(
+    dataset: SpatialDataset,
+    *,
+    timestamp: str | None = None,
+    variable: str | None = None,
+    prefer_raw: bool = False,
+) -> tuple[AssetReference, int]:
+    candidates = _select_candidate_raster_assets(
+        dataset, timestamp=timestamp, variable=variable, prefer_raw=prefer_raw
+    )
+    return candidates[0]
 
 
 def _local_path_from_uri(uri: str) -> Path | None:
@@ -1095,7 +1186,7 @@ async def render_dataset_tile(
     unit_conversion: str | None = None,
 ) -> bytes:
     """Render an XYZ 256x256 PNG tile for a persisted raster dataset."""
-    asset, step_idx = _select_raster_asset(dataset, timestamp=timestamp, variable=variable)
+    candidates = _select_candidate_raster_assets(dataset, timestamp=timestamp, variable=variable)
     tile_3857 = tile_bounds_3857(z, x, y)
     ds_wgs84 = _dataset_wgs84_bounds(dataset)
     if ds_wgs84 is not None:
@@ -1106,47 +1197,66 @@ async def render_dataset_tile(
             return _transparent_png(256, 256)
 
     dst_bounds = SpatialBounds(*tile_3857)
-    if _get_cached_decoded(dataset, asset) is not None:
-        return await asyncio.to_thread(
-            _render_sync,
-            asset=asset,
-            asset_path=None,
-            readers=readers,
-            dataset=dataset,
-            dst_bounds=dst_bounds,
-            dst_crs="EPSG:3857",
-            width=256,
-            height=256,
-            step_idx=step_idx,
-            variable=variable,
-            colormap=colormap,
-            vmin=vmin,
-            vmax=vmax,
-            unit_conversion=unit_conversion,
-        )
+    last_exc: Exception | None = None
+    for asset, step_idx in candidates:
+        if _get_cached_decoded(dataset, asset) is not None:
+            try:
+                return await asyncio.to_thread(
+                    _render_sync,
+                    asset=asset,
+                    asset_path=None,
+                    readers=readers,
+                    dataset=dataset,
+                    dst_bounds=dst_bounds,
+                    dst_crs="EPSG:3857",
+                    width=256,
+                    height=256,
+                    step_idx=step_idx,
+                    variable=variable,
+                    colormap=colormap,
+                    vmin=vmin,
+                    vmax=vmax,
+                    unit_conversion=unit_conversion,
+                )
+            except Exception as exc:
+                last_exc = exc
+                continue
 
-    with tempfile.TemporaryDirectory(prefix="ghs-tile-", dir=_scratch_base()) as tmp_root:
-        handle = await _materialize_asset(asset, storage, Path(tmp_root))
-        try:
-            return await asyncio.to_thread(
-                _render_sync,
-                asset=asset,
-                asset_path=handle.path,
-                readers=readers,
-                dataset=dataset,
-                dst_bounds=dst_bounds,
-                dst_crs="EPSG:3857",
-                width=256,
-                height=256,
-                step_idx=step_idx,
-                variable=variable,
-                colormap=colormap,
-                vmin=vmin,
-                vmax=vmax,
-                unit_conversion=unit_conversion,
-            )
-        finally:
-            handle.release()
+        with tempfile.TemporaryDirectory(prefix="ghs-tile-", dir=_scratch_base()) as tmp_root:
+            try:
+                handle = await _materialize_asset(asset, storage, Path(tmp_root))
+            except (RasterAssetUnavailableError, FileNotFoundError, OSError) as exc:
+                last_exc = exc
+                continue
+            try:
+                return await asyncio.to_thread(
+                    _render_sync,
+                    asset=asset,
+                    asset_path=handle.path,
+                    readers=readers,
+                    dataset=dataset,
+                    dst_bounds=dst_bounds,
+                    dst_crs="EPSG:3857",
+                    width=256,
+                    height=256,
+                    step_idx=step_idx,
+                    variable=variable,
+                    colormap=colormap,
+                    vmin=vmin,
+                    vmax=vmax,
+                    unit_conversion=unit_conversion,
+                )
+            except Exception as exc:
+                last_exc = exc
+                continue
+            finally:
+                handle.release()
+
+    if last_exc:
+        raise last_exc
+    raise RasterAssetUnavailableError(
+        f"No usable raster assets available for dataset '{dataset.dataset_id}'."
+    )
 
 
 async def render_dataset_bbox(
@@ -1166,30 +1276,45 @@ async def render_dataset_bbox(
     unit_conversion: str | None = None,
 ) -> bytes:
     """Render a georeferenced RGBA PNG image for a bounding box over a raster dataset."""
-    asset, step_idx = _select_raster_asset(dataset, timestamp=timestamp, variable=variable)
+    candidates = _select_candidate_raster_assets(dataset, timestamp=timestamp, variable=variable)
     dst_bounds = SpatialBounds(*bbox)
-    with tempfile.TemporaryDirectory(prefix="ghs-bbox-", dir=_scratch_base()) as tmp_root:
-        handle = await _materialize_asset(asset, storage, Path(tmp_root))
-        try:
-            return await asyncio.to_thread(
-                _render_sync,
-                asset=asset,
-                asset_path=handle.path,
-                readers=readers,
-                dataset=dataset,
-                dst_bounds=dst_bounds,
-                dst_crs=crs,
-                width=width,
-                height=height,
-                step_idx=step_idx,
-                variable=variable,
-                colormap=colormap,
-                vmin=vmin,
-                vmax=vmax,
-                unit_conversion=unit_conversion,
-            )
-        finally:
-            handle.release()
+    last_exc: Exception | None = None
+    for asset, step_idx in candidates:
+        with tempfile.TemporaryDirectory(prefix="ghs-bbox-", dir=_scratch_base()) as tmp_root:
+            try:
+                handle = await _materialize_asset(asset, storage, Path(tmp_root))
+            except (RasterAssetUnavailableError, FileNotFoundError, OSError) as exc:
+                last_exc = exc
+                continue
+            try:
+                return await asyncio.to_thread(
+                    _render_sync,
+                    asset=asset,
+                    asset_path=handle.path,
+                    readers=readers,
+                    dataset=dataset,
+                    dst_bounds=dst_bounds,
+                    dst_crs=crs,
+                    width=width,
+                    height=height,
+                    step_idx=step_idx,
+                    variable=variable,
+                    colormap=colormap,
+                    vmin=vmin,
+                    vmax=vmax,
+                    unit_conversion=unit_conversion,
+                )
+            except Exception as exc:
+                last_exc = exc
+                continue
+            finally:
+                handle.release()
+
+    if last_exc:
+        raise last_exc
+    raise RasterAssetUnavailableError(
+        f"No usable raster assets available for dataset '{dataset.dataset_id}'."
+    )
 
 
 def _evaluate_qa_pass(product: str, qa_code: float | int, qa_var_name: str = "") -> bool | None:
@@ -1444,22 +1569,37 @@ async def query_dataset_point(
     unit_conversion: str | None = None,
 ) -> dict[str, Any]:
     """Sample exact native grid pixel value and QA metadata at WGS 84 (lon, lat)."""
-    asset, step_idx = _select_raster_asset(dataset, timestamp=timestamp, variable=variable)
-    with tempfile.TemporaryDirectory(prefix="ghs-pt-", dir=_scratch_base()) as tmp_root:
-        handle = await _materialize_asset(asset, storage, Path(tmp_root))
-        try:
-            return await asyncio.to_thread(
-                _point_query_sync,
-                asset=asset,
-                asset_path=handle.path,
-                readers=readers,
-                dataset=dataset,
-                lon=lon,
-                lat=lat,
-                step_idx=step_idx,
-                variable=variable,
-                timestamp=timestamp,
-                unit_conversion=unit_conversion,
-            )
-        finally:
-            handle.release()
+    candidates = _select_candidate_raster_assets(dataset, timestamp=timestamp, variable=variable)
+    last_exc: Exception | None = None
+    for asset, step_idx in candidates:
+        with tempfile.TemporaryDirectory(prefix="ghs-pt-", dir=_scratch_base()) as tmp_root:
+            try:
+                handle = await _materialize_asset(asset, storage, Path(tmp_root))
+            except (RasterAssetUnavailableError, FileNotFoundError, OSError) as exc:
+                last_exc = exc
+                continue
+            try:
+                return await asyncio.to_thread(
+                    _point_query_sync,
+                    asset=asset,
+                    asset_path=handle.path,
+                    readers=readers,
+                    dataset=dataset,
+                    lon=lon,
+                    lat=lat,
+                    step_idx=step_idx,
+                    variable=variable,
+                    timestamp=timestamp,
+                    unit_conversion=unit_conversion,
+                )
+            except Exception as exc:
+                last_exc = exc
+                continue
+            finally:
+                handle.release()
+
+    if last_exc:
+        raise last_exc
+    raise RasterAssetUnavailableError(
+        f"No usable raster assets available for dataset '{dataset.dataset_id}'."
+    )

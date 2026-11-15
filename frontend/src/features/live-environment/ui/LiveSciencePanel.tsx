@@ -333,8 +333,9 @@ export function LiveSciencePanel() {
             Calculate NDVI series ({selectedAoi ? 'selected AOI' : 'no AOI'})
           </button>
           <p className="explorer-resolution-note">
-            Reads at most 12 MODIS composites intersecting the AOI from Planetary Computer; values
-            are scaled source pixels, not GIBS colours.
+            Reads at most 12 MODIS composites intersecting the AOI directly from Planetary Computer
+            in your browser. Subject to Microsoft&apos;s public API rate limits (HTTP 429). For
+            instant server-side physical analysis with zero rate limits, use the <strong>AOI</strong> tab.
           </p>
         </div>
 

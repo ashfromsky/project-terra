@@ -184,3 +184,87 @@ def test_analytics_zonal_statistics(client: TestClient, mock_ghs_app: FastAPI) -
         json={"metricId": "ndvi"},
     )
     assert bad_resp.status_code == 422
+
+
+def test_analytics_zonal_statistics_camel_case_upstream(client: TestClient) -> None:
+    """Verify Core parses camelCase fields (validPixelCount, etc.) returned by GHS."""
+    geotiff_dataset = {
+        "dataset_id": "ds-ndvi-cog-2",
+        "source_id": "modis_terra_vegetation",
+        "provider": "nasa_earthdata",
+        "product": "MOD13Q1.061",
+        "variables": {"250m 16 days NDVI": {"name": "250m 16 days NDVI", "units": "dimensionless"}},
+        "units": {"250m 16 days NDVI": "dimensionless"},
+        "spatial_metadata": {"crs": "EPSG:4326", "bounds": [-41.0, -10.0, -39.0, -8.0]},
+        "assets": [{"data_format": "geotiff", "storage_key": "cogs/ds-ndvi-cog-2/ndvi.tif"}],
+    }
+
+    def handle_ghs(request: httpx.Request) -> httpx.Response:
+        path = request.url.path
+        if path == "/api/v1/datasets":
+            return httpx.Response(200, json=[geotiff_dataset])
+        if path == "/api/v1/datasets/ds-ndvi-cog-2/zonal-statistics":
+            return httpx.Response(
+                200,
+                json={
+                    "datasetId": "ds-ndvi-cog-2",
+                    "variableName": "250m 16 days NDVI",
+                    "timestamp": "2024-06-01",
+                    "validPixelCount": 1234,
+                    "totalPixelCount": 2000,
+                    "validDataCoverage": 0.617,
+                    "approxAreaKm2": 250.25,
+                    "mean": 0.75,
+                    "median": 0.77,
+                    "min": 0.2,
+                    "max": 0.95,
+                    "std": 0.05,
+                    "q10": 0.6,
+                    "q25": 0.7,
+                    "q75": 0.8,
+                    "q90": 0.85,
+                    "histogram": {"bins": [0.5, 0.75], "counts": [500, 734]},
+                },
+            )
+        return httpx.Response(404, json={"detail": "Not found in mock GHS"})
+
+    transport = httpx.MockTransport(handle_ghs)
+    app = cast(FastAPI, client.app)
+
+    layer_service = LayerCatalogService(
+        StaticLayerCatalogRepository(),
+        ghs_base_url="https://mock-ghs.internal",
+        ghs_transport=transport,
+    )
+    analytics_service = AnalyticsService(
+        layer_service,
+        ghs_base_url="https://mock-ghs.internal",
+        ghs_transport=transport,
+    )
+
+    app.dependency_overrides[get_layer_service] = lambda: layer_service
+    app.dependency_overrides[get_analytics_service] = lambda: analytics_service
+
+    geometry = {
+        "type": "Polygon",
+        "coordinates": [
+            [
+                [-40.5, -9.5],
+                [-39.5, -9.5],
+                [-39.5, -8.5],
+                [-40.5, -8.5],
+                [-40.5, -9.5],
+            ]
+        ],
+    }
+    resp = client.post(
+        "/api/v1/analytics/zonal-statistics",
+        json={"metricId": "ndvi", "date": "2024-06-01", "geometry": geometry},
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["validPixelCount"] == 1234
+    assert data["totalPixelCount"] == 2000
+    assert data["validDataCoverage"] == 0.617
+    assert data["approxAreaKm2"] == 250.25
+    assert data["mean"] == 0.75

@@ -52,7 +52,7 @@ OBSERVATION_LAYERS: tuple[LayerDefinition, ...] = (
             mid_label="0.5",
             max_label="1.0",
             gradient_css=(
-                "linear-gradient(90deg, #dfb892 0%, #e7dfba 32%, #a2d4b4 68%, #159b91 100%)"
+                "linear-gradient(90deg, #dfb892 0%, #d9e3a3 32%, #74c476 68%, #238443 100%)"
             ),
             nodata_color="#d0dbe0",
             nodata_label="NoData / QA masked",

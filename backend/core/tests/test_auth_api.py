@@ -232,3 +232,92 @@ def test_github_login_and_callback_support_post_method() -> None:
         assert "terra_session" in cb_post_json.headers.get("set-cookie", "")
         assert client.get("/api/v1/auth/me").status_code == 200
         assert client.get("/api/v1/auth/me").json()["githubLogin"] == "post-user"
+
+
+def test_github_callback_preserves_forwarded_host_origin() -> None:
+    stub = StubGitHubClient(GitHubProfile(github_id=999, github_login="forwarded-user"))
+    app = create_app(
+        Settings(
+            environment="test",
+            database_url="sqlite+aiosqlite:///:memory:",
+            github_client_id="cid",
+            github_client_secret="csec",
+            frontend_auth_redirect_url="https://api-terra.yappin.studio/explore",
+            cors_origins=["https://project-terra.pages.dev", "https://api-terra.yappin.studio"],
+        )
+    )
+    app.dependency_overrides[get_github_oauth_client] = lambda: stub
+
+    with TestClient(app) as client:
+        login_resp = client.get(
+            "/api/v1/auth/github/login",
+            params={"redirect": "true", "returnTo": "/assessments"},
+            follow_redirects=False,
+        )
+        state = _extract_state(login_resp.headers["location"])
+
+        cb_resp = client.get(
+            "/api/v1/auth/github/callback",
+            params={"code": "c", "state": state},
+            headers={
+                "X-Forwarded-Host": "project-terra.pages.dev",
+                "X-Forwarded-Proto": "https",
+            },
+            follow_redirects=False,
+        )
+        assert cb_resp.status_code == 302
+        # Redirect must stay on project-terra.pages.dev where cookie is accepted!
+        assert cb_resp.headers["location"] == "https://project-terra.pages.dev/assessments"
+
+
+def test_auto_researcher_session_when_enabled() -> None:
+    app = create_app(
+        Settings(
+            environment="test",
+            database_url="sqlite+aiosqlite:///:memory:",
+            github_client_id="cid",
+            github_client_secret="csec",
+            auto_researcher_session=True,
+        )
+    )
+
+    with TestClient(app) as client:
+        # Request without cookies auto-provisions researcher session
+        resp = client.get("/api/v1/auth/me")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["githubLogin"] == "ashfromsky"
+        assert "terra_session" in resp.headers.get("set-cookie", "")
+
+        # Even after logout or without any credentials, auto_researcher_session preserves access
+        logout_resp = client.post("/api/v1/auth/logout")
+        assert logout_resp.status_code == 200
+
+        logged_out_me = client.get("/api/v1/auth/me")
+        assert logged_out_me.status_code == 200
+        assert logged_out_me.json()["githubLogin"] == "ashfromsky"
+
+        # Endpoints requiring authentication resolve the auto-researcher user
+        assessments_resp = client.get("/api/v1/assessments")
+        assert assessments_resp.status_code == 200
+        assert assessments_resp.json() == []
+
+
+def test_auth_me_returns_401_when_auto_researcher_session_disabled() -> None:
+    app = create_app(
+        Settings(
+            environment="test",
+            database_url="sqlite+aiosqlite:///:memory:",
+            github_client_id="cid",
+            github_client_secret="csec",
+            auto_researcher_session=False,
+        )
+    )
+
+    with TestClient(app) as client:
+        resp = client.get("/api/v1/auth/me")
+        assert resp.status_code == 401
+        assert resp.json()["detail"] == "Authentication required"
+
+        assessments_resp = client.get("/api/v1/assessments")
+        assert assessments_resp.status_code == 401

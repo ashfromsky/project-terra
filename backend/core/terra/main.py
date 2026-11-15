@@ -14,9 +14,9 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from terra import __version__
@@ -92,6 +92,20 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     app.include_router(health_router)
     app.include_router(api_router, prefix=settings.api_v1_prefix)
+
+    @app.exception_handler(Exception)
+    async def global_unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
+        logger.exception(
+            "Unhandled server error processing %s %s: %s",
+            request.method,
+            request.url.path,
+            exc,
+        )
+        return JSONResponse(
+            status_code=500,
+            content={"detail": "Internal server error occurred. Please retry shortly."},
+        )
+
     _mount_frontend(app, settings)
 
     return app
@@ -110,7 +124,7 @@ def _mount_frontend(app: FastAPI, settings: Settings) -> None:
     if assets_dir.is_dir():
         app.mount("/assets", StaticFiles(directory=assets_dir), name="frontend-assets")
 
-    @app.get("/{full_path:path}", include_in_schema=False)
+    @app.api_route("/{full_path:path}", methods=["GET", "HEAD"], include_in_schema=False)
     async def frontend_fallback(full_path: str) -> FileResponse:
         # Never turn an unknown API/health path into the SPA shell.
         if full_path.startswith(("api/", "health")):
@@ -120,9 +134,12 @@ def _mount_frontend(app: FastAPI, settings: Settings) -> None:
             candidate.relative_to(dist_dir)
         except ValueError:
             raise HTTPException(status_code=404, detail="Not Found") from None
-        if candidate.is_file():
+        if candidate.is_file() and candidate != index_path:
             return FileResponse(candidate)
-        return FileResponse(index_path)
+        return FileResponse(
+            index_path,
+            headers={"Cache-Control": "no-cache, must-revalidate"},
+        )
 
 
 app = create_app()

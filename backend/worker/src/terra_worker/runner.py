@@ -4,6 +4,7 @@ import asyncio
 import logging
 from collections.abc import Callable
 
+import terra.infrastructure.database.models  # noqa: F401
 from terra.config import Settings, get_settings
 from terra.infrastructure.database import DatabaseManager
 from terra.infrastructure.object_storage import ObjectStoragePort, build_core_object_storage

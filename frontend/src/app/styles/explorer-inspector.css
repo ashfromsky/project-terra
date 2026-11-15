@@ -65,7 +65,7 @@
 
 .explorer-tabs {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   border-bottom: 1px solid var(--color-border-subtle);
   background-color: var(--color-bg-canvas);
   flex-shrink: 0;
@@ -92,6 +92,7 @@
   display: flex;
   flex-direction: column;
   gap: 10px;
+  min-width: 0;
 }
 
 .explorer-empty-card,
@@ -103,6 +104,8 @@
   display: flex;
   flex-direction: column;
   gap: 8px;
+  min-width: 0;
+  max-width: 100%;
 }
 
 .explorer-empty-card {
@@ -444,6 +447,7 @@
   display: flex;
   flex-direction: column;
   gap: 4px;
+  min-width: 0;
 }
 
 .explorer-analysis-field > span {
@@ -453,6 +457,8 @@
 }
 
 .explorer-analysis-field > input {
+  width: 100%;
+  min-width: 0;
   height: 30px;
   padding: 0 8px;
   border: 1px solid var(--color-border-control);
@@ -499,6 +505,7 @@
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
+  flex-wrap: wrap;
   gap: 8px;
 }
 
@@ -515,12 +522,14 @@
   gap: 7px;
   padding-top: 10px;
   border-top: 1px solid var(--color-border-subtle);
+  min-width: 0;
 }
 
 .live-science-section__head {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
+  flex-wrap: wrap;
   gap: 8px;
 }
 
@@ -535,6 +544,8 @@
 }
 
 .explorer-analysis-field select {
+  width: 100%;
+  min-width: 0;
   height: 30px;
   padding: 0 6px;
   border: 1px solid var(--color-border-control);

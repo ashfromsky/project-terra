@@ -187,68 +187,38 @@ The map is an **AOI and preview interface**. Scientific analysis never depends o
 
 ## Architecture
 
-TERRA is a modular monolith for Core plus two isolated execution boundaries: **GHS** for heavy geospatial ingestion (ADR-0002) and **terra-scientific** for pure, independently testable algorithms.
+TERRA combines a **React SPA** with a **FastAPI modular monolith (`terra-core`)** and two isolated execution boundaries: **`terra-scientific`** (a pure Python math library called in-memory for readiness, comparisons, and assessment execution) and **GHS** ([ADR-0002](docs/adr/0002-geospatial-harmonization-service.md), an isolated geospatial ingestion, harmonization, and TiTiler service encapsulating GDAL/HDF/rasterio).
 
-```mermaid
-flowchart LR
-    subgraph Browser["Frontend — React 19 / Vite"]
-        UI["Map Explorer · Assessments<br/>Data Sources · Reports"]
-    end
+<img src="docs/assets/architecture/current-implemented-architecture.jpg" alt="PROJECT TERRA current implemented architecture on the deploy branch: Frontend SPA, Ingress & Same-Origin Hosting, Core Backend, Core Worker, Scientific Core, Core DB, Object Storage, and isolated GHS with GHS API, embedded TiTiler, GHS Worker, and GHS DB" width="100%">
 
-    subgraph Core["backend/core — terra-core"]
-        API["FastAPI /api/v1"]
-        APP["Application services"]
-        DB[("Core DB<br/>PostgreSQL / SQLite dev")]
-        OBJ[("Object storage<br/>local / S3 · R2")]
-    end
+<p align="center"><sub>As-built architecture on the <code>deploy</code> branch: browser-native GIBS visualization alongside the Core modular monolith, pure Scientific Core, isolated GHS (ADR-0002), and dual-database / object-storage persistence.</sub></p>
 
-    subgraph GHS["backend/services/geospatial_harmonization"]
-        GAPI["GHS API"]
-        GW["GHS Worker"]
-        GDB[("GHS DB")]
-        GST[("Raster / object storage")]
-    end
+### Architectural boundaries & data flow
 
-    subgraph Sci["backend/scientific — terra-scientific"]
-        SC["Pure Scientific Core"]
-    end
-
-    Worker["backend/worker — terra-worker"]
-    Providers["NASA MODIS · GPM · SMAP · POWER"]
-
-    UI -->|OpenAPI-typed REST| API
-    API --> APP
-    APP --> DB
-    APP --> OBJ
-    APP -->|HTTP| GAPI
-    Worker --> DB
-    Worker --> OBJ
-    Worker -->|HTTP| GAPI
-    Worker --> SC
-    GAPI --> GDB
-    GAPI --> GST
-    GW --> GDB
-    GW --> GST
-    GAPI -->|CMR / Earthdata| Providers
-```
+- **Ingress & dual hosting model:** In production, traffic enters through a Cloudflare Tunnel to `terra-core` on port `8000`, which serves the compiled Vite SPA from `/app/web` on the same origin (or via decoupled Cloudflare Pages); in local development, Vite (`5173`) proxies `/api` and `/health` to Core (`8000`).
+- **Core Backend (`terra-core`):** FastAPI modular monolith (`auth`, `regions`, `layers`, `analytics`, `data_sources`, `assessments`, plus TiTiler tile/analytics proxy). Handles GitHub OAuth 2.0 (plus `dev-session` in development), reads/writes `users`, `regions`, and queued `assessments` in **Core DB** (PostgreSQL 16 in production, SQLite fallback in dev; no Alembic or PostGIS yet), and calls **Scientific Core** in-memory for readiness and assessment comparisons.
+- **Core Worker (`terra-worker`):** Async runner that claims queued jobs from Core DB via `claim_next_queued()` (`FOR UPDATE SKIP LOCKED` on PostgreSQL, atomic conditional update on SQLite), resolves prepared datasets over internal HTTP from GHS (`GET /api/v1/datasets/{id}` and presigned object-store downloads), runs `terra-scientific` in-memory, and writes `result.json` + `provenance.json` under `core/` in **Object Storage**.
+- **Isolated GHS (`ADR-0002`):** Internal-only FastAPI API (`:8080`) with embedded **TiTiler** for dynamic COG tile streaming and zonal statistics, backed by its own **GHS DB** (PostgreSQL 16 / SQLite with Alembic `0003` migrations for `jobs`, `datasets`, and `ledger`). **GHS Worker** claims ingestion jobs via `SKIP LOCKED`, fetches granules from **NASA Earthdata / CMR-DAAC** (MODIS, GPM IMERG, SMAP) and **NASA POWER**, runs `TargetGrid`, `temporal.py`, and `CogPublisher`, and writes COGs/datasets across `raw/`, `intermediate/`, and `derived/` zones in Object Storage.
+- **Browser-direct visualization boundary:** The Frontend SPA loads pre-rendered WMTS tiles directly from **NASA GIBS CDN** strictly for visual context — never as quantitative input.
 
 ### Component responsibilities
 
-| Component | Runtime | Responsibility |
+| Component | Runtime & Storage | Responsibility |
 | :--- | :--- | :--- |
-| **Frontend** | React 19, Vite 8, MapLibre 5, deck.gl, TanStack Query, Zustand, ECharts 6 | Map/AOI interaction, live environmental layers, browser-side science panels, assessment configuration, readiness and result visualization, reports. |
-| **terra-core** | FastAPI, Granian, SQLAlchemy async, Pydantic | Auth, regions, layers, data-source proxy, assessment orchestration, readiness, artifacts, comparison. |
-| **terra-scientific** | Pure Python, NumPy, Pandas, SciPy, Pydantic | Deterministic scientific methods and contracts. No HTTP, database, storage, or UI dependencies. |
-| **terra-worker** | Async queue runner | Claims queued assessments, fetches prepared GHS datasets, runs Scientific Core, persists results and artifacts. |
-| **GHS** | FastAPI, Granian, rasterio/xarray/h5py/netCDF4/Zarr/Shapely | Multi-provider discovery, bounded ingestion, QA, temporal harmonization, COG publishing, tile and zonal-statistics services. |
-| **PostgreSQL** | Production / Docker | Shared Core and GHS database engine with isolated databases and migrations. |
-| **Object storage** | Local filesystem or S3-compatible | Assessment artifacts and GHS raster/object lifecycle. |
+| **Frontend SPA** | React 19, TypeScript, Vite 8, deck.gl 9, MapLibre 5, ECharts 6, TanStack Query, Zustand | 7 routes, OpenAPI-typed REST client, Map/AOI interaction, direct NASA GIBS layers, browser-side science Web Worker, readiness & assessment UI, comparison, reports. |
+| **Ingress & Hosting** | Cloudflare Tunnel → Core `:8000` (`/app/web`) or Cloudflare Pages; Vite proxy (`5173 → 8000`) in dev | TLS termination, same-origin SPA delivery without CORS overhead, API/health routing. |
+| **Core Backend (`terra-core`)** | FastAPI, Granian, SQLAlchemy async, Pydantic (`:8000`) | 6 domain modules (`auth`, `regions`, `layers`, `analytics`, `data_sources`, `assessments`), TiTiler proxy, GitHub OAuth 2.0, in-memory `readiness` & `compare` calls to `terra-scientific`, artifact downloads. |
+| **Scientific Core (`terra-scientific`)** | Pure Python, NumPy, Pandas, SciPy, Pydantic | 15 implemented P0/P1 deterministic methods, 4 separated resilience dimensions, SHA-256 provenance (P2 TRI/CSD/causal attribution deferred). Zero HTTP, DB, storage, or UI dependencies. |
+| **Core Worker (`terra-worker`)** | Async Python queue runner | Claims queued assessments (`SKIP LOCKED` / atomic SQLite), fetches GHS datasets, executes `terra-scientific` in-memory, persists `result.json` and `provenance.json` artifacts. |
+| **GHS (`ADR-0002`)** | FastAPI + embedded TiTiler (`:8080`), `GHS Worker`, rasterio/xarray/GDAL/HDF/Zarr/Shapely | Internal-only discovery, job orchestration, MODIS/GPM/SMAP/POWER handlers, `TargetGrid` + `temporal.py` + `CogPublisher`, COG tile rendering, and physical zonal statistics. |
+| **Databases (`Core DB` / `GHS DB`)** | PostgreSQL 16 (prod) / SQLite (dev) | Isolated persistence: Core DB stores `users`, `regions`, `assessments`; GHS DB (Alembic `0003`) tracks `jobs`, `datasets`, and storage `ledger`. |
+| **Object Storage** | Local filesystem (dev) / Cloudflare R2 (prod) | `core/` assessment result & provenance artifacts + GHS `raw/`, `intermediate/`, and `derived/` raster zones with presigned downloads. |
 
 ### Repository layout
 
 ```text
 project-terra/
-├── frontend/                         # React 19 SPA (FSD-lite)
+├── frontend/                          # React 19 SPA (FSD-lite)
 │   ├── src/features/live-environment/ # GIBS catalog, POWER/MODIS COG adapters, Web Worker
 │   ├── src/features/map-explorer/     # AOI workspace, drawing, scientific assessment launcher
 │   ├── src/pages/assessments/         # Readiness, execution, results, diagnostics
@@ -260,7 +230,7 @@ project-terra/
 │   └── services/
 │       └── geospatial_harmonization/  # GHS service, readers, handlers, workers, migrations
 ├── deploy/containerization/           # Docker Compose, production Dockerfiles, deploy scripts
-├── docs/                              # Architecture, ADRs, scientific specification, screenshots
+├── docs/                              # Architecture diagrams, ADRs, scientific specs, screenshots
 ├── scripts/                           # Orchestrator, doctor, contract generation
 └── Makefile                           # Unified install/test/lint/dev commands
 ```

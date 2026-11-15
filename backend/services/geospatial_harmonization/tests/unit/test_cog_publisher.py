@@ -205,3 +205,50 @@ def test_physical_array_conversion_guards_against_double_scaling() -> None:
     assert np.isclose(phys2[0], 0.5)
     assert np.isclose(phys2[1], 0.8)
     assert np.isnan(phys2[2])
+
+    # Scaled integer with physical valid range (-0.2, 1.0) must not mask out valid DNs
+    spec_phys_range = VariableSpec(
+        name="ndvi",
+        units="unitless",
+        dtype="int16",
+        dimensions=("y", "x"),
+        semantics="continuous_intensive",
+        scale_factor=0.0001,
+        nodata=-3000,
+        valid_range=(-0.2, 1.0),
+    )
+    phys3, _ = _to_physical_array(raw_int, spec_phys_range, dataset)
+    assert np.isclose(phys3[0], 0.5)
+    assert np.isclose(phys3[1], 0.8)
+    assert np.isnan(phys3[2])
+
+
+async def test_cog_publisher_serializes_concurrent_publish_for_same_key(
+    tmp_path: Path, monkeypatch
+) -> None:
+    import asyncio
+
+    storage = LocalObjectStore(tmp_path / "storage")
+    readers = build_default_reader_registry()
+    raw_arr = np.array([[6000, 7000], [5000, 8000]], dtype=np.int16)
+    dataset, _ = _make_synthetic_modis_dataset(tmp_path, raw_arr)
+
+    publisher = CogPublisher(storage=storage, readers=readers)
+    convert_calls = 0
+    original_convert = publisher._convert_to_cog_file
+
+    def counting_convert(*args, **kwargs):  # type: ignore[no-untyped-def]
+        nonlocal convert_calls
+        convert_calls += 1
+        return original_convert(*args, **kwargs)
+
+    monkeypatch.setattr(publisher, "_convert_to_cog_file", counting_convert)
+
+    res1, res2, res3 = await asyncio.gather(
+        publisher.get_or_publish_cog(dataset, variable="250m_16_days_NDVI"),
+        publisher.get_or_publish_cog(dataset, variable="250m_16_days_NDVI"),
+        publisher.get_or_publish_cog(dataset, variable="250m_16_days_NDVI"),
+    )
+    assert convert_calls == 1
+    assert sum(1 for r in (res1, res2, res3) if not r.is_reused) == 1
+    assert sum(1 for r in (res1, res2, res3) if r.is_reused) == 2

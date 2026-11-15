@@ -173,7 +173,7 @@ export interface paths {
         };
         /**
          * Me
-         * @description Return the profile of the currently authenticated user.
+         * @description Return the currently authenticated profile or auto-provision a researcher session.
          */
         get: operations["me_api_v1_auth_me_get"];
         put?: never;

@@ -6,6 +6,7 @@
   background-color: var(--color-bg-surface);
   border-top: 1px solid var(--color-border-subtle);
   flex-shrink: 0;
+  overflow: hidden;
 }
 
 .explorer-bottom-collapsed {
@@ -65,6 +66,8 @@
   gap: 8px;
   font-size: 10.5px;
   color: var(--color-text-subtle);
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .explorer-legend-pane__head {
@@ -236,7 +239,7 @@
   display: none;
 }
 
-@media (max-width: 1359px) {
+@media (max-width: 1520px) {
   .explorer-btn-label-wide {
     display: none;
   }

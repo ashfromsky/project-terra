@@ -16,7 +16,7 @@ import { InspectorPanel } from '../../features/map-explorer/ui/InspectorPanel'
 import { LayerCatalogSidebar } from '../../features/map-explorer/ui/LayerCatalogSidebar'
 import { TemporalLegendBar } from '../../features/map-explorer/ui/TemporalLegendBar'
 import { buildGibsMapLayer, findLiveLayer } from '../../shared/config/live-environment'
-import { resolveLayerEffectiveDate, useLayerCatalogQuery } from '../../shared/api/layers'
+import { useLayerCatalogQuery } from '../../shared/api/layers'
 import { PROJECTION_REGISTRY } from '../../shared/config/geospatial'
 import { formatCoordinatePair } from '../../shared/lib/geojson-utils'
 import {
@@ -39,7 +39,6 @@ export function MapExplorerWorkspace() {
   const primaryLayerId = useExploreStore((s) => s.primaryLayerId)
   const layerStates = useExploreStore((s) => s.layerStates)
   const selectedDate = useExploreStore((s) => s.selectedDate)
-  const setSelectedDate = useExploreStore((s) => s.setSelectedDate)
 
   const showGraticules = useExploreStore((s) => s.showGraticules)
   const showBorders = useExploreStore((s) => s.showBorders)
@@ -94,27 +93,16 @@ export function MapExplorerWorkspace() {
             maxValue: liveMapLayer.valueRange.defaultMax,
           }
         : activeLayer
-          ? resolveLayerControlState(activeLayer, layerStates[activeLayer.id], primaryLayerId)
+          ? {
+              ...resolveLayerControlState(activeLayer, layerStates[activeLayer.id], primaryLayerId),
+              visible: layerStates[activeLayer.id]?.visible ?? false,
+            }
           : null,
     [activeLayer, layerStates, liveMapLayer, primaryLayerId],
   )
 
   const { aois, selectedAoi, completeDraftAoi } = useAoiWorkspace()
   const selectedAoiId = selectedAoi?.properties.id ?? null
-
-  useEffect(() => {
-    if (liveMapLayer || !activeLayer || activeLayer.availabilityStatus !== 'connected') {
-      return
-    }
-    const availableDates = activeLayer.availableDates ?? []
-    if (availableDates.length === 0 || availableDates.includes(selectedDate)) {
-      return
-    }
-    const snapped = resolveLayerEffectiveDate(activeLayer, selectedDate)
-    if (snapped && snapped !== selectedDate) {
-      setSelectedDate(snapped)
-    }
-  }, [activeLayer, liveMapLayer, selectedDate, setSelectedDate])
 
   const renderState = useMemo<MapRenderState>(
     () => ({

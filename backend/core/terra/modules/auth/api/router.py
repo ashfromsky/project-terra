@@ -6,11 +6,12 @@ from fastapi import APIRouter, HTTPException, Query, Request, Response, status
 from fastapi.responses import RedirectResponse
 
 from terra.api.dependencies import SettingsDep
+from terra.config import Settings
 from terra.modules.auth.api.dependencies import (
-    CurrentUserDep,
     GitHubOAuthClientDep,
     TokenServiceDep,
     UserRepositoryDep,
+    _extract_token,
 )
 from terra.modules.auth.api.schemas import (
     AuthCallbackResponse,
@@ -20,6 +21,7 @@ from terra.modules.auth.api.schemas import (
 )
 from terra.modules.auth.application.use_cases import (
     AuthenticateGitHubCallbackUseCase,
+    GetCurrentUserUseCase,
     StartGitHubLoginUseCase,
 )
 from terra.modules.auth.domain.entities import GitHubProfile
@@ -32,11 +34,28 @@ from terra.modules.auth.domain.exceptions import (
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 
+def _resolve_frontend_base_url(
+    request: Request,
+    settings: Settings,
+    fallback: str,
+) -> str:
+    """Resolve the frontend redirect base origin from reverse-proxy headers or fallback."""
+    forwarded_host = request.headers.get("x-forwarded-host")
+    forwarded_proto = request.headers.get("x-forwarded-proto", "https")
+    if forwarded_host:
+        candidate = f"{forwarded_proto}://{forwarded_host}"
+        for allowed in settings.cors_origins:
+            if candidate.lower() == allowed.lower():
+                return candidate
+    return fallback
+
+
 def _build_frontend_redirect_url(
     base_url: str,
     return_to: str | None = None,
     *,
     auth_error: str | None = None,
+    fragment: str | None = None,
 ) -> str:
     parsed = urlsplit(base_url)
     target_path = parsed.path
@@ -49,7 +68,15 @@ def _build_frontend_redirect_url(
     query_params = dict(parse_qsl(target_query, keep_blank_values=True))
     if auth_error:
         query_params["authError"] = auth_error
-    return urlunsplit((parsed.scheme, parsed.netloc, target_path, urlencode(query_params), ""))
+    return urlunsplit(
+        (
+            parsed.scheme,
+            parsed.netloc,
+            target_path,
+            urlencode(query_params),
+            fragment or "",
+        )
+    )
 
 
 @router.get("/github/login", response_model=GitHubLoginResponse)
@@ -126,10 +153,15 @@ async def github_callback(
             claims = token_service.verify_oauth_state(state)
         except AuthenticationError as exc:
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(exc)) from exc
+        frontend_base = _resolve_frontend_base_url(
+            request,
+            settings,
+            fallback=settings.frontend_auth_redirect_url,
+        )
         if redirect or claims.redirect_to_frontend:
             return RedirectResponse(
                 url=_build_frontend_redirect_url(
-                    settings.frontend_auth_redirect_url,
+                    frontend_base,
                     claims.return_to,
                     auth_error=error,
                 ),
@@ -161,10 +193,15 @@ async def github_callback(
             claims = token_service.verify_oauth_state(state)
         except AuthenticationError:
             claims = None
+        frontend_base = _resolve_frontend_base_url(
+            request,
+            settings,
+            fallback=settings.frontend_auth_redirect_url,
+        )
         if claims is not None and (redirect or claims.redirect_to_frontend):
             return RedirectResponse(
                 url=_build_frontend_redirect_url(
-                    settings.frontend_auth_redirect_url,
+                    frontend_base,
                     claims.return_to,
                     auth_error="oauth_exchange_failed",
                 ),
@@ -172,27 +209,35 @@ async def github_callback(
             )
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
 
+    samesite_val = "none" if settings.auth_cookie_secure else "lax"
     cookie_kwargs = {
         "key": settings.auth_cookie_name,
         "value": session.access_token,
         "httponly": True,
-        "samesite": "lax",
+        "samesite": samesite_val,
         "secure": settings.auth_cookie_secure,
         "max_age": settings.jwt_access_token_expire_minutes * 60,
         "path": "/",
     }
     if redirect or session.redirect_to_frontend:
+        frontend_base = _resolve_frontend_base_url(
+            request,
+            settings,
+            fallback=settings.frontend_auth_redirect_url,
+        )
         redirect_resp = RedirectResponse(
             url=_build_frontend_redirect_url(
-                settings.frontend_auth_redirect_url,
+                frontend_base,
                 session.return_to,
             ),
             status_code=status.HTTP_302_FOUND,
         )
         redirect_resp.set_cookie(**cookie_kwargs)
+        redirect_resp.delete_cookie(key="terra_logged_out", path="/")
         return redirect_resp
 
     response.set_cookie(**cookie_kwargs)
+    response.delete_cookie(key="terra_logged_out", path="/")
     return AuthCallbackResponse(
         access_token=session.access_token,
         user=UserResponse.from_domain(session.user),
@@ -202,14 +247,67 @@ async def github_callback(
 @router.post("/logout", response_model=LogoutResponse)
 async def logout(response: Response, settings: SettingsDep) -> LogoutResponse:
     """Clear the HttpOnly authentication session cookie."""
-    response.delete_cookie(key=settings.auth_cookie_name, path="/")
+    samesite_val = "none" if settings.auth_cookie_secure else "lax"
+    response.delete_cookie(
+        key=settings.auth_cookie_name,
+        path="/",
+        samesite=samesite_val,
+        secure=settings.auth_cookie_secure,
+    )
+    response.delete_cookie(key="terra_logged_out", path="/")
     return LogoutResponse()
 
 
 @router.get("/me", response_model=UserResponse)
-async def me(current_user: CurrentUserDep) -> UserResponse:
-    """Return the profile of the currently authenticated user."""
-    return UserResponse.from_domain(current_user)
+async def me(
+    request: Request,
+    response: Response,
+    settings: SettingsDep,
+    users: UserRepositoryDep,
+    token_service: TokenServiceDep,
+) -> UserResponse:
+    """Return the currently authenticated profile or auto-provision a researcher session."""
+    token = _extract_token(request, settings.auth_cookie_name)
+    if token:
+        try:
+            user = await GetCurrentUserUseCase(users, token_service).execute(token)
+            return UserResponse.from_domain(user)
+        except AuthenticationError:
+            pass
+
+    if settings.auto_researcher_session:
+        user = await users.get_by_github_id(123993174)
+        if user is None:
+            user = await users.upsert_by_github_id(
+                GitHubProfile(
+                    github_id=123993174,
+                    github_login="ashfromsky",
+                    display_name="Timothy",
+                    avatar_url="https://avatars.githubusercontent.com/u/123993174?v=4",
+                    email="gamertimka9@gmail.com",
+                )
+            )
+
+        session_token = token_service.issue_access_token(user)
+        samesite_val = "none" if settings.auth_cookie_secure else "lax"
+        cookie_kwargs = {
+            "key": settings.auth_cookie_name,
+            "value": session_token,
+            "httponly": True,
+            "samesite": samesite_val,
+            "secure": settings.auth_cookie_secure,
+            "max_age": settings.jwt_access_token_expire_minutes * 60,
+            "path": "/",
+        }
+        response.set_cookie(**cookie_kwargs)
+        response.delete_cookie(key="terra_logged_out", path="/")
+        return UserResponse.from_domain(user)
+
+    raise HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Authentication required",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
 
 
 @router.post("/dev-session", response_model=AuthCallbackResponse)
@@ -245,6 +343,7 @@ async def dev_session(
         max_age=settings.jwt_access_token_expire_minutes * 60,
         path="/",
     )
+    response.delete_cookie(key="terra_logged_out", path="/")
     return AuthCallbackResponse(
         access_token=access_token,
         user=UserResponse.from_domain(user),

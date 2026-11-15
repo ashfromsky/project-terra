@@ -42,9 +42,10 @@ def _build_engine_kwargs(settings: Settings) -> dict[str, Any]:
             kwargs["poolclass"] = StaticPool
     else:
         kwargs["pool_pre_ping"] = True
-        kwargs["pool_size"] = 2
-        kwargs["max_overflow"] = 1
+        kwargs["pool_size"] = 5
+        kwargs["max_overflow"] = 10
         kwargs["pool_recycle"] = 300
+        kwargs["pool_timeout"] = 15.0
     return kwargs
 
 
@@ -52,6 +53,8 @@ class DatabaseManager:
     """Owns the SQLAlchemy async engine and session factory for an app instance."""
 
     def __init__(self, settings: Settings) -> None:
+        import terra.infrastructure.database.models  # noqa: F401
+
         self._engine: AsyncEngine = create_async_engine(
             settings.database_url,
             **_build_engine_kwargs(settings),

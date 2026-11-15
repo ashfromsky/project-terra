@@ -1,6 +1,8 @@
-import { EarthObservatorySection } from '../../widgets/earth-observatory/EarthObservatorySection'
-import { AnalyticsWorkspaceSection } from '../../widgets/analytics-workspace/AnalyticsWorkspaceSection'
-import { MvpWorkflowSection } from './MvpWorkflowSection'
+import { HackathonAttributionSection } from './HackathonAttributionSection'
+import { HomeFooter } from './HomeFooter'
+import { HomeHeroSection } from './HomeHeroSection'
+import { LiveEnvironmentalPreview } from './LiveEnvironmentalPreview'
+import { PlatformCapabilitiesSection } from './PlatformCapabilitiesSection'
 
 export default function HomePage() {
   return (
@@ -9,9 +11,10 @@ export default function HomePage() {
       data-node-id="5:110"
       data-name="PROJECT TERRA · Earth intelligence"
     >
-      <EarthObservatorySection />
-      <MvpWorkflowSection />
-      <AnalyticsWorkspaceSection />
+      <HomeHeroSection visual={<LiveEnvironmentalPreview />} />
+      <PlatformCapabilitiesSection />
+      <HackathonAttributionSection />
+      <HomeFooter />
     </div>
   )
 }

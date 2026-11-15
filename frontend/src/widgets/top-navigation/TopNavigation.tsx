@@ -10,6 +10,7 @@ import { useSystemInfoQuery } from '../../shared/api/system'
 import { brandAssets, figmaAssets } from '../../shared/config/assets'
 import { APP_ROUTES, WORKSPACE_NAV_ITEMS } from '../../shared/config/routes'
 import { useUiStore } from '../../shared/store/ui-store'
+import { Github } from '../../shared/ui/explorer-icons'
 
 function formatAuthError(code: string): string {
   if (code === 'access_denied') {
@@ -162,6 +163,17 @@ export function TopNavigation() {
         </nav>
 
         <div className="workspace-nav__right">
+          <a
+            href="https://github.com/ashfromsky/project-terra"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="workspace-nav__github-link"
+            aria-label="PROJECT TERRA on GitHub"
+            title="PROJECT TERRA on GitHub"
+          >
+            <Github size={15} />
+            <span className="workspace-nav__github-text">GitHub</span>
+          </a>
           <span className="workspace-nav__context-label" data-node-id="14:69">
             RESEARCH WORKSPACE
           </span>
@@ -329,6 +341,16 @@ export function TopNavigation() {
               {item.label}
             </NavLink>
           ))}
+          <a
+            href="https://github.com/ashfromsky/project-terra"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="mobile-nav-drawer__link mobile-nav-drawer__link--github"
+            onClick={() => setMobileNavOpen(false)}
+          >
+            <Github size={16} />
+            <span>GitHub Repository ↗</span>
+          </a>
           <div className="mobile-nav-drawer__auth">
             {user ? (
               <div className="mobile-nav-drawer__user-row">

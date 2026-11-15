@@ -382,7 +382,7 @@ export default function ComparativeAnalysisPage() {
               <li className="workspace-spec-item">
                 <span className="workspace-spec-item__label">Trend Inference</span>
                 <span className="workspace-spec-item__value">
-                  Mann–Kendall + Sen’s slope Δ (B − A)
+                  Mann–Kendall + Sen’s slope Δ (A − B)
                 </span>
               </li>
               <li className="workspace-spec-item">
@@ -524,9 +524,9 @@ export default function ComparativeAnalysisPage() {
               <section className="sci-panel">
                 <div className="sci-panel__header">
                   <div>
-                    <h2 className="sci-panel__title">Statistical &amp; Resilience Deltas (B − A)</h2>
+                    <h2 className="sci-panel__title">Statistical &amp; Resilience Deltas (A − B)</h2>
                     <p className="sci-panel__subtitle">
-                      Separated trend and resilience comparisons per shared variable
+                      Separated trend and resilience comparisons per shared variable (Primary A − Comparison B)
                     </p>
                   </div>
                 </div>

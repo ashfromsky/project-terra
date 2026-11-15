@@ -309,3 +309,64 @@ def test_insufficient_data_still_populates_full_readiness_diagnostics() -> None:
     assert res.readiness.overall_status == "insufficient"
     assert any(c.status == "failed" for c in res.readiness.criteria)
     assert len(res.readiness.recommended_actions) >= 1
+
+
+def test_partial_year_reference_baseline_matches_climatology_sufficiency() -> None:
+    # 2013-12-01..2015-12-31 spans 3 calendar years (2013, 2014, 2015) but only Month_12
+    # reaches 3 samples; Months 1..11 have 2 samples and must fail baseline readiness.
+    t_start = datetime(2013, 12, 1, tzinfo=UTC)
+    t_end = datetime(2024, 12, 31, tzinfo=UTC)
+    total_days = (t_end - t_start).days + 1
+    timestamps = [t_start + timedelta(days=i) for i in range(total_days)]
+    values: list[float | None] = [10.0 + float(i % 15) for i in range(total_days)]
+
+    t2m_meta = VariableMetadata(
+        name="T2M",
+        canonical_name="air_temperature_2m",
+        units="degC",
+        semantic_kind=VariableSemanticKind.CONTINUOUS_INTENSIVE,
+        fill_values=(-999.0,),
+        valid_range=(-80.0, 60.0),
+    )
+    ds = ScientificDataset(
+        dataset_id="power-partial-ref",
+        source_id=DataSourceId.NASA_POWER,
+        product="POWER_DAILY",
+        product_version="v10",
+        provider="nasa_power",
+        spatial_support=SpatialSupport(crs="EPSG:4326", nominal_resolution_m=55000.0),
+        temporal_metadata=TemporalMetadata(
+            cadence=TemporalCadence.DAILY,
+            semantics=TemporalSemantics.INTERVAL,
+            start=timestamps[0],
+            end=timestamps[-1] + timedelta(days=1),
+        ),
+        variables={"T2M": t2m_meta},
+        series={"T2M": ObservationSeries(timestamps=timestamps, values=values, metadata=t2m_meta)},
+    )
+    req = AssessmentRequest(
+        request_id="partial-ref-check",
+        analysis_start=datetime(2016, 1, 1, tzinfo=UTC),
+        analysis_end=datetime(2024, 12, 31, tzinfo=UTC),
+        target_cadence=TemporalCadence.MONTHLY,
+        baseline=BaselineConfig(
+            baseline_type=BaselineType.FIXED_REFERENCE,
+            start=datetime(2013, 12, 1, tzinfo=UTC),
+            end=datetime(2015, 12, 31, tzinfo=UTC),
+            seasonal_grouping=SeasonalGrouping.CALENDAR_MONTH,
+            min_years_required=3,
+            min_samples_per_bin=3,
+        ),
+    )
+
+    report = evaluate_assessment_readiness(req, datasets=[ds])
+    baseline_criteria = [c for c in report.criteria if c.category == "baseline"]
+    assert len(baseline_criteria) == 1
+    assert baseline_criteria[0].status == "failed"
+    assert "1/12" in baseline_criteria[0].actual_summary
+    by_id = {m.metric_id: m for m in report.metrics}
+    assert by_id["baseline_climatology"].status != "available"
+
+    res = ScientificAssessmentService().run_assessment(req, datasets=[ds])
+    assert len(res.baselines) == 1
+    assert res.baselines[0].sufficient is False

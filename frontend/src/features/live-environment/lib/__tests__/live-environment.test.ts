@@ -5,6 +5,7 @@ import {
   buildGibsMapLayer,
   findLiveLayer,
 } from '../../../../shared/config/live-environment'
+import { getMaxSelectableDateIso } from '../../../../shared/lib/date'
 import { lonLatToModis, modisToLonLat, pointInAoi } from '../cog'
 import { parsePowerMonthly } from '../power'
 import {
@@ -84,6 +85,7 @@ describe('NASA GIBS registry', () => {
     const layer = buildGibsMapLayer(ndvi!, '2026-10-16')
     expect(layer.tileSource.isConnected).toBe(true)
     expect(layer.availabilityStatus).toBe('connected')
+    expect(layer.availableTimeRange.end >= getMaxSelectableDateIso()).toBe(true)
     expect(layer.legend.stops.length).toBeGreaterThan(2)
     expect(layer.qaPolicy).toContain('GIBS')
     expect(layer.limitations).toContain('Never use tile colours')

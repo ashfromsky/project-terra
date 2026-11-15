@@ -52,6 +52,7 @@ class ProviderIngestionError(IncompatibleDatasetError):
         retryable: bool | None = None,
         status_code: int | None = None,
         provider: str | None = None,
+        resolution_url: str | None = None,
     ) -> None:
         super().__init__(message)
         if error_category is not None:
@@ -60,6 +61,7 @@ class ProviderIngestionError(IncompatibleDatasetError):
             self.retryable = retryable
         self.status_code = status_code
         self.provider = provider
+        self.resolution_url = resolution_url
 
 
 class ProviderDisabledError(ProviderIngestionError):

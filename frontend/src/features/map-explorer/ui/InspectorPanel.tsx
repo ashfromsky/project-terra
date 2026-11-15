@@ -20,7 +20,8 @@ export function InspectorPanel() {
 
   const catalogQuery = useLayerCatalogQuery()
   const layers = catalogQuery.data ?? []
-  const activeLayer = layers.find((l) => l.id === primaryLayerId) ?? layers[0] ?? null
+  const primaryLayer = layers.find((l) => l.id === primaryLayerId) ?? null
+  const activeLayer = primaryLayer ?? layers[0] ?? null
   const { aois } = useAoiWorkspace()
 
   if (!rightInspectorOpen) {
@@ -113,8 +114,15 @@ export function InspectorPanel() {
           />
         )}
         {tab === 'feature' && <InspectorFeatureTab />}
-        {tab === 'aoi' && <InspectorAoiTab />}
-        {tab === 'live' && <LiveSciencePanel />}
+        {tab === 'aoi' && (
+          <InspectorAoiTab
+            activeLayer={primaryLayer}
+            catalogLoading={catalogQuery.isPending}
+          />
+        )}
+        <div hidden={tab !== 'live'}>
+          <LiveSciencePanel />
+        </div>
       </div>
     </aside>
   )

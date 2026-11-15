@@ -524,6 +524,50 @@ describe('assessments API adapters and result parser', () => {
     expect(parseScientificAssessmentResult(null)).toBeNull()
   })
 
+  it('parses terra-scientific dictionary quality_reports and ProvenanceTrace fields', () => {
+    const parsed = parseScientificAssessmentResult({
+      assessment_id: 'real-run-1',
+      status: 'completed',
+      created_at_utc: '2026-11-17T12:43:56Z',
+      quality_reports: {
+        'e0760b86-ed25-423a-b5e7-62601eb795bc:T2M': {
+          total_observations: 133,
+          valid_observations: 130,
+          missing_or_fill: 2,
+          filtered_by_qa: 1,
+          out_of_physical_range: 0,
+          valid_fraction: 0.9774,
+          warnings: [],
+        },
+      },
+      provenance: {
+        trace_id: 'trace-abc-999',
+        created_at_utc: '2026-11-17T12:43:56.123456Z',
+        input_digest_sha256: 'sha256-input-xyz',
+        software_versions: { numpy: '2.5.4', terra_scientific: '0.1.0' },
+        methods_invoked: [{ method_id: 'mann_kendall', version: '1.0.0', name: 'Mann-Kendall' }],
+      },
+    })
+
+    expect(parsed).not.toBeNull()
+    expect(parsed?.qualityReports).toHaveLength(1)
+    expect(parsed?.qualityReports[0]).toMatchObject({
+      datasetId: 'e0760b86-ed25-423a-b5e7-62601eb795bc',
+      variableName: 'T2M',
+      totalSteps: 133,
+      validSteps: 130,
+      missingSteps: 2,
+      qaScreenedOutCount: 1,
+      outOfRangeCount: 0,
+    })
+    expect(parsed?.provenance?.traceId).toBe('trace-abc-999')
+    expect(parsed?.provenance?.generatedAtUtc).toBe('2026-11-17T12:43:56.123456Z')
+    expect(parsed?.provenance?.packageVersions).toEqual({
+      numpy: '2.5.4',
+      terra_scientific: '0.1.0',
+    })
+  })
+
   it('calls assessments endpoints and surfaces HTTP/API errors via ApiError', async () => {
     const getSpy = vi.spyOn(apiFetchClient, 'GET')
     const postSpy = vi.spyOn(apiFetchClient, 'POST')

@@ -25,8 +25,12 @@ def test_core_serves_spa_and_assets_from_frontend_dist(tmp_path: Path) -> None:
 
     app = create_app(_settings(dist))
     with TestClient(app) as client:
-        assert client.get("/").text == "<html><body>TERRA SPA</body></html>"
-        assert client.get("/explore").text == "<html><body>TERRA SPA</body></html>"
+        root_resp = client.get("/")
+        assert root_resp.text == "<html><body>TERRA SPA</body></html>"
+        assert root_resp.headers["cache-control"] == "no-cache, must-revalidate"
+        explore_resp = client.get("/explore")
+        assert explore_resp.text == "<html><body>TERRA SPA</body></html>"
+        assert explore_resp.headers["cache-control"] == "no-cache, must-revalidate"
         asset = client.get("/assets/app.js")
         assert asset.status_code == 200
         assert asset.text == "console.log('terra')"

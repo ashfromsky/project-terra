@@ -1,3 +1,4 @@
+import { getMaxSelectableDateIso } from '../lib/date'
 import type { ColorRampStop, MapLayerDefinition } from '../types/geospatial'
 
 export type LiveDomain = 'vegetation' | 'temperature' | 'water' | 'soil' | 'cryosphere'
@@ -290,7 +291,10 @@ export function buildGibsMapLayer(
     temporalResolution: liveLayer.temporalCadence,
     availableTimeRange: {
       start: '2000-01-01',
-      end: date,
+      end: (() => {
+        const todayMax = getMaxSelectableDateIso()
+        return date > todayMax ? date : todayMax
+      })(),
       cadence: cadenceToAvailableRange(liveLayer.temporalCadence),
     },
     attribution: liveLayer.attribution,

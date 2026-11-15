@@ -10,18 +10,21 @@ router = APIRouter(tags=["health"])
 
 
 @router.get("/health", response_model=HealthResponse)
+@router.head("/health", include_in_schema=False)
 async def health(settings: SettingsDep) -> HealthResponse:
     """Report basic service health."""
     return HealthResponse(status="ok", service=settings.app_name, version=__version__)
 
 
 @router.get("/health/live", response_model=HealthResponse)
+@router.head("/health/live", include_in_schema=False)
 async def health_live(settings: SettingsDep) -> HealthResponse:
     """Report process liveness without external dependency checks."""
     return HealthResponse(status="ok", service=settings.app_name, version=__version__)
 
 
 @router.get("/health/ready", response_model=ReadinessResponse)
+@router.head("/health/ready", include_in_schema=False)
 async def health_ready(
     response: Response,
     settings: SettingsDep,

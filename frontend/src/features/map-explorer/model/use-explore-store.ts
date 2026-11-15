@@ -6,6 +6,7 @@ import {
   mergeRoleExclusiveAoi,
 } from './explore-aoi-helpers'
 import { findLiveLayer } from '../../../shared/config/live-environment'
+import { getTodayUtcIso } from '../../../shared/lib/date'
 import {
   DEFAULT_VIEWPORT,
   resolveLayerControlState,
@@ -33,18 +34,21 @@ export const useExploreStore = create<ExploreState>()((set, get) => ({
   setPrimaryLayerId: (layerId) =>
     set((state) => ({
       primaryLayerId: layerId,
+      gibsLayerId: null,
       layerStates: {
         ...state.layerStates,
-        [layerId]: { ...state.layerStates[layerId], visible: true },
+        [layerId]: { ...state.layerStates[layerId], visible: state.layerStates[layerId]?.visible ?? false },
       },
     })),
 
-  layerStates: {},
+  layerStates: {
+    'ndvi-mod13q1': { visible: false },
+  },
 
   toggleLayerVisibility: (layerId) =>
     set((state) => {
       const current = state.layerStates[layerId]
-      const currentVisible = current?.visible ?? layerId === state.primaryLayerId
+      const currentVisible = current?.visible ?? false
       const nextVisible = !currentVisible
       return {
         primaryLayerId: nextVisible ? layerId : state.primaryLayerId,
@@ -93,10 +97,10 @@ export const useExploreStore = create<ExploreState>()((set, get) => ({
       }
     }),
 
-  selectedDate: '2025-12-01',
+  selectedDate: getTodayUtcIso(),
   setSelectedDate: (selectedDate) => set({ selectedDate }),
   dateRangeStart: '2020-01-01',
-  dateRangeEnd: '2025-12-01',
+  dateRangeEnd: getTodayUtcIso(),
   setDateRange: (dateRangeStart, dateRangeEnd) =>
     set({
       dateRangeStart: dateRangeStart <= dateRangeEnd ? dateRangeStart : dateRangeEnd,
@@ -108,8 +112,8 @@ export const useExploreStore = create<ExploreState>()((set, get) => ({
   temporalCadence: 'monthly',
   setTemporalCadence: (temporalCadence) => set({ temporalCadence }),
 
-  gibsLayerId: 'MODIS_Terra_L3_NDVI_16Day',
-  gibsDate: '2026-10-16',
+  gibsLayerId: null,
+  gibsDate: getTodayUtcIso(),
   setGibsLayer: (gibsLayerId) =>
     set((state) => {
       const layer = findLiveLayer(gibsLayerId)

@@ -1,5 +1,6 @@
 """HTTP API tests for ``/api/v1/layers`` endpoints."""
 
+from datetime import UTC, datetime
 from typing import cast
 
 import httpx
@@ -56,15 +57,19 @@ def test_layer_detail_metadata_legend_and_coverage(client: TestClient) -> None:
     assert legend_body["valueRange"]["max"] == 100.0
     assert len(legend_body["stops"]) > 0
 
+    today_iso = datetime.now(UTC).date().isoformat()
+    expected_end = max("2025-12-31", today_iso)
+    expected_steps = (int(expected_end[:4]) - 2001 + 1) * 23
+
     coverage = client.get("/api/v1/layers/ndvi-mod13q1/coverage")
     assert coverage.status_code == 200
     cov_body = coverage.json()
     assert cov_body == {
         "layerId": "ndvi-mod13q1",
         "startDate": "2001-01-01",
-        "endDate": "2025-12-31",
+        "endDate": expected_end,
         "cadence": "16-day",
-        "totalExpectedSteps": 575,
+        "totalExpectedSteps": expected_steps,
         "availableSteps": 0,
         "coveragePercent": 0.0,
         "notes": cov_body["notes"],

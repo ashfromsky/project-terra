@@ -1,5 +1,12 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { apiFetchClient, ApiError, buildApiUrl, extractErrorDetail, unwrapApiResponse } from './client'
+import {
+  apiFetchClient,
+  ApiError,
+  buildApiUrl,
+  extractErrorDetail,
+  setStoredToken,
+  unwrapApiResponse,
+} from './client'
 import type { AuthCallbackResponse, LogoutResponse, UserResponse } from './contracts'
 import { ASSESSMENTS_LIST_QUERY_KEY } from './assessments'
 import { REGIONS_QUERY_KEY } from './regions'
@@ -12,6 +19,7 @@ export async function fetchCurrentUser(): Promise<UserResponse | null> {
   try {
     const result = await apiFetchClient.GET('/api/v1/auth/me')
     if (result.response.status === 401) {
+      setStoredToken(null)
       return null
     }
     if (!result.response.ok || result.data === undefined) {
@@ -32,8 +40,10 @@ export async function fetchCurrentUser(): Promise<UserResponse | null> {
 export async function logoutSession(): Promise<LogoutResponse> {
   try {
     const result = await apiFetchClient.POST('/api/v1/auth/logout')
+    setStoredToken(null)
     return unwrapApiResponse(result, 'POST /api/v1/auth/logout')
   } catch (cause) {
+    setStoredToken(null)
     if (cause instanceof ApiError) throw cause
     throw new ApiError(0, `Network error calling /api/v1/auth/logout: ${String(cause)}`)
   }
@@ -62,7 +72,9 @@ export function useCurrentUserQuery() {
 export async function loginDevSession(): Promise<AuthCallbackResponse> {
   try {
     const result = await apiFetchClient.POST('/api/v1/auth/dev-session')
-    return unwrapApiResponse(result, 'POST /api/v1/auth/dev-session')
+    const session = unwrapApiResponse<AuthCallbackResponse>(result, 'POST /api/v1/auth/dev-session')
+    setStoredToken(session.accessToken)
+    return session
   } catch (cause) {
     if (cause instanceof ApiError) throw cause
     throw new ApiError(0, `Network error calling POST /api/v1/auth/dev-session: ${String(cause)}`)

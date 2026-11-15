@@ -1,3 +1,4 @@
+import { getMaxSelectableDateIso } from '../lib/date'
 import type {
   BasemapId,
   DataAvailabilityStatus,
@@ -176,7 +177,6 @@ export const BASEMAP_PROVIDER_REGISTRY: Record<BasemapId, BasemapProviderConfig>
     minZoom: 0,
     maxZoom: 9,
     supportsTemporalTime: true,
-    defaultTime: '2026-11-02',
     minTime: '2015-11-24',
     attribution: 'NASA EOSDIS GIBS · VIIRS SNPP True Color (Contextual imagery only)',
     licenseNote: 'NASA EOSDIS open imagery',
@@ -200,16 +200,19 @@ export function resolveGibsDate(
   selectedDate: string,
   config: BasemapProviderConfig,
 ): string {
-  const fallback = config.defaultTime ?? '2026-11-02'
   if (!config.supportsTemporalTime) {
     return 'default'
   }
+  const maxDate = getMaxSelectableDateIso()
   const isoDay = selectedDate.slice(0, 10)
+  if (!isoDay) {
+    return config.defaultTime ?? maxDate
+  }
   if (config.minTime && isoDay < config.minTime) {
     return config.minTime
   }
-  if (isoDay > fallback) {
-    return fallback
+  if (isoDay > maxDate) {
+    return maxDate
   }
   return isoDay
 }

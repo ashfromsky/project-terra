@@ -75,33 +75,10 @@ export function resolveScienceRasterConfig(
 }
 
 export function buildDatasetBboxGeoJson(
-  bounds: readonly number[] | null | undefined,
+  ..._args: unknown[]
 ): FeatureCollection<Geometry> {
-  if (!bounds || bounds.length !== 4) {
-    return EMPTY_FC
-  }
-  const [minLon, minLat, maxLon, maxLat] = bounds
-  return {
-    type: 'FeatureCollection',
-    features: [
-      {
-        type: 'Feature',
-        properties: {},
-        geometry: {
-          type: 'Polygon',
-          coordinates: [
-            [
-              [minLon, minLat],
-              [maxLon, minLat],
-              [maxLon, maxLat],
-              [minLon, maxLat],
-              [minLon, minLat],
-            ],
-          ],
-        },
-      },
-    ],
-  }
+  void _args
+  return EMPTY_FC
 }
 
 export function buildMapLibreStyle(state: MapRenderState): StyleSpecification {
@@ -121,7 +98,7 @@ export function buildMapLibreStyle(state: MapRenderState): StyleSpecification {
     'ne-countries': { type: 'geojson', data: GEOSPATIAL_PUBLIC_CONFIG.naturalEarthCountriesUrl },
     'terra-dataset-bbox': {
       type: 'geojson',
-      data: buildDatasetBboxGeoJson(state.activeLayer?.layer.datasetBbox),
+      data: EMPTY_FC,
     },
     'terra-user-aois': { type: 'geojson', data: EMPTY_FC },
     'terra-draft-geometry': { type: 'geojson', data: EMPTY_FC },
@@ -413,7 +390,8 @@ export function buildMapLibreStyle(state: MapRenderState): StyleSpecification {
       id: 'terra-dataset-bbox-line',
       type: 'line',
       source: 'terra-dataset-bbox',
-      paint: { 'line-color': '#159b91', 'line-width': 1.5, 'line-dasharray': [4, 2] },
+      layout: { visibility: 'none' },
+      paint: { 'line-color': '#159b91', 'line-width': 0 },
     },
     {
       id: 'terra-user-aois-fill',
