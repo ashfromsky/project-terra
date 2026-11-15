@@ -6,6 +6,7 @@ from collections.abc import Callable
 
 from terra.config import Settings, get_settings
 from terra.infrastructure.database import DatabaseManager
+from terra.infrastructure.object_storage import ObjectStoragePort, build_core_object_storage
 from terra.modules.assessments.application.services import AssessmentApplicationService
 from terra.modules.assessments.domain.entities import ScientificAssessment
 from terra.modules.assessments.domain.ports import GhsDatasetClient
@@ -28,6 +29,7 @@ class AssessmentWorkerRunner:
         db: DatabaseManager | None = None,
         ghs_client_factory: Callable[[Settings], GhsDatasetClient] | None = None,
         scientific_service: ScientificAssessmentService | None = None,
+        object_storage: ObjectStoragePort | None = None,
         poll_interval_seconds: float = 2.0,
     ) -> None:
         self._settings = settings or get_settings()
@@ -35,6 +37,7 @@ class AssessmentWorkerRunner:
         self._db = db or DatabaseManager(self._settings)
         self._ghs_client_factory = ghs_client_factory or (lambda s: HttpxGhsDatasetClient(s))
         self._scientific_service = scientific_service or ScientificAssessmentService()
+        self._object_storage = object_storage or build_core_object_storage(self._settings)
         self._poll_interval = poll_interval_seconds
 
     async def initialize(self) -> None:
@@ -66,6 +69,8 @@ class AssessmentWorkerRunner:
                 ghs_client=ghs_client,
                 artifact_root=self._settings.scientific_artifact_dir,
                 scientific_service=self._scientific_service,
+                object_storage=self._object_storage,
+                presign_ttl_seconds=self._settings.s3_presign_ttl_seconds,
             )
             try:
                 completed = await service.execute_claimed_assessment(claimed)

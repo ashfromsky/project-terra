@@ -154,6 +154,13 @@ async def test_worker_drains_queued_assessments_and_isolates_failures(tmp_path: 
         assert by_id[good_queued.id].result_payload is not None
         assert by_id[good_queued.id].artifact_paths["assessment_result_json"]
         assert Path(by_id[good_queued.id].artifact_paths["assessment_result_json"]).exists()
+        assert by_id[good_queued.id].artifact_paths["object_storage_backend"] == "local"
+        result_obj_key = by_id[good_queued.id].artifact_paths["result_object_key"]
+        prov_obj_key = by_id[good_queued.id].artifact_paths["provenance_object_key"]
+        assert result_obj_key == f"assessments/{good_queued.id}/result.json"
+        assert prov_obj_key == f"assessments/{good_queued.id}/provenance.json"
+        assert await runner._object_storage.head_object(result_obj_key) is not None
+        assert await runner._object_storage.head_object(prov_obj_key) is not None
 
         # Queue is now empty
         assert await runner.run_once() is None
