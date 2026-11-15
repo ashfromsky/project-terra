@@ -2,12 +2,15 @@
 
 from uuid import UUID
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, Response, status
 
 from terra.modules.assessments.api.dependencies import AssessmentServiceDep
 from terra.modules.assessments.api.schemas import (
+    AssessmentArtifactItemResponse,
     AssessmentComparisonResponse,
     AssessmentDetailResponse,
+    AssessmentReadinessRequest,
+    AssessmentReadinessResponse,
     AssessmentSummaryResponse,
     CompareAssessmentsRequest,
     CreateAssessmentRequest,
@@ -132,4 +135,64 @@ async def compare_assessments(
         ],
         compatibility_warnings=bundle.compatibility_warnings,
         methodology_notes=bundle.methodology_notes,
+    )
+
+
+@router.get("/{assessment_id}/artifacts", response_model=list[AssessmentArtifactItemResponse])
+async def list_assessment_artifacts(
+    assessment_id: UUID,
+    user: CurrentUserDep,
+    service: AssessmentServiceDep,
+) -> list[AssessmentArtifactItemResponse]:
+    """List downloadable artifacts (keys and optional presigned R2 URLs) for an assessment."""
+    try:
+        items = await service.list_assessment_artifacts(user.id, assessment_id)
+    except AssessmentDomainError as exc:
+        raise _translate_domain_error(exc) from exc
+    return [AssessmentArtifactItemResponse.model_validate(item) for item in items]
+
+
+@router.post("/readiness", response_model=AssessmentReadinessResponse)
+async def evaluate_assessment_readiness_endpoint(
+    payload: AssessmentReadinessRequest,
+    user: CurrentUserDep,
+    service: AssessmentServiceDep,
+) -> AssessmentReadinessResponse:
+    """Evaluate adaptive dataset and methodological readiness prior to running an assessment."""
+    try:
+        report = await service.evaluate_readiness(
+            owner_id=user.id,
+            region_id=payload.region_id,
+            request_config=payload.request_config,
+            ghs_dataset_ids=payload.ghs_dataset_ids,
+            inline_datasets=payload.inline_datasets,
+        )
+    except AssessmentDomainError as exc:
+        raise _translate_domain_error(exc) from exc
+    return AssessmentReadinessResponse.from_scientific(report)
+
+
+@router.get("/{assessment_id}/artifacts/{artifact_name}")
+async def download_assessment_artifact(
+    assessment_id: UUID,
+    artifact_name: str,
+    user: CurrentUserDep,
+    service: AssessmentServiceDep,
+) -> Response:
+    """Download an assessment JSON/provenance artifact owned by the authenticated user."""
+    try:
+        filename, content_type, data = await service.download_assessment_artifact(
+            user.id,
+            assessment_id,
+            artifact_name,
+        )
+    except AssessmentDomainError as exc:
+        raise _translate_domain_error(exc) from exc
+    return Response(
+        content=data,
+        media_type=content_type,
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            "Cache-Control": "private, max-age=60",
+        },
     )

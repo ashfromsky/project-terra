@@ -3,11 +3,14 @@
 from typing import NoReturn
 from uuid import UUID
 
-from fastapi import APIRouter, HTTPException, Query, status
+from fastapi import APIRouter, HTTPException, Query, Response, status
 
 from terra.modules.auth.api.dependencies import CurrentUserDep
 from terra.modules.data_sources.api.dependencies import DataSourcesServiceDep
 from terra.modules.data_sources.api.schemas import (
+    AutoProvisionRequest,
+    AutoProvisionResponse,
+    DatasetAssetDownloadUrlResponse,
     DiscoverObservationsRequest,
     DiscoverObservationsResponse,
     IngestionOperationResponse,
@@ -169,3 +172,79 @@ async def get_prepared_dataset(
     except DataSourcesDomainError as exc:
         _raise_http(exc)
     return PreparedDatasetSummaryResponse.model_validate(dataset)
+
+
+@router.get("/datasets/{dataset_id}/download-url", response_model=DatasetAssetDownloadUrlResponse)
+async def get_prepared_dataset_download_url(
+    dataset_id: str,
+    user: CurrentUserDep,
+    service: DataSourcesServiceDep,
+    asset_id: str | None = Query(default=None),
+    expires_in: int | None = Query(default=None, ge=30, le=3600),
+) -> DatasetAssetDownloadUrlResponse:
+    """Resolve a direct presigned R2 URL (when enabled) or authenticated Core download endpoint."""
+    try:
+        info = await service.get_dataset_download_url(
+            user.id,
+            dataset_id,
+            asset_id=asset_id,
+            expires_in=expires_in,
+        )
+    except DataSourcesDomainError as exc:
+        _raise_http(exc)
+    return DatasetAssetDownloadUrlResponse.model_validate(info)
+
+
+@router.get("/datasets/{dataset_id}/download")
+async def download_prepared_dataset_asset(
+    dataset_id: str,
+    user: CurrentUserDep,
+    service: DataSourcesServiceDep,
+    asset_id: str | None = Query(default=None),
+) -> Response:
+    """Stream the primary harmonized GeoTIFF/JSON asset from GHS/R2 via Core authentication."""
+    try:
+        content, media_type, filename = await service.download_dataset_asset(
+            user.id,
+            dataset_id,
+            asset_id=asset_id,
+        )
+    except DataSourcesDomainError as exc:
+        _raise_http(exc)
+    return Response(
+        content=content,
+        media_type=media_type,
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            "Cache-Control": "private, max-age=60",
+        },
+    )
+
+
+@router.post("/provision", response_model=AutoProvisionResponse)
+async def auto_provision_datasets(
+    payload: AutoProvisionRequest,
+    user: CurrentUserDep,
+    service: DataSourcesServiceDep,
+) -> AutoProvisionResponse:
+    """Adaptively resolve, ingest, and evaluate real datasets for an AOI and analysis window."""
+    try:
+        outcome = await service.auto_provision(
+            user.id,
+            region_id=payload.region_id,
+            bbox=payload.bbox,
+            analysis_start=payload.analysis_start,
+            analysis_end=payload.analysis_end,
+            target_cadence=payload.target_cadence,
+            baseline_type=payload.baseline_type,
+            reference_start=payload.reference_start,
+            reference_end=payload.reference_end,
+            min_reference_years=payload.min_reference_years,
+            qa_level=payload.qa_level,
+            existing_dataset_ids=payload.existing_dataset_ids,
+            desired_domains=payload.desired_domains,
+            max_granules_per_product=payload.max_granules_per_product,
+        )
+    except DataSourcesDomainError as exc:
+        _raise_http(exc)
+    return AutoProvisionResponse.model_validate(outcome)

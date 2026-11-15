@@ -4,7 +4,7 @@ from typing import Annotated
 
 from fastapi import Depends
 
-from terra.api.dependencies import DbSessionDep, SettingsDep
+from terra.api.dependencies import DbSessionDep, ObjectStorageDep, SettingsDep
 from terra.modules.assessments.application.services import AssessmentApplicationService
 from terra.modules.assessments.domain.ports import GhsDatasetClient
 from terra.modules.assessments.infrastructure.ghs_client import HttpxGhsDatasetClient
@@ -26,6 +26,7 @@ def get_assessment_service(
     session: DbSessionDep,
     settings: SettingsDep,
     ghs_client: GhsDatasetClientDep,
+    object_storage: ObjectStorageDep,
 ) -> AssessmentApplicationService:
     """Build a request-scoped AssessmentApplicationService."""
     return AssessmentApplicationService(
@@ -33,6 +34,8 @@ def get_assessment_service(
         region_repo=SqlAlchemyRegionRepository(session),
         ghs_client=ghs_client,
         artifact_root=settings.scientific_artifact_dir,
+        object_storage=object_storage,
+        presign_ttl_seconds=settings.s3_presign_ttl_seconds,
     )
 
 

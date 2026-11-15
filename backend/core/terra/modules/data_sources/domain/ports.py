@@ -38,3 +38,22 @@ class GhsServiceClient(Protocol):
     async def get_dataset(self, dataset_id: str) -> dict[str, Any]:
         """Fetch full prepared dataset metadata and embedded series from GHS."""
         ...
+
+    async def get_dataset_asset_url(
+        self,
+        dataset_id: str,
+        *,
+        asset_id: str | None = None,
+        expires_in: int | None = None,
+    ) -> dict[str, Any]:
+        """Request a download descriptor and optional presigned R2 URL from GHS."""
+        ...
+
+    async def download_dataset_asset_content(
+        self,
+        dataset_id: str,
+        *,
+        asset_id: str | None = None,
+    ) -> tuple[bytes, str, str]:
+        """Download binary asset bytes, media_type, and filename from GHS."""
+        ...
