@@ -2432,24 +2432,21 @@ input:focus-visible,
   white-space: nowrap;
 }
 
-.insights-card__ai-pill {
+.insights-card__provenance-badge {
   position: absolute;
   left: 296px;
   top: 12px;
-  width: 78px;
+  min-width: 78px;
   height: 21px;
+  padding: 0 8px;
   border-radius: 5px;
   background-color: var(--color-teal-insight-pill);
-}
-
-.insights-card__ai-text {
-  position: absolute;
-  left: 304px;
-  top: 19px;
-  font-size: 7px;
+  font-size: 8px;
   font-weight: 600;
-  line-height: normal;
+  line-height: 21px;
+  text-align: center;
   color: var(--color-brand-teal);
+  letter-spacing: 0.05em;
   white-space: nowrap;
 }
 
@@ -3533,7 +3530,7 @@ input:focus-visible,
     width: calc(100% - 30px);
   }
 
-  .insights-card__ai-pill {
+  .insights-card__provenance-badge {
     left: auto;
     right: 15px;
   }

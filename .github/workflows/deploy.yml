@@ -17,7 +17,7 @@ jobs:
   # ----------------------------------------------------------------------------
   # 1. Verify Deployment Secrets & Infrastructure Readiness
   # ----------------------------------------------------------------------------
-  verify-secrets:
+  verify_secrets:
     name: Verify Secrets & Configuration
     runs-on: ubuntu-latest
     steps:
@@ -63,9 +63,9 @@ jobs:
   # ----------------------------------------------------------------------------
   # 2. Deploy Frontend to Cloudflare Pages
   # ----------------------------------------------------------------------------
-  deploy-frontend:
+  deploy_frontend:
     name: Build & Deploy Frontend to Cloudflare Pages
-    needs: [verify-secrets]
+    needs: [verify_secrets]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -94,7 +94,7 @@ jobs:
           bash deploy/containerization/cloudflare-pages-build.sh
 
       - name: Deploy to Cloudflare Pages
-        if: ${{ secrets.CLOUDFLARE_API_TOKEN != '' }}
+        if: secrets.CLOUDFLARE_API_TOKEN != ''
         uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -104,9 +104,9 @@ jobs:
   # ----------------------------------------------------------------------------
   # 3. Deploy Backend to VPS Server
   # ----------------------------------------------------------------------------
-  deploy-backend:
+  deploy_backend:
     name: Deploy Backend Infrastructure to VPS
-    needs: [verify-secrets]
+    needs: [verify_secrets]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -175,10 +175,10 @@ jobs:
   # ----------------------------------------------------------------------------
   # 4. End-to-End Health & Secret Synchronization Verification
   # ----------------------------------------------------------------------------
-  verify-sync:
+  verify_sync:
     name: Verify End-to-End Secrets & System Synchronization
-    needs: [deploy-frontend, deploy-backend]
-    if: always() && needs.deploy-backend.result == 'success'
+    needs: [deploy_frontend, deploy_backend]
+    if: always() && needs.deploy_backend.result == 'success'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

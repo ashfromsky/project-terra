@@ -272,10 +272,9 @@ export function AnalyticsWorkspaceSection() {
             <p className="insights-card__title" data-node-id="5:388">
               Provenance &amp; workflow
             </p>
-            <div className="insights-card__ai-pill" data-node-id="5:389" />
-            <p className="insights-card__ai-text" data-node-id="5:390">
+            <div className="insights-card__provenance-badge">
               {parsed?.provenance ? 'VERIFIED' : 'BACKEND'}
-            </p>
+            </div>
             <p className="insights-card__headline" data-node-id="5:391">
               {latestCompleted
                 ? `Assessment ${latestCompleted.id.slice(0, 8)}`

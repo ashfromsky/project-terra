@@ -167,6 +167,7 @@ function AoiCard({
 }
 
 export function InspectorAoiTab() {
+  const [copiedStatus, setCopiedStatus] = useState<'coords' | 'bounds' | null>(null)
   const interactionMode = useExploreStore((s) => s.interactionMode)
   const setInteractionMode = useExploreStore((s) => s.setInteractionMode)
   const activeAoiRole = useExploreStore((s) => s.activeAoiRole)
@@ -393,6 +394,32 @@ export function InspectorAoiTab() {
                     </dd>
                   </div>
                 </dl>
+                <div className="explorer-draw-guide__actions" style={{ marginTop: '8px' }}>
+                  <button
+                    type="button"
+                    className="explorer-action-btn"
+                    onClick={() => {
+                      const text = JSON.stringify(selectedAoi.geometry)
+                      void navigator.clipboard.writeText(text)
+                      setCopiedStatus('coords')
+                      setTimeout(() => setCopiedStatus(null), 2000)
+                    }}
+                  >
+                    <span>{copiedStatus === 'coords' ? 'Coordinates Copied!' : 'Copy Coordinates (WGS 84)'}</span>
+                  </button>
+                  <button
+                    type="button"
+                    className="explorer-action-btn"
+                    onClick={() => {
+                      const text = JSON.stringify(selectedAoi.properties.bbox)
+                      void navigator.clipboard.writeText(text)
+                      setCopiedStatus('bounds')
+                      setTimeout(() => setCopiedStatus(null), 2000)
+                    }}
+                  >
+                    <span>{copiedStatus === 'bounds' ? 'Bounds Copied!' : 'Copy Bounds'}</span>
+                  </button>
+                </div>
               </div>
 
               <div className="explorer-inspector-card">

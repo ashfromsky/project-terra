@@ -18,10 +18,10 @@ function getStatusBadgeMeta(layer: MapLayerDefinition): {
     return { label: 'Experimental', toneClass: 'is-experimental' }
   }
   const map: Record<DataAvailabilityStatus, { label: string; toneClass: string }> = {
-    connected: { label: 'Connected', toneClass: 'is-connected' },
-    preview: { label: 'AOI Preview', toneClass: 'is-preview' },
+    connected: { label: 'Live Preview', toneClass: 'is-connected' },
+    preview: { label: 'AOI Analysis', toneClass: 'is-preview' },
     planned: { label: 'Planned', toneClass: 'is-planned' },
-    unavailable: { label: 'Unavailable', toneClass: 'is-unavailable' },
+    unavailable: { label: 'AOI Analysis', toneClass: 'is-unavailable' },
   }
   return map[layer.availabilityStatus]
 }

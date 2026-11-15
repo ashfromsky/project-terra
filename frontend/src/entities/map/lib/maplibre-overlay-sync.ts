@@ -32,8 +32,8 @@ function syncScienceRasterSource(map: MapLibreMap, state: MapRenderState): void 
     type: 'raster',
     tiles: [nextUrl],
     tileSize: 256,
-    minzoom: 0,
-    maxzoom: 18,
+    minzoom: nextRaster.minzoom ?? 0,
+    maxzoom: nextRaster.maxzoom ?? 18,
     ...(nextRaster.bounds ? { bounds: nextRaster.bounds } : {}),
     attribution: state.activeLayer?.layer.attribution ?? 'NASA Earth Observations via TERRA',
   })
