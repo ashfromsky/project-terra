@@ -15,6 +15,7 @@ def test_openapi_schema_exposes_all_p0_routes_and_schemas() -> None:
         "/api/v1/system/info",
         "/api/v1/auth/github/login",
         "/api/v1/auth/github/callback",
+        "/api/v1/auth/dev-session",
         "/api/v1/auth/logout",
         "/api/v1/auth/me",
         "/api/v1/layers",
@@ -23,6 +24,13 @@ def test_openapi_schema_exposes_all_p0_routes_and_schemas() -> None:
         "/api/v1/regions",
         "/api/v1/regions/{region_id}",
         "/api/v1/regions/{region_id}/statistics",
+        "/api/v1/data-sources/providers",
+        "/api/v1/data-sources/discover",
+        "/api/v1/data-sources/ingestions",
+        "/api/v1/data-sources/ingestions/{operation_id}",
+        "/api/v1/data-sources/datasets",
+        "/api/v1/data-sources/datasets/{dataset_id}",
+        "/api/v1/assessments/compare",
     ):
         assert expected_path in paths
 

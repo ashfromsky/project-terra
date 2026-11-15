@@ -22,6 +22,7 @@ from terra.modules.auth.application.use_cases import (
     AuthenticateGitHubCallbackUseCase,
     StartGitHubLoginUseCase,
 )
+from terra.modules.auth.domain.entities import GitHubProfile
 from terra.modules.auth.domain.exceptions import (
     AuthenticationError,
     OAuthConfigurationError,
@@ -177,3 +178,42 @@ async def logout(response: Response, settings: SettingsDep) -> LogoutResponse:
 async def me(current_user: CurrentUserDep) -> UserResponse:
     """Return the profile of the currently authenticated user."""
     return UserResponse.from_domain(current_user)
+
+
+@router.post("/dev-session", response_model=AuthCallbackResponse)
+async def dev_session(
+    response: Response,
+    settings: SettingsDep,
+    users: UserRepositoryDep,
+    token_service: TokenServiceDep,
+) -> AuthCallbackResponse:
+    """Issue a local researcher session cookie and bearer token in development mode."""
+    if settings.environment != "development":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Development session login is only enabled in development environment",
+        )
+
+    user = await users.upsert_by_github_id(
+        GitHubProfile(
+            github_id=9990001,
+            github_login="terra-dev-researcher",
+            display_name="TERRA Local Researcher",
+            avatar_url=None,
+            email="researcher@terra.local",
+        )
+    )
+    access_token = token_service.issue_access_token(user)
+    response.set_cookie(
+        key=settings.auth_cookie_name,
+        value=access_token,
+        httponly=True,
+        samesite="lax",
+        secure=settings.auth_cookie_secure,
+        max_age=settings.jwt_access_token_expire_minutes * 60,
+        path="/",
+    )
+    return AuthCallbackResponse(
+        access_token=access_token,
+        user=UserResponse.from_domain(user),
+    )
