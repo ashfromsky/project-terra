@@ -67,6 +67,10 @@ export interface ExploreState {
   toggleTemporalPlaying: () => void
   temporalCadence: ObservationGranularity
   setTemporalCadence: (cadence: ObservationGranularity) => void
+  gibsLayerId: string | null
+  gibsDate: string
+  setGibsLayer: (layerId: string | null) => void
+  setGibsDate: (date: string) => void
   analysisStart: string
   analysisEnd: string
   setAnalysisPeriod: (start: string, end: string) => void
@@ -124,8 +128,8 @@ export interface ExploreState {
   setLeftSidebarOpen: (open: boolean) => void
   rightInspectorOpen: boolean
   setRightInspectorOpen: (open: boolean) => void
-  inspectorTab: 'point' | 'feature' | 'aoi'
-  setInspectorTab: (tab: 'point' | 'feature' | 'aoi') => void
+  inspectorTab: 'point' | 'feature' | 'aoi' | 'live'
+  setInspectorTab: (tab: 'point' | 'feature' | 'aoi' | 'live') => void
   bottomPanelOpen: boolean
   setBottomPanelOpen: (open: boolean) => void
   isFullscreen: boolean

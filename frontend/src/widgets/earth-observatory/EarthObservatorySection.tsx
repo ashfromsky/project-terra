@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router'
 import { useLayerCatalogQuery } from '../../shared/api/layers'
 import { figmaAssets } from '../../shared/config/assets'
+import { LIVE_GIBS_LAYERS } from '../../shared/config/live-environment'
 import { APP_ROUTES } from '../../shared/config/routes'
 import { ObservatoryFrameIcon } from '../../shared/ui/explorer-icons'
 import {
@@ -324,16 +325,12 @@ export function EarthObservatorySection() {
           EARTH OBSERVATORY
         </p>
         <h1 className="earth-observatory__headline" data-node-id="5:219">
-          {activeLayer?.name ?? 'Earth observations, in focus.'}
+          Global live environmental observations
         </h1>
 
         <div className="earth-observatory__period-pill" data-node-id="5:220">
           <p className="earth-observatory__period-text" data-node-id="5:221">
-            {activeLayer?.availabilityStatus === 'connected' &&
-            activeLayer.availableDates &&
-            activeLayer.availableDates.length > 0
-              ? `${activeLayer.availableDates[0]} — ${activeLayer.availableDates[activeLayer.availableDates.length - 1]}`
-              : 'No ingested observations'}
+            NASA GIBS · {LIVE_GIBS_LAYERS.length} live layers · direct from the browser
           </p>
         </div>
 

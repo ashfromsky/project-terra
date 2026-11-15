@@ -1,6 +1,7 @@
 import { useEffect, useMemo } from 'react'
 import { useLayerCatalogQuery, useTemporalCoverageQuery } from '../../../shared/api/layers'
 import { BASEMAP_PROVIDER_REGISTRY } from '../../../shared/config/geospatial'
+import { buildGibsMapLayer, findLiveLayer } from '../../../shared/config/live-environment'
 import type { ObservationGranularity } from '../../../shared/types/geospatial'
 import {
   ChevronDown,
@@ -49,11 +50,19 @@ export function TemporalLegendBar() {
   const setTemporalPlaying = useExploreStore((s) => s.setTemporalPlaying)
   const toggleTemporalPlaying = useExploreStore((s) => s.toggleTemporalPlaying)
 
+  const gibsLayerId = useExploreStore((s) => s.gibsLayerId)
+  const gibsDate = useExploreStore((s) => s.gibsDate)
+  const setGibsDate = useExploreStore((s) => s.setGibsDate)
   const catalogQuery = useLayerCatalogQuery()
   const layers = catalogQuery.data ?? []
-  const activeLayer = layers.find((layer) => layer.id === primaryLayerId) ?? layers[0] ?? null
+  const liveLayer = findLiveLayer(gibsLayerId)
+  const liveMapLayer = liveLayer ? buildGibsMapLayer(liveLayer, gibsDate) : null
+  const activeLayer = liveMapLayer ?? layers.find((layer) => layer.id === primaryLayerId) ?? layers[0] ?? null
   const basemapConfig = BASEMAP_PROVIDER_REGISTRY[basemap]
-  const coverageQuery = useTemporalCoverageQuery(activeLayer?.id ?? '', Boolean(activeLayer))
+  const coverageQuery = useTemporalCoverageQuery(
+    activeLayer?.id ?? '',
+    Boolean(activeLayer) && !liveMapLayer,
+  )
   const cadence: ObservationGranularity = activeLayer?.availableTimeRange.cadence ?? 'monthly'
   const availableDates = useMemo(
     () => activeLayer?.availableDates ?? [],
@@ -85,16 +94,17 @@ export function TemporalLegendBar() {
     () => Math.max(rangeMinMs + 86_400_000, dateToMs(dateRangeEnd)),
     [dateRangeEnd, rangeMinMs],
   )
+  const displayDate = liveMapLayer ? gibsDate : selectedDate
   const currentMs = useMemo(() => {
-    const val = dateToMs(selectedDate)
+    const val = dateToMs(displayDate)
     return Math.min(rangeMaxMs, Math.max(rangeMinMs, val))
-  }, [rangeMaxMs, rangeMinMs, selectedDate])
+  }, [displayDate, rangeMaxMs, rangeMinMs])
 
   if (!bottomPanelOpen) {
     return (
       <div className="explorer-bottom-collapsed">
         <span className="explorer-bottom-collapsed__meta">
-          {activeLayer ? activeLayer.shortName : 'Layer catalog'} · {selectedDate} · {basemapConfig.shortName}
+          {activeLayer ? activeLayer.shortName : 'Layer catalog'} · {displayDate} · {basemapConfig.shortName}
         </span>
         <button
           type="button"
@@ -188,6 +198,7 @@ export function TemporalLegendBar() {
             onChange={(e) => {
               const iso = new Date(Number(e.target.value)).toISOString().slice(0, 10)
               setSelectedDate(iso)
+              if (liveMapLayer) setGibsDate(iso)
             }}
             aria-label="Observation date timeline slider"
           />
@@ -221,7 +232,7 @@ export function TemporalLegendBar() {
 
         <div className="explorer-coverage-strip">
           <span>
-            Target date: <strong>{selectedDate}</strong> ({cadence})
+            Target date: <strong>{displayDate}</strong> ({cadence})
           </span>
           {availableDates.length > 0 && (
             <label className="explorer-select-wrap">
@@ -229,7 +240,10 @@ export function TemporalLegendBar() {
               <select
                 className="explorer-mini-select"
                 value={availableDates.includes(selectedDate) ? selectedDate : availableDates[availableDates.length - 1]}
-                onChange={(e) => setSelectedDate(e.target.value)}
+                onChange={(e) => {
+                  setSelectedDate(e.target.value)
+                  if (liveMapLayer) setGibsDate(e.target.value)
+                }}
                 aria-label="Select ingested observation date"
               >
                 {availableDates.map((dateStr) => (

@@ -4,6 +4,7 @@ import { formatCoordinatePair } from '../../../shared/lib/geojson-utils'
 import { Info, X } from '../../../shared/ui/explorer-icons'
 import { useAoiWorkspace } from '../model/use-aoi-workspace'
 import { useExploreStore } from '../model/use-explore-store'
+import { LiveSciencePanel } from '../../live-environment/ui/LiveSciencePanel'
 import { InspectorAoiTab } from './InspectorAoiTab'
 import { InspectorFeatureTab } from './InspectorFeatureTab'
 import { InspectorPointTab } from './InspectorPointTab'
@@ -93,6 +94,15 @@ export function InspectorPanel() {
         >
           AOI ({aois.length})
         </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={tab === 'live'}
+          className={`explorer-tabs__btn ${tab === 'live' ? 'is-active' : ''}`}
+          onClick={() => setTab('live')}
+        >
+          Live
+        </button>
       </div>
 
       <div className="explorer-sidebar__scroll">
@@ -104,6 +114,7 @@ export function InspectorPanel() {
         )}
         {tab === 'feature' && <InspectorFeatureTab />}
         {tab === 'aoi' && <InspectorAoiTab />}
+        {tab === 'live' && <LiveSciencePanel />}
       </div>
     </aside>
   )
