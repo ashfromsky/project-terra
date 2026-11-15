@@ -33,11 +33,32 @@ COPY backend/worker/src /app/backend/worker/src
 # Install terra-scientific, terra-core, and terra-worker as non-editable packages
 # into the production virtual environment
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --locked --no-editable --no-dev
+    uv sync --locked --no-editable --no-dev \
+    --reinstall-package terra-core \
+    --reinstall-package terra-scientific \
+    --reinstall-package terra-worker
 
 
 # ------------------------------------------------------------------------------
-# Stage 2: Minimal, secure production runtime
+# Stage 2: Production SPA build (served by Core at the API origin)
+# ------------------------------------------------------------------------------
+FROM node:22-bookworm-slim AS frontend
+
+WORKDIR /web
+
+RUN corepack enable     && corepack prepare pnpm@12.19.0 --activate
+
+COPY frontend/package.json frontend/pnpm-lock.yaml ./
+RUN --mount=type=cache,target=/root/.npm \
+    pnpm install --frozen-lockfile
+
+COPY frontend/ ./
+# Contracts are committed; skip the prebuild generator (it requires uv/Python).
+RUN pnpm exec tsc -b && pnpm exec vite build
+
+
+# ------------------------------------------------------------------------------
+# Stage 3: Minimal, secure production runtime
 # ------------------------------------------------------------------------------
 FROM python:3.13-slim-bookworm AS runtime
 
@@ -56,13 +77,15 @@ WORKDIR /app
 
 # Copy virtualenv and application directory with correct ownership
 COPY --from=builder --chown=terra:terra /app /app
+COPY --from=frontend --chown=terra:terra /web/dist /app/web
 
 # Prepare writable directories for scientific artifacts and runtime storage
 RUN mkdir -p /data/artifacts && chown -R terra:terra /data/artifacts
 
 USER terra
 
-ENV SCIENTIFIC_ARTIFACT_DIR=/data/artifacts
+ENV SCIENTIFIC_ARTIFACT_DIR=/data/artifacts \
+    FRONTEND_DIST_DIR=/app/web
 EXPOSE 8000
 
 # Default health check targets Core API readiness endpoint

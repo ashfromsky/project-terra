@@ -17,6 +17,7 @@ def settings() -> Settings:
         environment="test",
         database_url="sqlite+aiosqlite:///:memory:",
         cors_origins=[],
+        ghs_timeout_seconds=0.01,
     )
 
 
