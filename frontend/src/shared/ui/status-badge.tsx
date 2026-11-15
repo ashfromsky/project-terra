@@ -4,6 +4,8 @@ export type StatusBadgeTone =
   | 'teal'
   | 'neutral'
   | 'success'
+  | 'warning'
+  | 'error'
   | 'experimental'
   | 'ai'
   | 'synthetic'

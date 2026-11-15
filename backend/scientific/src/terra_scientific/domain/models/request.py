@@ -120,6 +120,7 @@ class RecoveryConfig(BaseModel):
     pre_event_window_steps: int = Field(default=6, ge=2)
     recovery_fraction_threshold: float = Field(default=0.9, gt=0.0, le=1.0)
     min_post_event_steps: int = Field(default=3, ge=2)
+    confirmation_steps: int = Field(default=2, ge=1)
     require_deseasonalized: bool = True
 
 

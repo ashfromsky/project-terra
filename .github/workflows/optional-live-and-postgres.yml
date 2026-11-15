@@ -1,0 +1,78 @@
+name: Optional Live NASA & PostgreSQL Integration Tests
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_postgres_tests:
+        description: "Run GHS PostgreSQL FOR UPDATE SKIP LOCKED integration tests"
+        type: boolean
+        required: true
+        default: true
+      run_live_nasa_tests:
+        description: "Run live NASA Earthdata smoke tests (requires EARTHDATA_TOKEN secret)"
+        type: boolean
+        required: true
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  ghs-postgres-locking:
+    name: GHS PostgreSQL Locking Integration
+    if: ${{ inputs.run_postgres_tests }}
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: terra
+          POSTGRES_PASSWORD: terra_ci_password
+          POSTGRES_DB: terra_ghs_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U terra -d terra_ghs_test"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.13"
+          enable-cache: true
+          cache-dependency-glob: "backend/services/geospatial_harmonization/uv.lock"
+      - name: Install GHS dependencies
+        run: cd backend/services/geospatial_harmonization && uv sync --locked
+      - name: Run GHS PostgreSQL locking test
+        env:
+          GHS_TEST_POSTGRES_URL: postgresql+asyncpg://terra:terra_ci_password@127.0.0.1:5432/terra_ghs_test
+        run: cd backend/services/geospatial_harmonization && uv run pytest tests/test_postgres_locking.py
+
+  ghs-live-nasa-smoke:
+    name: GHS Live NASA Smoke Test
+    if: ${{ inputs.run_live_nasa_tests }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.13"
+          enable-cache: true
+          cache-dependency-glob: "backend/services/geospatial_harmonization/uv.lock"
+      - name: Validate EARTHDATA_TOKEN secret availability
+        env:
+          HAS_TOKEN: ${{ secrets.EARTHDATA_TOKEN != '' }}
+        run: |
+          if [ "$HAS_TOKEN" != "true" ]; then
+            echo "EARTHDATA_TOKEN GitHub Actions secret is required for live NASA tests." >&2
+            exit 1
+          fi
+      - name: Install GHS dependencies
+        run: cd backend/services/geospatial_harmonization && uv sync --locked
+      - name: Run live NASA smoke test
+        env:
+          RUN_LIVE_NASA_TESTS: "1"
+          EARTHDATA_TOKEN: ${{ secrets.EARTHDATA_TOKEN }}
+        run: cd backend/services/geospatial_harmonization && uv run pytest tests/test_nasa_live_smoke.py

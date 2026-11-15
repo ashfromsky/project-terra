@@ -128,3 +128,34 @@ def test_partial_correlation_and_multiple_regression() -> None:
     assert res.multiple_regression.r_squared > 0.9
     assert res.multiple_regression.coefficients["x1"] > 1.5
     assert res.multiple_regression.coefficients["x2"] < -1.0
+
+    # Verify pairwise OLS slope preserves response/driver units rather than Pearson r.
+    m_ndvi = VariableMetadata(
+        name="NDVI",
+        canonical_name="ndvi",
+        units="dimensionless",
+        semantic_kind=VariableSemanticKind.CONTINUOUS_INTENSIVE,
+    )
+    m_precip = VariableMetadata(
+        name="precip",
+        canonical_name="precipitation",
+        units="mm/month",
+        semantic_kind=VariableSemanticKind.CONTINUOUS_INTENSIVE,
+    )
+    x_precip = np.linspace(10.0, 200.0, 24)
+    y_ndvi = 0.0025 * x_precip + 0.1  # exact OLS slope = 0.0025 (dimensionless / (mm/month))
+    ts_m = [datetime(2020, 1, 1, tzinfo=UTC) + timedelta(days=30 * i) for i in range(24)]
+    pair_res = analyze_cross_variables(
+        response_name="ndvi",
+        response_series=(ts_m, y_ndvi, m_ndvi, DataSourceId.CUSTOM, 1000.0),
+        predictors={"precip": (ts_m, x_precip, m_precip, DataSourceId.CUSTOM, 1000.0)},
+        config=CrossVariableConfig(deseasonalize=False, max_lag_steps=0),
+    )
+    assert len(pair_res.pairwise) == 1
+    p0 = pair_res.pairwise[0]
+    assert p0.pearson_r == pytest.approx(1.0)
+    assert p0.ols_slope == pytest.approx(0.0025)
+    assert p0.ols_slope != pytest.approx(p0.pearson_r)
+    assert p0.slope_unit == "dimensionless/mm/month"
+    assert p0.ols_slope_se is not None
+    assert p0.ols_slope_p is not None and p0.ols_slope_p < 1e-6

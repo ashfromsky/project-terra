@@ -1,6 +1,14 @@
-import { describe, expect, it } from 'vitest'
-import { ApiError, extractErrorDetail, unwrapApiResponse } from '../client'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { ApiError, apiFetchClient, extractErrorDetail, unwrapApiResponse } from '../client'
 import { buildGitHubLoginUrl } from '../auth'
+import {
+  createAssessment,
+  executeAssessment,
+  fetchAssessmentDetail,
+  fetchAssessmentMethods,
+  fetchAssessments,
+  parseScientificAssessmentResult,
+} from '../assessments'
 import type { RegionResponse } from '../contracts'
 import { regionResponseToAoiFeature, toRegionGeometryInput } from '../regions'
 import { normalizeAoiGeometry } from '../../lib/geojson-utils'
@@ -282,8 +290,250 @@ describe('resolveLayerControlState', () => {
     ).toEqual({
       visible: false,
       opacity: 0.4,
-      minValue: 0.2,
       maxValue: 0.9,
+      minValue: 0.2,
+    })
+  })
+})
+
+describe('assessments API adapters and result parser', () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it('parses separated resilience dimensions, event traceability, quality, uncertainty, and provenance', () => {
+    const parsed = parseScientificAssessmentResult({
+      assessment_id: 'assess-001',
+      status: 'completed_partial',
+      warnings: ['Censored post-event window.'],
+      errors: [],
+      stages: [
+        {
+          stage_name: 'disturbance_recovery_resilience',
+          priority: 'P1',
+          status: 'completed',
+          duration_ms: 12.4,
+          warnings: [],
+          errors: [],
+        },
+      ],
+      quality_reports: [
+        {
+          dataset_id: 'mod13-poly',
+          variable_name: 'NDVI',
+          total_steps: 84,
+          valid_steps: 80,
+          missing_steps: 4,
+          valid_fraction: 0.9524,
+          missing_fraction: 0.0476,
+          qa_screened_out_count: 3,
+          out_of_range_count: 1,
+          warnings: [],
+        },
+      ],
+      trends: [
+        {
+          dataset_id: 'mod13-poly',
+          variable_name: 'NDVI',
+          variant: 'deseasonalized',
+          sample_count: 84,
+          valid_count: 80,
+          direction: 'no_trend',
+          p_value: 0.42,
+          sens_slope: 0.0012,
+          slope_unit: 'dimensionless/year',
+          warnings: [],
+        },
+      ],
+      resilience: [
+        {
+          dataset_id: 'mod13-poly',
+          variable_name: 'NDVI',
+          resistance: {
+            dimension: 'resistance',
+            available: true,
+            status: 'completed',
+            value: 0.25,
+            unit: 'dimensionless_(0..1]',
+            formula: 'mean_i(1 / (1 + |z_neg_peak,i|))',
+            interpretation: 'Negative peak deflection.',
+            assumptions: [],
+            limitations: [],
+            event_values: [
+              {
+                event_start: '2022-06-01T00:00:00Z',
+                event_end: '2022-08-01T00:00:00Z',
+                peak_negative_zscore: -3.0,
+                resistance: 0.25,
+              },
+            ],
+          },
+          recovery: {
+            dimension: 'recovery',
+            available: false,
+            status: 'insufficient_data',
+            value: null,
+            unit: 'fraction_[0..1]',
+            formula: 'mean((x_end_or_rec - x_peak) / (x_pre - x_peak))',
+            interpretation: 'Insufficient pre-event data.',
+          },
+          stability: {
+            dimension: 'stability',
+            available: true,
+            status: 'completed',
+            value: 0.51,
+            unit: 'dimensionless_(0..1]',
+            formula: '1 / (1 + std(standardized_deseasonalized_residuals))',
+            interpretation: 'Dimensionless variance.',
+          },
+          sensitivity: {
+            dimension: 'sensitivity',
+            available: true,
+            status: 'completed',
+            value: 0.0024,
+            unit: 'dimensionless/mm/month',
+            formula: 'OLS slope of response anomaly against forcing driver anomaly',
+            interpretation: 'Non-causal co-variation.',
+          },
+          composite_tri: {
+            status: 'unavailable_unvalidated',
+            value: null,
+            reason: 'TRI weights withheld until calibrated.',
+          },
+        },
+      ],
+      uncertainty: {
+        data_quality_confidence: 'high',
+        data_quality_rationale: '95% valid.',
+        statistical_confidence: 'moderate',
+        statistical_rationale: 'Moderate sample span.',
+        scientific_confidence: 'moderate',
+        scientific_rationale: 'Proxy-only indicator.',
+        methodological_limitations: ['Remote sensing proxy only.'],
+      },
+      provenance: {
+        input_digest_sha256: 'abc123',
+        config_digest_sha256: 'def456',
+        generated_at_utc: '2026-11-15T10:00:00Z',
+        dataset_lineage: [{ dataset_id: 'mod13-poly' }],
+        methods_invoked: [
+          { method_id: 'resilience_dimensions', version: '1.1.0', name: 'Resilience' },
+        ],
+        package_versions: { numpy: '2.2.0' },
+      },
+    })
+
+    expect(parsed).not.toBeNull()
+    expect(parsed?.status).toBe('completed_partial')
+    expect(parsed?.qualityReports[0]?.qaScreenedOutCount).toBe(3)
+    expect(parsed?.resilience[0]?.resistance?.eventValues[0]?.peakNegativeZscore).toBe(-3.0)
+    expect(parsed?.resilience[0]?.recovery?.status).toBe('insufficient_data')
+    expect(parsed?.resilience[0]?.sensitivity?.unit).toBe('dimensionless/mm/month')
+    expect(parsed?.resilience[0]?.compositeTriStatus).toBe('unavailable_unvalidated')
+    expect(parsed?.provenance?.inputDigestSha256).toBe('abc123')
+    expect(parseScientificAssessmentResult(null)).toBeNull()
+  })
+
+  it('calls assessments endpoints and surfaces HTTP/API errors via ApiError', async () => {
+    const getSpy = vi.spyOn(apiFetchClient, 'GET')
+    const postSpy = vi.spyOn(apiFetchClient, 'POST')
+
+    getSpy.mockResolvedValueOnce({
+      data: [
+        {
+          methodId: 'mann_kendall',
+          version: '1.0.0',
+          name: 'Mann-Kendall',
+          priority: 'P0',
+          implemented: true,
+          formulaSummary: 'tau',
+          assumptions: [],
+          limitations: [],
+          reference: 'Kendall',
+        },
+      ],
+      response: new Response(null, { status: 200 }),
+    } as never)
+    const methods = await fetchAssessmentMethods()
+    expect(methods[0]?.methodId).toBe('mann_kendall')
+    expect(getSpy).toHaveBeenCalledWith('/api/v1/assessments/methods')
+
+    getSpy.mockResolvedValueOnce({
+      error: { detail: 'Not authenticated' },
+      response: new Response(null, { status: 401 }),
+    } as never)
+    await expect(fetchAssessments()).rejects.toMatchObject({
+      name: 'ApiError',
+      status: 401,
+      detail: 'Not authenticated',
+    })
+
+    postSpy.mockResolvedValueOnce({
+      data: {
+        id: 'a-1',
+        ownerId: 'u-1',
+        regionId: null,
+        title: 'Test',
+        status: 'queued',
+        ghsDatasetIds: [],
+        errorMessage: null,
+        createdAt: '2026-11-15T10:00:00Z',
+        updatedAt: '2026-11-15T10:00:00Z',
+        completedAt: null,
+        requestConfig: {},
+        result: null,
+        artifactPaths: {},
+      },
+      response: new Response(null, { status: 201 }),
+    } as never)
+    const created = await createAssessment({
+      title: 'Test',
+      executeNow: false,
+      requestConfig: {},
+    })
+    expect(created.status).toBe('queued')
+    expect(postSpy).toHaveBeenCalledWith('/api/v1/assessments', {
+      body: { title: 'Test', executeNow: false, requestConfig: {} },
+    })
+
+    postSpy.mockResolvedValueOnce({
+      data: {
+        id: 'a-1',
+        ownerId: 'u-1',
+        regionId: null,
+        title: 'Test',
+        status: 'completed',
+        ghsDatasetIds: [],
+        errorMessage: null,
+        createdAt: '2026-11-15T10:00:00Z',
+        updatedAt: '2026-11-15T10:00:05Z',
+        completedAt: '2026-11-15T10:00:05Z',
+        requestConfig: {},
+        result: { status: 'completed' },
+        artifactPaths: {},
+      },
+      response: new Response(null, { status: 200 }),
+    } as never)
+    const executed = await executeAssessment('a-1')
+    expect(executed.status).toBe('completed')
+    expect(postSpy).toHaveBeenCalledWith('/api/v1/assessments/{assessment_id}/execute', {
+      params: { path: { assessment_id: 'a-1' } },
+    })
+
+    getSpy.mockResolvedValueOnce({
+      error: { detail: 'GHS unreachable' },
+      response: new Response(null, { status: 502 }),
+    } as never)
+    await expect(fetchAssessmentDetail('a-1')).rejects.toMatchObject({
+      name: 'ApiError',
+      status: 502,
+      detail: 'GHS unreachable',
+    })
+
+    getSpy.mockRejectedValueOnce(new Error('connect ECONNREFUSED'))
+    await expect(fetchAssessmentDetail('a-1')).rejects.toMatchObject({
+      name: 'ApiError',
+      status: 0,
     })
   })
 })

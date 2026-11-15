@@ -35,3 +35,8 @@ export type RegionGeometryResponse = components['schemas']['RegionGeometryRespon
 export type RegionStatisticsResponse = components['schemas']['RegionStatisticsResponse']
 export type RegionGeometryInput = RegionCreateRequest['geometry']
 export type RegionGeometryOutput = RegionResponse['geometry']
+
+export type MethodCatalogItemResponse = components['schemas']['MethodCatalogItemResponse']
+export type CreateAssessmentRequest = components['schemas']['CreateAssessmentRequest']
+export type AssessmentSummaryResponse = components['schemas']['AssessmentSummaryResponse']
+export type AssessmentDetailResponse = components['schemas']['AssessmentDetailResponse']
