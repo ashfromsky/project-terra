@@ -71,3 +71,44 @@ def test_provider_enable_flags_and_token_helpers(monkeypatch: pytest.MonkeyPatch
     )
     assert settings_with_creds.has_earthdata_token() is True
     assert settings_with_creds.is_provider_enabled("generic") is True
+
+
+def test_ghs_database_url_overrides_database_url_when_not_explicit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("DATABASE_URL", "sqlite+aiosqlite:///./core_should_not_win.db")
+    monkeypatch.setenv("GHS_DATABASE_URL", "sqlite+aiosqlite:////tmp/terra_ghs_dedicated.db")
+
+    settings = Settings(_env_file=None, environment="test")
+
+    assert settings.database_url == "sqlite+aiosqlite:////tmp/terra_ghs_dedicated.db"
+    assert settings.ghs_database_url == "sqlite+aiosqlite:////tmp/terra_ghs_dedicated.db"
+
+    explicit = Settings(
+        _env_file=None,
+        environment="test",
+        database_url="sqlite+aiosqlite:////tmp/explicit_override.db",
+    )
+    assert explicit.database_url == "sqlite+aiosqlite:////tmp/explicit_override.db"
+
+
+def test_s3_credentials_accept_aws_and_s3_aliases_and_mask_secrets(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("AWS_ACCESS_KEY_ID", "aws-key-id")
+    monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "aws-secret-value")
+
+    aws_settings = Settings(_env_file=None, environment="test")
+    assert aws_settings.effective_s3_access_key_id() == "aws-key-id"
+    assert aws_settings.effective_s3_secret_access_key() == "aws-secret-value"
+    assert "aws-secret-value" not in repr(aws_settings)
+
+    monkeypatch.delenv("AWS_ACCESS_KEY_ID", raising=False)
+    monkeypatch.delenv("AWS_SECRET_ACCESS_KEY", raising=False)
+    monkeypatch.setenv("S3_ACCESS_KEY_ID", "r2-key-id")
+    monkeypatch.setenv("S3_SECRET_ACCESS_KEY", "r2-secret-value")
+
+    s3_settings = Settings(_env_file=None, environment="test")
+    assert s3_settings.effective_s3_access_key_id() == "r2-key-id"
+    assert s3_settings.effective_s3_secret_access_key() == "r2-secret-value"
+    assert "r2-secret-value" not in repr(s3_settings)

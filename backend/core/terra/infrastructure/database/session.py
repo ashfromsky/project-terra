@@ -3,9 +3,11 @@
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Any
 
-from sqlalchemy import text
+from sqlalchemy import event, text
+from sqlalchemy.engine import make_url
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
@@ -21,10 +23,21 @@ from terra.infrastructure.database.base import Base
 logger = logging.getLogger("terra.database")
 
 
+def _ensure_sqlite_parent_dir(database_url: str) -> None:
+    url = make_url(database_url)
+    if url.get_backend_name() != "sqlite":
+        return
+    db = url.database
+    if db in (None, "", ":memory:") or url.query.get("mode") == "memory":
+        return
+    Path(db).expanduser().resolve().parent.mkdir(parents=True, exist_ok=True)
+
+
 def _build_engine_kwargs(settings: Settings) -> dict[str, Any]:
     kwargs: dict[str, Any] = {"echo": settings.database_echo}
     if settings.database_url.startswith("sqlite"):
-        kwargs["connect_args"] = {"check_same_thread": False}
+        _ensure_sqlite_parent_dir(settings.database_url)
+        kwargs["connect_args"] = {"check_same_thread": False, "timeout": 30.0}
         if ":memory:" in settings.database_url:
             kwargs["poolclass"] = StaticPool
     else:
@@ -40,6 +53,18 @@ class DatabaseManager:
             settings.database_url,
             **_build_engine_kwargs(settings),
         )
+        if settings.database_url.startswith("sqlite"):
+
+            @event.listens_for(self._engine.sync_engine, "connect")
+            def _configure_sqlite_connection(
+                dbapi_connection: Any, _connection_record: object
+            ) -> None:
+                cursor = dbapi_connection.cursor()
+                try:
+                    cursor.execute("PRAGMA busy_timeout = 30000")
+                finally:
+                    cursor.close()
+
         self._session_factory: async_sessionmaker[AsyncSession] = async_sessionmaker(
             bind=self._engine,
             expire_on_commit=False,

@@ -9,7 +9,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Annotated, Any, Literal
 
-from pydantic import Field, SecretStr, field_validator, model_validator
+from pydantic import Field, PrivateAttr, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 Environment = Literal["development", "test", "production"]
@@ -63,6 +63,7 @@ class Settings(BaseSettings):
     cors_allow_headers: Annotated[list[str], NoDecode] = Field(default_factory=lambda: ["*"])
 
     database_url: str = "sqlite+aiosqlite:///./ghs.db"
+    ghs_database_url: str | None = None
     database_echo: bool = False
 
     storage_backend: StorageBackend = "local"
@@ -70,6 +71,18 @@ class Settings(BaseSettings):
     s3_bucket: str | None = None
     s3_endpoint_url: str | None = None
     s3_region: str = "us-east-1"
+    s3_access_key_id: SecretStr | None = None
+    s3_secret_access_key: SecretStr | None = None
+    aws_access_key_id: SecretStr | None = None
+    aws_secret_access_key: SecretStr | None = None
+    _init_database_url_provided: bool = PrivateAttr(default=False)
+
+    def __init__(self, **data: Any) -> None:
+        explicit_db = "database_url" in data
+        super().__init__(**data)
+        if not explicit_db and self.ghs_database_url and self.ghs_database_url.strip():
+            self.database_url = self.ghs_database_url.strip()
+        self._init_database_url_provided = explicit_db
 
     ghs_storage_budget_bytes: int = Field(default=8_000_000_000, ge=1)
     ghs_storage_warning_threshold: float = Field(default=0.80, gt=0.0, le=1.0)
@@ -124,11 +137,14 @@ class Settings(BaseSettings):
     http_retry_backoff_seconds: float = Field(default=1.0, ge=0.0, le=60.0)
     http_max_download_bytes: int = Field(default=2_147_483_648, ge=1)
     worker_poll_interval_seconds: float = Field(default=2.0, gt=0.0, le=60.0)
+    ghs_worker_poll_seconds: float | None = Field(default=None, gt=0.0, le=60.0)
     worker_lease_seconds: int = Field(default=300, ge=30, le=86400)
     max_grid_pixels: int = Field(default=100_000_000, ge=1)
 
     @model_validator(mode="after")
     def _validate_storage_constraints(self) -> "Settings":
+        if self.ghs_worker_poll_seconds is not None:
+            self.worker_poll_interval_seconds = self.ghs_worker_poll_seconds
         if self.ghs_storage_warning_threshold > self.ghs_storage_hard_limit_threshold:
             raise ValueError(
                 "ghs_storage_warning_threshold cannot exceed ghs_storage_hard_limit_threshold"
@@ -157,6 +173,22 @@ class Settings(BaseSettings):
     def has_earthdata_token(self) -> bool:
         """Return True when a non-empty Earthdata credential is configured without exposing it."""
         return bool(self.earthdata_token and self.earthdata_token.get_secret_value().strip())
+
+    def effective_s3_access_key_id(self) -> str | None:
+        """Return non-empty AWS or S3 access key ID without exposing SecretStr in repr."""
+        token = self.aws_access_key_id or self.s3_access_key_id
+        if token is None:
+            return None
+        value = token.get_secret_value().strip()
+        return value or None
+
+    def effective_s3_secret_access_key(self) -> str | None:
+        """Return non-empty AWS or S3 secret access key without exposing SecretStr in repr."""
+        token = self.aws_secret_access_key or self.s3_secret_access_key
+        if token is None:
+            return None
+        value = token.get_secret_value().strip()
+        return value or None
 
     def is_provider_enabled(self, provider: str) -> bool:
         """Return whether the given provider is enabled by configuration."""
