@@ -41,6 +41,7 @@ export interface UseWorldMapParams {
   layerVisibility: MapLayerVisibility
   activeLayer: MapLayerDefinition | null
   regions: readonly RegionResponse[]
+  selectedDate?: string
 }
 
 export function useWorldMap({
@@ -55,6 +56,7 @@ export function useWorldMap({
   layerVisibility,
   activeLayer,
   regions,
+  selectedDate,
 }: UseWorldMapParams): WorldMapController {
   const mapRef = useRef<MapLibreMap | null>(null)
   const deckOverlayRef = useRef<MapLibreOverlay | null>(null)
@@ -277,7 +279,7 @@ export function useWorldMap({
       return
     }
 
-    const effectiveDate = resolveLayerEffectiveDate(activeLayer, '')
+    const effectiveDate = resolveLayerEffectiveDate(activeLayer, selectedDate ?? '')
     const tileUrl =
       activeLayer && activeLayer.availabilityStatus === 'connected'
         ? buildLayerTileUrlTemplate(activeLayer.id, { timestamp: effectiveDate })
@@ -384,6 +386,7 @@ export function useWorldMap({
     selectedCountry?.isoA3,
     selectedRegion,
     selectedVariable,
+    selectedDate,
   ])
 
   const previousRegionRef = useRef<RegionOption>(selectedRegion)

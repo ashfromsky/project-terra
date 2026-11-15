@@ -6,6 +6,7 @@ import { useLayerCatalogQuery } from '../../../shared/api/layers'
 import { useRegionsQuery } from '../../../shared/api/regions'
 import { APP_ROUTES } from '../../../shared/config/routes'
 import { useUiStore } from '../../../shared/store/ui-store'
+import { useExploreStore } from '../../../features/map-explorer/model/use-explore-store'
 import { VARIABLE_TO_LAYER_ID } from '../config/map-style'
 import { useWorldMap } from '../lib/use-world-map'
 import { MapControlsToolbar } from './MapControlsToolbar'
@@ -27,6 +28,7 @@ export function WorldMap({ expandedCanvas = false }: WorldMapProps) {
   const hoveredCountry = useUiStore((state) => state.hoveredCountry)
   const setHoveredCountry = useUiStore((state) => state.setHoveredCountry)
   const layerVisibility = useUiStore((state) => state.layerVisibility)
+  const selectedDate = useExploreStore((state) => state.selectedDate)
 
   const currentUserQuery = useCurrentUserQuery()
   const isAuthenticated = Boolean(currentUserQuery.data)
@@ -60,6 +62,7 @@ export function WorldMap({ expandedCanvas = false }: WorldMapProps) {
     layerVisibility,
     activeLayer,
     regions,
+    selectedDate,
   })
 
   return (

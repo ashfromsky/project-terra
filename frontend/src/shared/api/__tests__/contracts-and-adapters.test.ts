@@ -29,6 +29,8 @@ import {
   inspectLayerPoint,
   resolveLayerEffectiveDate,
 } from '../layers'
+import { fetchZonalStatistics, fetchZonalTimeseries } from '../analytics'
+import { buildHistogramChartOption } from '../../lib/scientific-charts'
 import { normalizeAoiGeometry } from '../../lib/geojson-utils'
 import type { AoiGeometry, MapLayerDefinition } from '../../types/geospatial'
 import { resolveLayerControlState } from '../../../features/map-explorer/model/explore-store.types'
@@ -1333,5 +1335,89 @@ describe('assessments API adapters and result parser', () => {
     })
     expect(parsedSnakeResult?.readiness?.overallStatus).toBe('partial')
     expect(parsedSnakeResult?.readiness?.criteria[0]?.missingGap).toBe('Short by 6 steps')
+  })
+
+  it('queries zonal statistics, time series, and builds histogram options', async () => {
+    const postSpy = vi.spyOn(apiFetchClient, 'POST').mockImplementation(async (path: string) => {
+      if (path === '/api/v1/analytics/zonal-statistics') {
+        return {
+          data: {
+            metricId: 'ndvi-mod13q1',
+            date: '2024-06-01',
+            datasetId: 'ds-1',
+            mean: 0.65,
+            median: 0.66,
+            min: 0.1,
+            max: 0.9,
+            std: 0.08,
+            q10: 0.52,
+            q25: 0.59,
+            q75: 0.72,
+            q90: 0.79,
+            validPixelCount: 500,
+            totalPixelCount: 500,
+            validDataCoverage: 1.0,
+            approxAreaKm2: 250.0,
+            units: 'index',
+            histogram: {
+              bins: [0.2, 0.4, 0.6, 0.8],
+              counts: [10, 50, 200, 240],
+            },
+          },
+          error: undefined,
+          response: new Response(),
+        } as never
+      }
+      if (path === '/api/v1/analytics/zonal-statistics/timeseries') {
+        return {
+          data: {
+            metricId: 'ndvi-mod13q1',
+            units: 'index',
+            series: [
+              {
+                date: '2024-06-01',
+                mean: 0.65,
+                median: 0.66,
+                min: 0.1,
+                max: 0.9,
+                q25: 0.59,
+                q75: 0.72,
+                validDataCoverage: 1.0,
+              },
+            ],
+          },
+          error: undefined,
+          response: new Response(),
+        } as never
+      }
+      return { data: undefined, error: 'Not found', response: new Response() } as never
+    })
+
+    const stats = await fetchZonalStatistics({
+      metricId: 'ndvi',
+      date: '2024-06-01',
+      geometry: { type: 'Polygon', coordinates: [] },
+    })
+    expect(stats.mean).toBe(0.65)
+    expect(stats.histogram.counts).toHaveLength(4)
+
+    const ts = await fetchZonalTimeseries({
+      metricId: 'ndvi',
+      regionId: '00000000-0000-0000-0000-000000000001',
+    })
+    expect(ts.series).toHaveLength(1)
+    expect(ts.series[0]?.mean).toBe(0.65)
+
+    const histOpt = buildHistogramChartOption({
+      bins: [0.2, 0.4, 0.6, 0.8],
+      counts: [10, 50, 200, 240],
+      variableName: 'NDVI',
+      units: 'index',
+    })
+    const seriesList = Array.isArray(histOpt.series) ? histOpt.series : []
+    expect(seriesList).toHaveLength(1)
+    expect((seriesList[0] as { data?: unknown }).data).toEqual([10, 50, 200, 240])
+
+    postSpy.mockRestore()
   })
 })

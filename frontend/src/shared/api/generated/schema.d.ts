@@ -420,6 +420,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/layers/{layer_id}/tilejson.json": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Layer Tilejson
+         * @description Return TileJSON 2.2.0 metadata for this layer.
+         */
+        get: operations["get_layer_tilejson_api_v1_layers__layer_id__tilejson_json_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/layers/{layer_id}/render.png": {
         parameters: {
             query?: never;
@@ -454,6 +474,90 @@ export interface paths {
         get: operations["inspect_layer_point_api_v1_layers__layer_id__point_get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tiles/{metric_id}/{date}/{z}/{x}/{y}.png": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Metric Tile
+         * @description Serve an XYZ RGBA PNG tile for the specified metric, date, and tile coordinates.
+         */
+        get: operations["get_metric_tile_api_v1_tiles__metric_id___date___z___x___y__png_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tiles/{metric_id}/{date}/tilejson.json": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Metric Tilejson
+         * @description Generate TileJSON 2.2.0 metadata for the metric and date.
+         */
+        get: operations["get_metric_tilejson_api_v1_tiles__metric_id___date__tilejson_json_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/analytics/zonal-statistics": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Compute Zonal Statistics
+         * @description Compute physical raster zonal statistics within a GeoJSON geometry or region.
+         */
+        post: operations["compute_zonal_statistics_api_v1_analytics_zonal_statistics_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/analytics/zonal-statistics/timeseries": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Compute Zonal Timeseries Get
+         * @description Query temporal time series of zonal statistics for a saved region.
+         */
+        get: operations["compute_zonal_timeseries_get_api_v1_analytics_zonal_statistics_timeseries_get"];
+        put?: never;
+        /**
+         * Compute Zonal Timeseries Post
+         * @description Compute temporal time series of zonal statistics within a geometry or region.
+         */
+        post: operations["compute_zonal_timeseries_post_api_v1_analytics_zonal_statistics_timeseries_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2574,6 +2678,107 @@ export interface components {
             /** Meanvaluedelta */
             meanValueDelta?: number | null;
         };
+        /** ZonalHistogramResponse */
+        ZonalHistogramResponse: {
+            /** Bins */
+            bins: number[];
+            /** Counts */
+            counts: number[];
+        };
+        /** ZonalStatisticsRequest */
+        ZonalStatisticsRequest: {
+            /** Metricid */
+            metricId: string;
+            /** Date */
+            date?: string | null;
+            /** Geometry */
+            geometry?: {
+                [key: string]: unknown;
+            } | null;
+            /** Regionid */
+            regionId?: string | null;
+        };
+        /** ZonalStatisticsResponse */
+        ZonalStatisticsResponse: {
+            /** Metricid */
+            metricId: string;
+            /** Date */
+            date: string;
+            /** Datasetid */
+            datasetId: string;
+            /** Mean */
+            mean?: number | null;
+            /** Median */
+            median?: number | null;
+            /** Min */
+            min?: number | null;
+            /** Max */
+            max?: number | null;
+            /** Std */
+            std?: number | null;
+            /** Q10 */
+            q10?: number | null;
+            /** Q25 */
+            q25?: number | null;
+            /** Q75 */
+            q75?: number | null;
+            /** Q90 */
+            q90?: number | null;
+            /** Validpixelcount */
+            validPixelCount: number;
+            /** Totalpixelcount */
+            totalPixelCount: number;
+            /** Validdatacoverage */
+            validDataCoverage: number;
+            /** Approxareakm2 */
+            approxAreaKm2: number;
+            /** Units */
+            units?: string | null;
+            histogram: components["schemas"]["ZonalHistogramResponse"];
+        };
+        /** ZonalTimeseriesPointResponse */
+        ZonalTimeseriesPointResponse: {
+            /** Date */
+            date: string;
+            /** Mean */
+            mean?: number | null;
+            /** Median */
+            median?: number | null;
+            /** Min */
+            min?: number | null;
+            /** Max */
+            max?: number | null;
+            /** Q25 */
+            q25?: number | null;
+            /** Q75 */
+            q75?: number | null;
+            /** Validdatacoverage */
+            validDataCoverage: number;
+        };
+        /** ZonalTimeseriesRequest */
+        ZonalTimeseriesRequest: {
+            /** Metricid */
+            metricId: string;
+            /** Geometry */
+            geometry?: {
+                [key: string]: unknown;
+            } | null;
+            /** Regionid */
+            regionId?: string | null;
+            /** Startdate */
+            startDate?: string | null;
+            /** Enddate */
+            endDate?: string | null;
+        };
+        /** ZonalTimeseriesResponse */
+        ZonalTimeseriesResponse: {
+            /** Metricid */
+            metricId: string;
+            /** Units */
+            units?: string | null;
+            /** Series */
+            series: components["schemas"]["ZonalTimeseriesPointResponse"][];
+        };
     };
     responses: never;
     parameters: never;
@@ -2717,8 +2922,8 @@ export interface operations {
     };
     github_callback_api_v1_auth_github_callback_get: {
         parameters: {
-            query: {
-                state: string;
+            query?: {
+                state?: string | null;
                 code?: string | null;
                 error?: string | null;
                 redirect?: boolean;
@@ -3250,6 +3455,43 @@ export interface operations {
             };
         };
     };
+    get_layer_tilejson_api_v1_layers__layer_id__tilejson_json_get: {
+        parameters: {
+            query?: {
+                timestamp?: string | null;
+                vmin?: number | null;
+                vmax?: number | null;
+            };
+            header?: never;
+            path: {
+                layer_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_layer_render_png_api_v1_layers__layer_id__render_png_get: {
         parameters: {
             query: {
@@ -3314,6 +3556,182 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["LayerPointInspectionResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_metric_tile_api_v1_tiles__metric_id___date___z___x___y__png_get: {
+        parameters: {
+            query?: {
+                vmin?: number | null;
+                vmax?: number | null;
+            };
+            header?: never;
+            path: {
+                metric_id: string;
+                date: string;
+                z: number;
+                x: number;
+                y: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                    "image/png": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_metric_tilejson_api_v1_tiles__metric_id___date__tilejson_json_get: {
+        parameters: {
+            query?: {
+                vmin?: number | null;
+                vmax?: number | null;
+            };
+            header?: never;
+            path: {
+                metric_id: string;
+                date: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    compute_zonal_statistics_api_v1_analytics_zonal_statistics_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ZonalStatisticsRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ZonalStatisticsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    compute_zonal_timeseries_get_api_v1_analytics_zonal_statistics_timeseries_get: {
+        parameters: {
+            query: {
+                metricId: string;
+                regionId?: string | null;
+                startDate?: string | null;
+                endDate?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ZonalTimeseriesResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    compute_zonal_timeseries_post_api_v1_analytics_zonal_statistics_timeseries_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ZonalTimeseriesRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ZonalTimeseriesResponse"];
                 };
             };
             /** @description Validation Error */
