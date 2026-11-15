@@ -53,7 +53,7 @@ export interface paths {
         };
         /**
          * Health Ready
-         * @description Verify runtime dependency readiness (database connectivity).
+         * @description Verify runtime dependency readiness (database and object storage connectivity).
          */
         get: operations["health_ready_health_ready_get"];
         put?: never;
@@ -584,6 +584,66 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/data-sources/datasets/{dataset_id}/download-url": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Prepared Dataset Download Url
+         * @description Resolve a direct presigned R2 URL (when enabled) or authenticated Core download endpoint.
+         */
+        get: operations["get_prepared_dataset_download_url_api_v1_data_sources_datasets__dataset_id__download_url_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/data-sources/datasets/{dataset_id}/download": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Download Prepared Dataset Asset
+         * @description Stream the primary harmonized GeoTIFF/JSON asset from GHS/R2 via Core authentication.
+         */
+        get: operations["download_prepared_dataset_asset_api_v1_data_sources_datasets__dataset_id__download_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/data-sources/provision": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Auto Provision Datasets
+         * @description Adaptively resolve, ingest, and evaluate real datasets for an AOI and analysis window.
+         */
+        post: operations["auto_provision_datasets_api_v1_data_sources_provision_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/assessments/methods": {
         parameters: {
             query?: never;
@@ -688,6 +748,66 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/assessments/{assessment_id}/artifacts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Assessment Artifacts
+         * @description List downloadable artifacts (keys and optional presigned R2 URLs) for an assessment.
+         */
+        get: operations["list_assessment_artifacts_api_v1_assessments__assessment_id__artifacts_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/assessments/readiness": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Evaluate Assessment Readiness Endpoint
+         * @description Evaluate adaptive dataset and methodological readiness prior to running an assessment.
+         */
+        post: operations["evaluate_assessment_readiness_endpoint_api_v1_assessments_readiness_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/assessments/{assessment_id}/artifacts/{artifact_name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Download Assessment Artifact
+         * @description Download an assessment JSON/provenance artifact owned by the authenticated user.
+         */
+        get: operations["download_assessment_artifact_api_v1_assessments__assessment_id__artifacts__artifact_name__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -740,6 +860,33 @@ export interface components {
             createdAt: string;
             /** Isoa3 */
             isoA3?: string | null;
+        };
+        /**
+         * AssessmentArtifactItemResponse
+         * @description Descriptor and download endpoints for a persisted assessment artifact.
+         */
+        AssessmentArtifactItemResponse: {
+            /** Name */
+            name: string;
+            /** Objectkey */
+            objectKey: string;
+            /** Contenttype */
+            contentType: string;
+            /** Sizebytes */
+            sizeBytes: number;
+            /** Checksumsha256 */
+            checksumSha256?: string | null;
+            /** Storagebackend */
+            storageBackend: string;
+            /** Downloadpath */
+            downloadPath: string;
+            /** Presignedurl */
+            presignedUrl?: string | null;
+            /**
+             * Presigned
+             * @default false
+             */
+            presigned: boolean;
         };
         /**
          * AssessmentComparisonResponse
@@ -815,6 +962,53 @@ export interface components {
             };
         };
         /**
+         * AssessmentReadinessRequest
+         * @description Request payload evaluating pre-run scientific readiness for datasets and AOI.
+         */
+        AssessmentReadinessRequest: {
+            /** Regionid */
+            regionId?: string | null;
+            /** Requestconfig */
+            requestConfig: {
+                [key: string]: unknown;
+            };
+            /** Ghsdatasetids */
+            ghsDatasetIds?: string[];
+            /** Inlinedatasets */
+            inlineDatasets?: {
+                [key: string]: unknown;
+            }[];
+        };
+        /**
+         * AssessmentReadinessResponse
+         * @description Structured pre-run or post-run adaptive readiness diagnostic report.
+         */
+        AssessmentReadinessResponse: {
+            /** Specversion */
+            specVersion: string;
+            /**
+             * Evaluatedatutc
+             * Format: date-time
+             */
+            evaluatedAtUtc: string;
+            /** Overallstatus */
+            overallStatus: string;
+            /** Summary */
+            summary: string;
+            /** Datasets */
+            datasets?: components["schemas"]["DatasetReadinessProfileResponse"][];
+            /** Criteria */
+            criteria?: components["schemas"]["ReadinessCriterionResponse"][];
+            /** Metrics */
+            metrics?: components["schemas"]["MetricAvailabilityResponse"][];
+            /** Recommendedactions */
+            recommendedActions?: string[];
+            /** Suggestedwindowstart */
+            suggestedWindowStart?: string | null;
+            /** Suggestedwindowend */
+            suggestedWindowEnd?: string | null;
+        };
+        /**
          * AssessmentSummaryResponse
          * @description Summary representation of a persisted Scientific Assessment.
          */
@@ -869,6 +1063,108 @@ export interface components {
              */
             tokenType: "bearer";
             user: components["schemas"]["UserResponse"];
+        };
+        /**
+         * AutoProvisionRequest
+         * @description Adaptive multi-source discovery and provisioning request for an AOI and window.
+         */
+        AutoProvisionRequest: {
+            /** Regionid */
+            regionId?: string | null;
+            /** Bbox */
+            bbox?: [
+                number,
+                number,
+                number,
+                number
+            ] | null;
+            /**
+             * Analysisstart
+             * Format: date-time
+             */
+            analysisStart: string;
+            /**
+             * Analysisend
+             * Format: date-time
+             */
+            analysisEnd: string;
+            /**
+             * Targetcadence
+             * @default monthly
+             */
+            targetCadence: string;
+            /**
+             * Baselinetype
+             * @default out_of_sample
+             */
+            baselineType: string;
+            /** Referencestart */
+            referenceStart?: string | null;
+            /** Referenceend */
+            referenceEnd?: string | null;
+            /**
+             * Minreferenceyears
+             * @default 3
+             */
+            minReferenceYears: number;
+            /**
+             * Qalevel
+             * @default strict
+             */
+            qaLevel: string;
+            /** Existingdatasetids */
+            existingDatasetIds?: string[];
+            /** Desireddomains */
+            desiredDomains?: string[];
+            /**
+             * Maxgranulesperproduct
+             * @default 48
+             */
+            maxGranulesPerProduct: number;
+        };
+        /**
+         * AutoProvisionResponse
+         * @description Adaptive provisioning outcome, provisioned datasets, and readiness diagnostics.
+         */
+        AutoProvisionResponse: {
+            /** Bbox */
+            bbox: [
+                number,
+                number,
+                number,
+                number
+            ];
+            /**
+             * Analysisstart
+             * Format: date-time
+             */
+            analysisStart: string;
+            /**
+             * Analysisend
+             * Format: date-time
+             */
+            analysisEnd: string;
+            /**
+             * Provisionstart
+             * Format: date-time
+             */
+            provisionStart: string;
+            /**
+             * Provisionend
+             * Format: date-time
+             */
+            provisionEnd: string;
+            /** Windowexpanded */
+            windowExpanded: boolean;
+            /** Windowexpansionreason */
+            windowExpansionReason?: string | null;
+            /** Datasetids */
+            datasetIds?: string[];
+            /** Datasets */
+            datasets?: components["schemas"]["PreparedDatasetSummaryResponse"][];
+            /** Steps */
+            steps?: components["schemas"]["ProvisioningStepResponse"][];
+            readiness?: components["schemas"]["AssessmentReadinessResponse"] | null;
         };
         /**
          * AvailableTimeRangeResponse
@@ -943,6 +1239,93 @@ export interface components {
             inlineDatasets?: {
                 [key: string]: unknown;
             }[];
+        };
+        /**
+         * DatasetAssetDownloadUrlResponse
+         * @description Download descriptor for a prepared GHS/R2 dataset asset.
+         */
+        DatasetAssetDownloadUrlResponse: {
+            /** Datasetid */
+            datasetId: string;
+            /** Assetid */
+            assetId: string;
+            /** Storagekey */
+            storageKey: string;
+            /** Filename */
+            filename: string;
+            /** Mediatype */
+            mediaType: string;
+            /** Sizebytes */
+            sizeBytes: number;
+            /** Checksumsha256 */
+            checksumSha256: string;
+            /** Downloadurl */
+            downloadUrl: string;
+            /** Presigned */
+            presigned: boolean;
+            /** Expiresin */
+            expiresIn?: number | null;
+        };
+        /**
+         * DatasetReadinessProfileResponse
+         * @description Per-dataset observed coverage, QA presence, and adaptive thresholds.
+         */
+        DatasetReadinessProfileResponse: {
+            /** Datasetid */
+            datasetId: string;
+            /** Sourceid */
+            sourceId: string;
+            /** Product */
+            product: string;
+            /** Variables */
+            variables?: string[];
+            /** Nativecadence */
+            nativeCadence: string;
+            /** Targetcadence */
+            targetCadence: string;
+            /** Observationstart */
+            observationStart?: string | null;
+            /** Observationend */
+            observationEnd?: string | null;
+            /**
+             * Spanyears
+             * @default 0
+             */
+            spanYears: number;
+            /**
+             * Rawstepcount
+             * @default 0
+             */
+            rawStepCount: number;
+            /**
+             * Validqacount
+             * @default 0
+             */
+            validQaCount: number;
+            /**
+             * Validfraction
+             * @default 0
+             */
+            validFraction: number;
+            /** Qalayerspresent */
+            qaLayersPresent?: string[];
+            /**
+             * Hasgridstack
+             * @default false
+             */
+            hasGridStack: boolean;
+            /** Minqafractionrequired */
+            minQaFractionRequired: number;
+            /** Minstepcoveragerequired */
+            minStepCoverageRequired: number;
+            /** Mintrendsamplesrequired */
+            minTrendSamplesRequired: number;
+            /** Minbaselineyearsrequired */
+            minBaselineYearsRequired: number;
+            /** Status */
+            status: string;
+            /** Notes */
+            notes?: string[];
         };
         /**
          * DependencyHealth
@@ -1503,6 +1886,31 @@ export interface components {
             reference: string;
         };
         /**
+         * MetricAvailabilityResponse
+         * @description Availability status of one scientific stage or derived metric.
+         */
+        MetricAvailabilityResponse: {
+            /** Metricid */
+            metricId: string;
+            /** Label */
+            label: string;
+            /** Priority */
+            priority: string;
+            /**
+             * Required
+             * @default true
+             */
+            required: boolean;
+            /** Status */
+            status: string;
+            /** Blockingcriteria */
+            blockingCriteria?: string[];
+            /** Reason */
+            reason: string;
+            /** Remediation */
+            remediation?: string | null;
+        };
+        /**
          * PreparedDatasetSummaryResponse
          * @description Summary and provenance view of a harmonized dataset stored in GHS.
          */
@@ -1546,6 +1954,10 @@ export interface components {
             validFraction?: number | null;
             /** Qapolicy */
             qaPolicy?: string | null;
+            /** Qalayerspresent */
+            qaLayersPresent?: string[];
+            /** Spanyears */
+            spanYears?: number | null;
             /** Regionid */
             regionId?: string | null;
             /** Ingestionoperationid */
@@ -1654,6 +2066,28 @@ export interface components {
             description: string;
         };
         /**
+         * ProvisioningStepResponse
+         * @description Single domain/provider attempt during adaptive data provisioning.
+         */
+        ProvisioningStepResponse: {
+            /** Domain */
+            domain: string;
+            /** Provider */
+            provider: string;
+            /** Product */
+            product: string;
+            /** Status */
+            status: string;
+            /** Datasetid */
+            datasetId?: string | null;
+            /** Windowstart */
+            windowStart?: string | null;
+            /** Windowend */
+            windowEnd?: string | null;
+            /** Detail */
+            detail: string;
+        };
+        /**
          * RasterPointBBoxResponse
          * @description WGS 84 bounding box of the inspected raster dataset.
          */
@@ -1666,6 +2100,44 @@ export interface components {
             maxLon: number;
             /** Maxlat */
             maxLat: number;
+        };
+        /**
+         * ReadinessCriterionResponse
+         * @description Evaluated dataset/method readiness criterion with required vs actual diagnostics.
+         */
+        ReadinessCriterionResponse: {
+            /** Criterionid */
+            criterionId: string;
+            /** Category */
+            category: string;
+            /** Datasetid */
+            datasetId?: string | null;
+            /** Variablename */
+            variableName?: string | null;
+            /** Stageormetric */
+            stageOrMetric: string;
+            /** Title */
+            title: string;
+            /** Requiredsummary */
+            requiredSummary: string;
+            /** Actualsummary */
+            actualSummary: string;
+            /** Requiredvalue */
+            requiredValue?: number | string | null;
+            /** Actualvalue */
+            actualValue?: number | string | null;
+            /** Unit */
+            unit?: string | null;
+            /** Status */
+            status: string;
+            /** Scientificrationale */
+            scientificRationale: string;
+            /** Missinggap */
+            missingGap?: string | null;
+            /** Remediation */
+            remediation?: string | null;
+            /** Specversion */
+            specVersion: string;
         };
         /**
          * ReadinessResponse
@@ -1944,6 +2416,11 @@ export interface components {
              * @default false
              */
             devAuthEnabled: boolean;
+            /**
+             * Storagebackend
+             * @default local
+             */
+            storageBackend: string;
         };
         /**
          * TemporalCoverageResponse
@@ -3050,6 +3527,106 @@ export interface operations {
             };
         };
     };
+    get_prepared_dataset_download_url_api_v1_data_sources_datasets__dataset_id__download_url_get: {
+        parameters: {
+            query?: {
+                asset_id?: string | null;
+                expires_in?: number | null;
+            };
+            header?: never;
+            path: {
+                dataset_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DatasetAssetDownloadUrlResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    download_prepared_dataset_asset_api_v1_data_sources_datasets__dataset_id__download_get: {
+        parameters: {
+            query?: {
+                asset_id?: string | null;
+            };
+            header?: never;
+            path: {
+                dataset_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    auto_provision_datasets_api_v1_data_sources_provision_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AutoProvisionRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AutoProvisionResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     list_scientific_methods_api_v1_assessments_methods_get: {
         parameters: {
             query?: never;
@@ -3205,6 +3782,102 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AssessmentComparisonResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_assessment_artifacts_api_v1_assessments__assessment_id__artifacts_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                assessment_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AssessmentArtifactItemResponse"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    evaluate_assessment_readiness_endpoint_api_v1_assessments_readiness_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AssessmentReadinessRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AssessmentReadinessResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    download_assessment_artifact_api_v1_assessments__assessment_id__artifacts__artifact_name__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                assessment_id: string;
+                artifact_name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
                 };
             };
             /** @description Validation Error */
