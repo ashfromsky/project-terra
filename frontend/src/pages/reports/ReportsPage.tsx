@@ -2,12 +2,14 @@ import { useMemo, useState } from 'react'
 import { Link, useSearchParams } from 'react-router'
 import {
   parseScientificAssessmentResult,
+  useAssessmentArtifactsQuery,
   useAssessmentDetailQuery,
   useAssessmentsQuery,
   type AssessmentDetailResponse,
   type ParsedScientificResult,
 } from '../../shared/api/assessments'
 import { useCurrentUserQuery } from '../../shared/api/auth'
+import { buildApiUrl } from '../../shared/api/client'
 import { useRegionsQuery } from '../../shared/api/regions'
 import { APP_ROUTES } from '../../shared/config/routes'
 import { AuthActionBanner } from '../../shared/ui/auth-action-banner'
@@ -309,6 +311,11 @@ export default function ReportsPage() {
 
   const detailQuery = useAssessmentDetailQuery(effectiveAssessmentId, isAuthenticated)
   const detail = detailQuery.data ?? null
+  const artifactsQuery = useAssessmentArtifactsQuery(
+    effectiveAssessmentId,
+    isAuthenticated && Boolean(detail),
+  )
+  const persistedArtifacts = artifactsQuery.data ?? []
 
   const parsedResult = useMemo(
     () => (detail ? parseScientificAssessmentResult(detail.result) : null),
@@ -792,6 +799,59 @@ export default function ReportsPage() {
                                 <td>{method.name}</td>
                               </tr>
                             ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    ) : null}
+
+                    {persistedArtifacts.length > 0 ? (
+                      <div className="provenance-table-wrapper">
+                        <table className="provenance-table" aria-label="Persisted object storage artifacts">
+                          <thead>
+                            <tr>
+                              <th scope="col">Artifact</th>
+                              <th scope="col">Storage</th>
+                              <th scope="col">Object Key</th>
+                              <th scope="col">Size</th>
+                              <th scope="col">Action</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {persistedArtifacts.map((artifact) => {
+                              const href =
+                                artifact.presigned && artifact.presignedUrl
+                                  ? artifact.presignedUrl
+                                  : buildApiUrl(artifact.downloadPath)
+                              return (
+                                <tr key={artifact.name}>
+                                  <td className="provenance-table__primary">{artifact.name}</td>
+                                  <td>
+                                    {artifact.storageBackend === 's3'
+                                      ? artifact.presigned
+                                        ? 'R2 (presigned)'
+                                        : 'R2 / S3'
+                                      : 'Local store'}
+                                  </td>
+                                  <td>
+                                    <code className="sci-code-chip">{artifact.objectKey}</code>
+                                  </td>
+                                  <td>{Math.max(1, Math.round(artifact.sizeBytes / 1024))} KB</td>
+                                  <td>
+                                    <a
+                                      href={href}
+                                      download={`assessment-${detail.id.slice(0, 8)}-${artifact.name}`}
+                                      target={artifact.presigned ? '_blank' : undefined}
+                                      rel={artifact.presigned ? 'noopener noreferrer' : undefined}
+                                      className="terra-link-reset"
+                                    >
+                                      <Button type="button" variant="secondary">
+                                        Download
+                                      </Button>
+                                    </a>
+                                  </td>
+                                </tr>
+                              )
+                            })}
                           </tbody>
                         </table>
                       </div>

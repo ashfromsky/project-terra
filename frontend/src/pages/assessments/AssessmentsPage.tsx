@@ -1,17 +1,24 @@
 import { useMemo, useState, type FormEvent } from 'react'
 import { Link, useSearchParams } from 'react-router'
 import {
+  parseReadinessReport,
   parseScientificAssessmentResult,
   useAssessmentDetailQuery,
   useAssessmentMethodsQuery,
+  useAssessmentReadinessQuery,
   useAssessmentsQuery,
   useCreateAssessmentMutation,
   useExecuteAssessmentMutation,
+  type AssessmentReadinessRequest,
   type ParsedResilienceDimension,
 } from '../../shared/api/assessments'
 import { useCurrentUserQuery } from '../../shared/api/auth'
 import { ApiError } from '../../shared/api/client'
-import { usePreparedDatasetsQuery } from '../../shared/api/data-sources'
+import {
+  useAutoProvisionMutation,
+  usePreparedDatasetsQuery,
+  type AutoProvisionResponse,
+} from '../../shared/api/data-sources'
 import { useRegionsQuery } from '../../shared/api/regions'
 import { APP_ROUTES } from '../../shared/config/routes'
 import {
@@ -21,6 +28,7 @@ import {
 import { AuthActionBanner } from '../../shared/ui/auth-action-banner'
 import { Button } from '../../shared/ui/button'
 import { Chart } from '../../shared/ui/chart'
+import { ReadinessDiagnosticsPanel } from '../../shared/ui/readiness-diagnostics'
 import { StatusBadge, type StatusBadgeTone } from '../../shared/ui/status-badge'
 
 type WorkspaceTab = 'results' | 'methods'
@@ -52,6 +60,13 @@ function formatDate(iso: string | null | undefined): string {
   const d = new Date(iso)
   if (Number.isNaN(d.getTime())) return iso
   return d.toISOString().slice(0, 10)
+}
+
+function shiftIsoDateDays(dateStr: string, deltaDays: number): string {
+  const parsed = new Date(`${dateStr}T00:00:00Z`)
+  if (Number.isNaN(parsed.getTime())) return dateStr
+  parsed.setUTCDate(parsed.getUTCDate() + deltaDays)
+  return parsed.toISOString().slice(0, 10)
 }
 
 function renderDimensionCard(dim: ParsedResilienceDimension | null, label: string) {
@@ -155,6 +170,8 @@ function PreparedDatasetPickerField(props: {
                   </strong>
                   <div className="sci-run-item__meta">
                     {(ds.variables ?? []).join(', ') || 'variables'} · {ds.observationCount} obs ·{' '}
+                    {ds.temporalStart ? ds.temporalStart.slice(0, 10) : 'n/a'} →{' '}
+                    {ds.temporalEnd ? ds.temporalEnd.slice(0, 10) : 'n/a'} ·{' '}
                     {ds.datasetId.slice(0, 8)}
                   </div>
                 </span>
@@ -210,8 +227,21 @@ function AssessmentVisualizationsSection(props: {
     })
   }, [activeAnomaly])
 
-  if (!seriesOption && !anomalyOption && parsedResult.crossVariable.length === 0) {
-    return null
+  if (
+    !seriesOption &&
+    !anomalyOption &&
+    !activeBaseline &&
+    parsedResult.crossVariable.length === 0
+  ) {
+    return (
+      <div className="sci-banner sci-banner--neutral">
+        <strong>No chartable series or baseline outputs</strong>
+        <p>
+          Selected datasets did not yield aligned temporal observations or cross-variable pairs for
+          chart rendering. Check quality screening and stage warnings below.
+        </p>
+      </div>
+    )
   }
 
   return (
@@ -273,6 +303,65 @@ function AssessmentVisualizationsSection(props: {
         </div>
       ) : null}
 
+      {activeBaseline ? (
+        <div className="sci-dim-card">
+          <div className="sci-dim-card__head">
+            <span className="sci-dim-card__name">
+              Baseline Climatology · {activeBaseline.variableName} ({activeBaseline.baselineType})
+            </span>
+            <StatusBadge tone={activeBaseline.sufficient ? 'success' : 'warning'}>
+              {activeBaseline.sufficient ? 'sufficient' : 'insufficient'} ·{' '}
+              {activeBaseline.binCounts.reduce((a, b) => a + b, 0)} ref samples
+            </StatusBadge>
+          </div>
+          {activeBaseline.referenceStart && activeBaseline.referenceEnd ? (
+            <p className="sci-dim-card__note">
+              Reference window: {formatDate(activeBaseline.referenceStart)} →{' '}
+              {formatDate(activeBaseline.referenceEnd)} ({activeBaseline.seasonalGrouping})
+            </p>
+          ) : null}
+          {activeBaseline.warnings.length > 0 ? (
+            <ul className="sci-dim-card__note">
+              {activeBaseline.warnings.map((w) => (
+                <li key={w}>{w}</li>
+              ))}
+            </ul>
+          ) : null}
+          {activeBaseline.bins.length > 0 ? (
+            <div className="provenance-table-wrapper">
+              <table className="provenance-table">
+                <thead>
+                  <tr>
+                    <th scope="col">Bin</th>
+                    <th scope="col">Samples</th>
+                    <th scope="col">Mean</th>
+                    <th scope="col">Median</th>
+                    <th scope="col">Std</th>
+                    <th scope="col">MAD</th>
+                    <th scope="col">Q10–Q90</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {activeBaseline.bins.map((bin) => (
+                    <tr key={`${bin.binKey}-${bin.binLabel}`}>
+                      <td className="provenance-table__primary">{bin.binLabel}</td>
+                      <td>{bin.sampleCount}</td>
+                      <td>{formatNumber(bin.mean, 3)}</td>
+                      <td>{formatNumber(bin.median, 3)}</td>
+                      <td>{formatNumber(bin.std, 3)}</td>
+                      <td>{formatNumber(bin.mad, 3)}</td>
+                      <td>
+                        {formatNumber(bin.q10, 2)} – {formatNumber(bin.q90, 2)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+
       {parsedResult.crossVariable.length > 0 ? (
         <div>
           <h3 className="sci-panel__title">Cross-Variable Associations</h3>
@@ -320,11 +409,14 @@ export default function AssessmentsPage() {
   const [regionId, setRegionId] = useState(() => searchParams.get('regionId') ?? '')
   const [analysisStart, setAnalysisStart] = useState('2021-01-01')
   const [analysisEnd, setAnalysisEnd] = useState('2024-12-31')
+  const [baselineType, setBaselineType] = useState<'fixed_reference' | 'full_period_explicit'>(
+    'fixed_reference',
+  )
   const [baselineStart, setBaselineStart] = useState('2018-01-01')
   const [baselineEnd, setBaselineEnd] = useState('2020-12-31')
   const [targetCadence, setTargetCadence] = useState<'monthly' | 'daily' | 'sixteen_day'>('monthly')
-  const [qaPolicy, setQaPolicy] = useState<'standard' | 'strict' | 'exploratory'>('standard')
-  const [minYearsRequired, setMinYearsRequired] = useState(1)
+  const [qaLevel, setQaLevel] = useState<'strict' | 'permissive'>('strict')
+  const [minYearsRequired, setMinYearsRequired] = useState(3)
   const [selectedDatasetIds, setSelectedDatasetIds] = useState<string[]>(() => {
     const preselected = searchParams.get('datasetId')
     return preselected ? [preselected] : []
@@ -332,6 +424,7 @@ export default function AssessmentsPage() {
   const [ghsDatasetIdsText, setGhsDatasetIdsText] = useState('')
   const [executeNow, setExecuteNow] = useState(true)
   const [formError, setFormError] = useState<string | null>(null)
+  const [provisionResult, setProvisionResult] = useState<AutoProvisionResponse | null>(null)
 
   const currentUserQuery = useCurrentUserQuery()
   const isAuthenticated = Boolean(currentUserQuery.data)
@@ -350,10 +443,80 @@ export default function AssessmentsPage() {
   const detailQuery = useAssessmentDetailQuery(activeAssessmentId, isAuthenticated)
   const createMutation = useCreateAssessmentMutation()
   const executeMutation = useExecuteAssessmentMutation()
+  const autoProvisionMutation = useAutoProvisionMutation()
 
   const parsedResult = useMemo(
     () => parseScientificAssessmentResult(detailQuery.data?.result),
     [detailQuery.data?.result],
+  )
+
+  const effectiveDatasetIds = useMemo(() => {
+    const manualIds = ghsDatasetIdsText
+      .split(',')
+      .map((item) => item.trim())
+      .filter(Boolean)
+    return Array.from(new Set([...selectedDatasetIds, ...manualIds]))
+  }, [ghsDatasetIdsText, selectedDatasetIds])
+
+  const scientificRequestConfig = useMemo<Record<string, unknown>>(
+    () => ({
+      request_id: `ui-preview`,
+      analysis_start: `${analysisStart}T00:00:00Z`,
+      analysis_end: `${analysisEnd}T23:59:59Z`,
+      target_cadence: targetCadence,
+      qa_level: qaLevel,
+      baseline:
+        baselineType === 'full_period_explicit'
+          ? {
+              baseline_type: 'full_period_explicit',
+              allow_explicit_full_period: true,
+              exclude_assessment_overlap: false,
+              min_years_required: minYearsRequired,
+              min_samples_per_bin: Math.max(1, minYearsRequired),
+            }
+          : {
+              baseline_type: 'fixed_reference',
+              start: baselineStart ? `${baselineStart}T00:00:00Z` : undefined,
+              end: baselineEnd ? `${baselineEnd}T23:59:59Z` : undefined,
+              min_years_required: minYearsRequired,
+              min_samples_per_bin: Math.max(1, minYearsRequired),
+            },
+    }),
+    [
+      analysisEnd,
+      analysisStart,
+      baselineEnd,
+      baselineStart,
+      baselineType,
+      minYearsRequired,
+      qaLevel,
+      targetCadence,
+    ],
+  )
+
+  const isReadinessConfigValid = Boolean(
+    isAuthenticated &&
+      analysisStart &&
+      analysisEnd &&
+      analysisStart <= analysisEnd &&
+      (baselineType !== 'fixed_reference' ||
+        (baselineStart && baselineEnd && baselineStart <= baselineEnd && baselineEnd < analysisStart)),
+  )
+
+  const readinessRequest = useMemo<AssessmentReadinessRequest>(
+    () => ({
+      regionId: regionId || null,
+      requestConfig: scientificRequestConfig,
+      ghsDatasetIds: effectiveDatasetIds,
+      inlineDatasets: [],
+    }),
+    [effectiveDatasetIds, regionId, scientificRequestConfig],
+  )
+
+  const readinessQuery = useAssessmentReadinessQuery(readinessRequest, isReadinessConfigValid)
+  const parsedPreRunReadiness = useMemo(
+    () => parseReadinessReport(readinessQuery.data ?? provisionResult?.readiness),
+    [provisionResult?.readiness, readinessQuery.data],
   )
 
   const syncDatesFromDatasetIds = (nextIds: string[]) => {
@@ -368,8 +531,82 @@ export default function AssessmentsPage() {
       .filter((d): d is string => Boolean(d && /^\d{4}-\d{2}-\d{2}$/.test(d)))
       .sort()
     if (starts.length > 0 && ends.length > 0) {
-      setAnalysisStart(starts[0])
-      setAnalysisEnd(ends[ends.length - 1])
+      const minStart = starts[0]
+      const maxEnd = ends[ends.length - 1]
+      setAnalysisStart(minStart)
+      setAnalysisEnd(maxEnd)
+
+      const startYear = Number(minStart.slice(0, 4))
+      const endYear = Number(maxEnd.slice(0, 4))
+      if (Number.isFinite(startYear) && Number.isFinite(endYear) && endYear - startYear >= 3) {
+        const splitYear = Math.min(startYear + 2, endYear - 1)
+        setBaselineStart(minStart)
+        setBaselineEnd(`${splitYear}-12-31`)
+        setAnalysisStart(`${splitYear + 1}-01-01`)
+      } else {
+        setBaselineStart('')
+        setBaselineEnd('')
+      }
+    }
+  }
+
+  const handleAutoProvision = async () => {
+    setFormError(null)
+    const fallbackDatasetRegionId =
+      preparedDatasetsQuery.data?.find((ds) => effectiveDatasetIds.includes(ds.datasetId))
+        ?.regionId ?? null
+    const resolvedRegionId = regionId || fallbackDatasetRegionId
+
+    if (!resolvedRegionId) {
+      setFormError(
+        'Select a saved Region / AOI in the configuration rail before auto-provisioning datasets.',
+      )
+      return
+    }
+    if (!analysisStart || !analysisEnd || analysisStart > analysisEnd) {
+      setFormError('Analysis start date must be on or before analysis end date.')
+      return
+    }
+
+    try {
+      const res = await autoProvisionMutation.mutateAsync({
+        regionId: resolvedRegionId,
+        bbox: null,
+        analysisStart: `${analysisStart}T00:00:00Z`,
+        analysisEnd: `${analysisEnd}T23:59:59Z`,
+        targetCadence,
+        baselineType: baselineType === 'fixed_reference' ? 'fixed_reference' : 'full_period_explicit',
+        referenceStart:
+          baselineType === 'fixed_reference' && baselineStart ? `${baselineStart}T00:00:00Z` : null,
+        referenceEnd:
+          baselineType === 'fixed_reference' && baselineEnd ? `${baselineEnd}T23:59:59Z` : null,
+        minReferenceYears: minYearsRequired,
+        qaLevel,
+        existingDatasetIds: effectiveDatasetIds,
+        desiredDomains: ['climate', 'precipitation', 'soil_moisture', 'vegetation'],
+        maxGranulesPerProduct: 48,
+      })
+      setProvisionResult(res)
+      if (!regionId && resolvedRegionId) {
+        setRegionId(resolvedRegionId)
+      }
+      if ((res.datasetIds ?? []).length > 0) {
+        setSelectedDatasetIds(Array.from(new Set(res.datasetIds)))
+        setGhsDatasetIdsText('')
+      }
+      if (baselineType === 'fixed_reference') {
+        const provStart = res.provisionStart.slice(0, 10)
+        if (!baselineStart || provStart < baselineStart) {
+          setBaselineStart(provStart)
+        }
+        const dayBeforeAnalysis = shiftIsoDateDays(analysisStart, -1)
+        if (!baselineEnd || baselineEnd >= analysisStart) {
+          setBaselineEnd(dayBeforeAnalysis)
+        }
+      }
+    } catch (cause) {
+      const msg = cause instanceof ApiError ? cause.message : String(cause)
+      setFormError(msg)
     }
   }
 
@@ -383,15 +620,35 @@ export default function AssessmentsPage() {
       return
     }
 
-    const manualIds = ghsDatasetIdsText
-      .split(',')
-      .map((item) => item.trim())
-      .filter(Boolean)
-    const ghsIds = Array.from(new Set([...selectedDatasetIds, ...manualIds]))
+    const ghsIds = effectiveDatasetIds
 
     if (ghsIds.length === 0) {
       setFormError('Select or provide at least one prepared GHS dataset ID.')
       return
+    }
+
+    if (analysisStart > analysisEnd) {
+      setFormError('Analysis start date must be on or before analysis end date.')
+      return
+    }
+
+    if (baselineType === 'fixed_reference') {
+      if (!baselineStart || !baselineEnd) {
+        setFormError(
+          'Fixed reference baseline requires baseline start and end dates with historical coverage, or switch baseline mode to Full period (explicit).',
+        )
+        return
+      }
+      if (baselineStart > baselineEnd) {
+        setFormError('Baseline start date must be on or before baseline end date.')
+        return
+      }
+      if (baselineEnd >= analysisStart) {
+        setFormError(
+          'Fixed reference baseline end date must precede analysis start date to prevent data leakage.',
+        )
+        return
+      }
     }
 
     try {
@@ -402,18 +659,8 @@ export default function AssessmentsPage() {
         ghsDatasetIds: ghsIds,
         inlineDatasets: [],
         requestConfig: {
+          ...scientificRequestConfig,
           request_id: `ui-${Date.now()}`,
-          analysis_start: `${analysisStart}T00:00:00Z`,
-          analysis_end: `${analysisEnd}T23:59:59Z`,
-          target_cadence: targetCadence,
-          qa_policy: qaPolicy,
-          baseline: {
-            baseline_type: 'fixed_reference',
-            start: `${baselineStart}T00:00:00Z`,
-            end: `${baselineEnd}T23:59:59Z`,
-            min_years_required: minYearsRequired,
-            min_samples_per_bin: Math.max(1, minYearsRequired),
-          },
         },
       })
       setSelectedId(created.id)
@@ -542,32 +789,61 @@ export default function AssessmentsPage() {
                 </div>
               </div>
 
-              <div className="sci-field-row">
-                <div className="sci-field">
-                  <label className="sci-label" htmlFor="baseline-start">
-                    Baseline start
-                  </label>
-                  <input
-                    id="baseline-start"
-                    className="sci-input"
-                    type="date"
-                    value={baselineStart}
-                    onChange={(e) => setBaselineStart(e.target.value)}
-                  />
-                </div>
-                <div className="sci-field">
-                  <label className="sci-label" htmlFor="baseline-end">
-                    Baseline end
-                  </label>
-                  <input
-                    id="baseline-end"
-                    className="sci-input"
-                    type="date"
-                    value={baselineEnd}
-                    onChange={(e) => setBaselineEnd(e.target.value)}
-                  />
-                </div>
+              <div className="sci-field">
+                <label className="sci-label" htmlFor="baseline-type">
+                  Baseline methodology
+                </label>
+                <select
+                  id="baseline-type"
+                  className="sci-select"
+                  value={baselineType}
+                  onChange={(e) =>
+                    setBaselineType(
+                      e.target.value as 'fixed_reference' | 'full_period_explicit',
+                    )
+                  }
+                >
+                  <option value="fixed_reference">Fixed reference (historical window)</option>
+                  <option value="full_period_explicit">
+                    Full period (explicit — includes assessment period)
+                  </option>
+                </select>
+                {baselineType === 'fixed_reference' && (!baselineStart || !baselineEnd) ? (
+                  <p className="sci-dim-card__note">
+                    Selected datasets span fewer than 3 years; ingest historical reference data or
+                    switch to Full period (explicit) to compute exploratory anomalies.
+                  </p>
+                ) : null}
               </div>
+
+              {baselineType === 'fixed_reference' ? (
+                <div className="sci-field-row">
+                  <div className="sci-field">
+                    <label className="sci-label" htmlFor="baseline-start">
+                      Baseline start
+                    </label>
+                    <input
+                      id="baseline-start"
+                      className="sci-input"
+                      type="date"
+                      value={baselineStart}
+                      onChange={(e) => setBaselineStart(e.target.value)}
+                    />
+                  </div>
+                  <div className="sci-field">
+                    <label className="sci-label" htmlFor="baseline-end">
+                      Baseline end
+                    </label>
+                    <input
+                      id="baseline-end"
+                      className="sci-input"
+                      type="date"
+                      value={baselineEnd}
+                      onChange={(e) => setBaselineEnd(e.target.value)}
+                    />
+                  </div>
+                </div>
+              ) : null}
 
               <div className="sci-field-row">
                 <div className="sci-field">
@@ -589,19 +865,16 @@ export default function AssessmentsPage() {
                 </div>
                 <div className="sci-field">
                   <label className="sci-label" htmlFor="qa-policy">
-                    QA policy
+                    QA screening level
                   </label>
                   <select
                     id="qa-policy"
                     className="sci-select"
-                    value={qaPolicy}
-                    onChange={(e) =>
-                      setQaPolicy(e.target.value as 'standard' | 'strict' | 'exploratory')
-                    }
+                    value={qaLevel}
+                    onChange={(e) => setQaLevel(e.target.value as 'strict' | 'permissive')}
                   >
-                    <option value="standard">Standard</option>
-                    <option value="strict">Strict</option>
-                    <option value="exploratory">Exploratory</option>
+                    <option value="strict">Strict (high-confidence QA only)</option>
+                    <option value="permissive">Permissive (retain marginal QA)</option>
                   </select>
                 </div>
               </div>
@@ -664,13 +937,25 @@ export default function AssessmentsPage() {
                 </div>
               ) : null}
 
-              <Button
-                type="submit"
-                variant="primary"
-                disabled={createMutation.isPending}
-              >
-                {createMutation.isPending ? 'Submitting assessment…' : 'Create assessment'}
-              </Button>
+              <div className="sci-btn-row">
+                <Button
+                  type="button"
+                  variant="secondary"
+                  disabled={autoProvisionMutation.isPending}
+                  onClick={() => void handleAutoProvision()}
+                >
+                  {autoProvisionMutation.isPending
+                    ? 'Provisioning data…'
+                    : 'Auto-Provision Missing Data'}
+                </Button>
+                <Button
+                  type="submit"
+                  variant="primary"
+                  disabled={createMutation.isPending}
+                >
+                  {createMutation.isPending ? 'Submitting assessment…' : 'Create assessment'}
+                </Button>
+              </div>
             </form>
           )}
 
@@ -730,6 +1015,121 @@ export default function AssessmentsPage() {
         </aside>
 
         <main className="sci-main-stack">
+          {isAuthenticated ? (
+            <>
+              {!isReadinessConfigValid ? (
+                <section className="sci-panel" aria-label="Pre-run readiness configuration warning">
+                  <div className="sci-banner sci-banner--warning">
+                    <strong>Configuration check needed for pre-run readiness</strong>
+                    <span>
+                      Ensure analysis dates are ordered and fixed-reference baseline end precedes
+                      analysis start to avoid data leakage.
+                    </span>
+                  </div>
+                </section>
+              ) : readinessQuery.isPending && !parsedPreRunReadiness ? (
+                <section className="sci-panel" aria-label="Pre-run adaptive data readiness">
+                  <p className="sci-panel__subtitle" aria-live="polite">
+                    Evaluating adaptive source and method readiness criteria…
+                  </p>
+                </section>
+              ) : readinessQuery.isError ? (
+                <section className="sci-panel" aria-label="Pre-run adaptive data readiness error">
+                  <div className="sci-banner sci-banner--error" role="alert">
+                    Failed to evaluate pre-run readiness:{' '}
+                    {readinessQuery.error instanceof ApiError
+                      ? readinessQuery.error.message
+                      : String(readinessQuery.error)}
+                  </div>
+                </section>
+              ) : parsedPreRunReadiness ? (
+                <ReadinessDiagnosticsPanel
+                  readiness={parsedPreRunReadiness}
+                  mode="pre_run"
+                  actionSlot={
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      disabled={autoProvisionMutation.isPending}
+                      onClick={() => void handleAutoProvision()}
+                    >
+                      {autoProvisionMutation.isPending
+                        ? 'Provisioning data…'
+                        : 'Auto-Provision Missing Data'}
+                    </Button>
+                  }
+                  onApplySuggestedWindow={(startDate, endDate) => {
+                    setBaselineType('fixed_reference')
+                    setBaselineStart(startDate)
+                    setBaselineEnd(endDate)
+                  }}
+                />
+              ) : null}
+
+              {provisionResult ? (
+                <section className="sci-panel" aria-label="Auto-provisioning execution summary">
+                  <div className="sci-panel__header">
+                    <div>
+                      <h3 className="sci-panel__title">Adaptive Data Provisioning Summary</h3>
+                      <p className="sci-panel__subtitle">
+                        Provision window: {formatDate(provisionResult.provisionStart)} →{' '}
+                        {formatDate(provisionResult.provisionEnd)}
+                        {provisionResult.windowExpansionReason
+                          ? ` · ${provisionResult.windowExpansionReason}`
+                          : ''}
+                      </p>
+                    </div>
+                    <StatusBadge tone="teal">
+                      {(provisionResult.datasetIds ?? []).length} dataset(s) linked
+                    </StatusBadge>
+                  </div>
+                  {(provisionResult.steps ?? []).length > 0 ? (
+                    <div className="provenance-table-wrapper">
+                      <table className="provenance-table">
+                        <thead>
+                          <tr>
+                            <th scope="col">Domain</th>
+                            <th scope="col">Provider &amp; Product</th>
+                            <th scope="col">Status</th>
+                            <th scope="col">Window</th>
+                            <th scope="col">Details</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {(provisionResult.steps ?? []).map((step) => (
+                            <tr key={`${step.domain}-${step.provider}-${step.product}`}>
+                              <td className="provenance-table__primary">{step.domain}</td>
+                              <td>
+                                {step.provider} · {step.product}
+                              </td>
+                              <td>
+                                <StatusBadge
+                                  tone={
+                                    step.status === 'provisioned' || step.status === 'reused'
+                                      ? 'success'
+                                      : step.status === 'skipped'
+                                        ? 'warning'
+                                        : 'error'
+                                  }
+                                >
+                                  {step.status}
+                                </StatusBadge>
+                              </td>
+                              <td>
+                                {formatDate(step.windowStart)} → {formatDate(step.windowEnd)}
+                              </td>
+                              <td style={{ whiteSpace: 'normal', minWidth: 240 }}>{step.detail}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  ) : null}
+                </section>
+              ) : null}
+            </>
+          ) : null}
+
           <div className="sci-panel">
             <div className="sci-panel__header">
               <div className="sci-tablist" role="tablist" aria-label="Assessments workspace views">
@@ -901,21 +1301,36 @@ export default function AssessmentsPage() {
 
                     {(detail.status === 'insufficient_data' ||
                       detail.status === 'completed_partial') && (
-                      <div className="sci-banner sci-banner--warning">
+                      <div
+                        className={`sci-banner ${
+                          detail.status === 'insufficient_data'
+                            ? 'sci-banner--error'
+                            : 'sci-banner--warning'
+                        }`}
+                      >
                         <strong>
                           {detail.status === 'insufficient_data'
-                            ? 'Insufficient Data'
-                            : 'Partial Completion'}
+                            ? 'Scientific Data Requirements Not Met'
+                            : 'Partial Assessment Completion'}
                         </strong>
                         <span>
-                          One or more variables or pipeline stages did not meet baseline/QA sample
-                          requirements. Review quality reports and warnings below.
+                          {parsedResult?.readiness?.summary ||
+                            parsedResult?.errors[0] ||
+                            parsedResult?.warnings[0] ||
+                            'One or more scientific readiness criteria did not pass; review the per-criterion and metric diagnostics below.'}
                         </span>
                       </div>
                     )}
 
                     {parsedResult ? (
                       <>
+                        {parsedResult.readiness ? (
+                          <ReadinessDiagnosticsPanel
+                            readiness={parsedResult.readiness}
+                            mode="post_run"
+                          />
+                        ) : null}
+
                         {parsedResult.warnings.length > 0 ? (
                           <div className="sci-banner sci-banner--warning">
                             <strong>Scientific warnings</strong>
