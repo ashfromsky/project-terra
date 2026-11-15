@@ -340,6 +340,20 @@ Under **Settings -> Environment variables**, configure:
 | `VITE_API_BASE_URL` | Production | `https://api.example.com` | Absolute HTTPS address of Core API |
 | `VITE_API_BASE_URL` | Preview | `https://api-staging.example.com` | Staging API URL for PR preview deployments |
 | `VITE_NASA_GIBS_BASE_URL` | All | `https://gibs.earthdata.nasa.gov` | NASA GIBS tile imagery endpoint |
+| `FRONTEND_DIST_DIR` | Production VPS | `/app/web` | Built SPA directory served by Core at the API origin. The Core Docker image builds it automatically. |
+
+### Same-origin SPA hosting (VPS)
+
+The production Core image includes a built copy of `frontend/dist` and sets
+`FRONTEND_DIST_DIR=/app/web`. Core serves the SPA at `/` and non-API routes,
+while `/api/v1/*`, `/health*`, `/docs`, and `/openapi.json` keep their API
+behavior. This makes the frontend available at the public API origin without a
+separate Pages deployment or CORS configuration.
+
+> [!NOTE]
+> Cloudflare Pages remains an optional target. Its workflow step requires the
+> `CLOUDFLARE_API_TOKEN` repository secret; without it, Pages is skipped and the
+> VPS-hosted same-origin frontend remains the current deployment.
 
 > [!CAUTION]
 > **No Secrets in Frontend:** Never configure `JWT_SECRET_KEY`, `GITHUB_CLIENT_SECRET`, `EARTHDATA_TOKEN`, `POSTGRES_PASSWORD`, or R2 access keys in Cloudflare Pages. Frontend code is compiled into public client bundles.
