@@ -349,8 +349,6 @@ class LayerCatalogService:
             return base_layer
 
         if not ghs_reachable:
-            if base_layer.tile_source.url_template and base_layer.availability_status == "connected":
-                return base_layer
             return replace(
                 base_layer,
                 availability_status="unavailable",
@@ -360,8 +358,6 @@ class LayerCatalogService:
 
         selected, has_only_non_raster = _select_matching_dataset(spec, datasets)
         if selected is None:
-            if base_layer.tile_source.url_template and base_layer.availability_status == "connected":
-                return base_layer
             reason = (
                 "Dataset exists only in non-raster format (e.g. JSON/CSV) and cannot be "
                 "directly rendered as raster tiles."

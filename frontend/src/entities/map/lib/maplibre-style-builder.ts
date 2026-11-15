@@ -24,13 +24,20 @@ export function resolveScienceRasterConfig(
   minzoom?: number
   maxzoom?: number
 } | null {
-  if (
-    !activeLayer ||
-    !activeLayer.visible ||
-    (activeLayer.layer.availabilityStatus !== 'connected' &&
-      activeLayer.layer.availabilityStatus !== 'preview') ||
-    !activeLayer.layer.tileSource.isConnected
-  ) {
+  if (!activeLayer || !activeLayer.visible) {
+    return null
+  }
+  const hasExternalTemplate = Boolean(
+    activeLayer.layer.tileSource?.urlTemplate &&
+      (activeLayer.layer.tileSource.urlTemplate.startsWith('http://') ||
+        activeLayer.layer.tileSource.urlTemplate.startsWith('https://')),
+  )
+  const isAvailableLocally =
+    (activeLayer.layer.availabilityStatus === 'connected' ||
+      activeLayer.layer.availabilityStatus === 'preview') &&
+    activeLayer.layer.tileSource.isConnected
+
+  if (!hasExternalTemplate && !isAvailableLocally) {
     return null
   }
   const effectiveDate = resolveLayerEffectiveDate(activeLayer.layer, selectedDate)
