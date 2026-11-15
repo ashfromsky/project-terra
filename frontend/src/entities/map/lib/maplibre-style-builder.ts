@@ -60,8 +60,8 @@ export function resolveScienceRasterConfig(
   return {
     tileUrl,
     bounds,
-    minzoom: activeLayer.layer.tileSource.minZoom,
-    maxzoom: activeLayer.layer.tileSource.maxZoom,
+    minzoom: (activeLayer.layer.tileSource as { minZoom?: number }).minZoom ?? 0,
+    maxzoom: (activeLayer.layer.tileSource as { maxZoom?: number }).maxZoom ?? 18,
   }
 }
 

@@ -142,6 +142,7 @@ class AssessmentRequest(BaseModel):
     region_id: str | None = None
     region_name: str | None = None
     region_area_km2: float | None = Field(default=None, gt=0.0)
+    analysis_profile: str = "quick"
     analysis_start: datetime
     analysis_end: datetime
     target_cadence: TemporalCadence = TemporalCadence.MONTHLY

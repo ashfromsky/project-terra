@@ -34,10 +34,10 @@ OBSERVATION_LAYERS: tuple[LayerDefinition, ...] = (
         native_spatial_resolution="250 m",
         temporal_resolution="16-day composite",
         available_time_range=AvailableTimeRange("2001-01-01", "2025-12-31", "16-day"),
-        attribution="NASA LP DAAC · MOD13Q1 v061 / NASA GIBS",
-        availability_status="connected",
+        attribution="NASA LP DAAC · MOD13Q1 v061",
+        availability_status="unavailable",
         rendering_type="raster",
-        supported_tile_formats=("wmts", "xyz", "cog"),
+        supported_tile_formats=("cog", "xyz"),
         qa_policy="MOD13Q1 Pixel Reliability == 0 (Good data) & VI Quality bitmask screening",
         limitations=(
             "Optical composite affected by persistent tropical cloud cover; "
@@ -58,17 +58,13 @@ OBSERVATION_LAYERS: tuple[LayerDefinition, ...] = (
             nodata_label="NoData / QA masked",
             stops=VEGETATION_RAMP,
         ),
-        tile_source=MapTileSource(
-            "src-mod13q1-ndvi",
-            "wmts",
-            "https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/MODIS_Terra_L3_NDVI_16Day/default/{time}/GoogleMapsCompatible_Level9/{z}/{y}/{x}.png",
-            "EPSG:3857",
-            False,
-            True,
-        ),
+        tile_source=MapTileSource("src-mod13q1-ndvi", "cog", None, "EPSG:4326", True, False),
         is_synthetic_preview=False,
         preview_property_key=None,
-        unavailable_reason=None,
+        unavailable_reason=(
+            "No ingested MOD13Q1.061 NDVI dataset found in storage. "
+            "Ingest observations via Data Sources."
+        ),
     ),
     LayerDefinition(
         id="evi-mod13q1",
@@ -87,10 +83,10 @@ OBSERVATION_LAYERS: tuple[LayerDefinition, ...] = (
         native_spatial_resolution="250 m",
         temporal_resolution="16-day composite",
         available_time_range=AvailableTimeRange("2001-01-01", "2025-12-31", "16-day"),
-        attribution="NASA LP DAAC · MOD13Q1 v061 / NASA GIBS",
-        availability_status="connected",
+        attribution="NASA LP DAAC · MOD13Q1 v061",
+        availability_status="unavailable",
         rendering_type="raster",
-        supported_tile_formats=("wmts", "xyz", "cog"),
+        supported_tile_formats=("cog", "xyz"),
         qa_policy="VI Usefulness <= 2; snow/ice & adjacent cloud bits excluded",
         limitations="Sensitive to topographic slope effects in steep mountainous terrain.",
         color_ramp=EVI_RAMP,
@@ -108,17 +104,13 @@ OBSERVATION_LAYERS: tuple[LayerDefinition, ...] = (
             nodata_label="NoData / QA masked",
             stops=EVI_RAMP,
         ),
-        tile_source=MapTileSource(
-            "src-mod13q1-evi",
-            "wmts",
-            "https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/MODIS_Terra_L3_EVI_16Day/default/{time}/GoogleMapsCompatible_Level9/{z}/{y}/{x}.png",
-            "EPSG:3857",
-            False,
-            True,
-        ),
+        tile_source=MapTileSource("src-mod13q1-evi", "cog", None, "EPSG:4326", True, False),
         is_synthetic_preview=False,
         preview_property_key=None,
-        unavailable_reason=None,
+        unavailable_reason=(
+            "No ingested MOD13Q1.061 EVI dataset found in storage. "
+            "Ingest observations via Data Sources."
+        ),
     ),
     LayerDefinition(
         id="lst-mod11a2",
@@ -137,10 +129,10 @@ OBSERVATION_LAYERS: tuple[LayerDefinition, ...] = (
         native_spatial_resolution="1 km",
         temporal_resolution="8-day composite",
         available_time_range=AvailableTimeRange("2001-01-01", "2025-12-31", "8-day"),
-        attribution="NASA LP DAAC · MOD11A2 v061 / NASA GIBS",
-        availability_status="connected",
+        attribution="NASA LP DAAC · MOD11A2 v061",
+        availability_status="unavailable",
         rendering_type="raster",
-        supported_tile_formats=("wmts", "xyz", "cog"),
+        supported_tile_formats=("cog", "xyz"),
         qa_policy="Mandatory QA == Good / Average LST error <= 1 K; scale 0.02 K -> °C",
         limitations="Clear-sky radiometric skin temperature bias; cloud-covered days are absent.",
         color_ramp=THERMAL_ABS_RAMP,
@@ -158,15 +150,11 @@ OBSERVATION_LAYERS: tuple[LayerDefinition, ...] = (
             nodata_label="Cloud / NoData",
             stops=THERMAL_ABS_RAMP,
         ),
-        tile_source=MapTileSource(
-            "src-mod11a2-lst",
-            "wmts",
-            "https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/MODIS_Terra_Land_Surface_Temp_Day/default/{time}/GoogleMapsCompatible_Level7/{z}/{y}/{x}.png",
-            "EPSG:3857",
-            False,
-            True,
+        tile_source=MapTileSource("src-mod11a2-lst", "cog", None, "EPSG:4326", True, False),
+        unavailable_reason=(
+            "No ingested MOD11A2.061 daytime LST dataset found in storage. "
+            "Ingest observations via Data Sources."
         ),
-        unavailable_reason=None,
     ),
     LayerDefinition(
         id="lst-anomaly",
@@ -186,7 +174,7 @@ OBSERVATION_LAYERS: tuple[LayerDefinition, ...] = (
         temporal_resolution="Monthly composite",
         available_time_range=AvailableTimeRange("2001-01-01", "2025-12-31", "monthly"),
         attribution="NASA LP DAAC · MOD11A2 / MOD11C3",
-        availability_status="preview",
+        availability_status="unavailable",
         rendering_type="raster",
         supported_tile_formats=("cog", "xyz"),
         qa_policy="Baseline 2001-2010 same-calendar-month anomaly; >= 80% valid months",
@@ -213,7 +201,7 @@ OBSERVATION_LAYERS: tuple[LayerDefinition, ...] = (
         tile_source=MapTileSource("src-lst-anomaly", "cog", None, "EPSG:4326", True, False),
         is_synthetic_preview=False,
         preview_property_key=None,
-        unavailable_reason="Spatially gridded LST anomaly available on-demand via Scientific Assessments or GHS.",
+        unavailable_reason="No spatially gridded LST anomaly artifact is currently available.",
     ),
     LayerDefinition(
         id="precip-gpm-imerg",
@@ -232,10 +220,10 @@ OBSERVATION_LAYERS: tuple[LayerDefinition, ...] = (
         native_spatial_resolution="0.1° (~10 km)",
         temporal_resolution="30-min / Monthly sum",
         available_time_range=AvailableTimeRange("2001-01-01", "2025-12-31", "monthly"),
-        attribution="NASA GES DISC · GPM IMERG V07 / NASA GIBS",
-        availability_status="connected",
+        attribution="NASA GES DISC · GPM IMERG V07",
+        availability_status="unavailable",
         rendering_type="raster",
-        supported_tile_formats=("wmts", "xyz", "cog", "zarr"),
+        supported_tile_formats=("cog", "xyz", "zarr"),
         qa_policy="Final Run V07; interval mm/hr rate integrated to mm depth before monthly sum",
         limitations=(
             "Lower accuracy over complex orographic snow/ice regions (>60° latitude); "
@@ -257,17 +245,13 @@ OBSERVATION_LAYERS: tuple[LayerDefinition, ...] = (
             nodata_label="NoData / High-latitude snow mask",
             stops=PRECIP_ANOMALY_RAMP,
         ),
-        tile_source=MapTileSource(
-            "src-gpm-imerg",
-            "wmts",
-            "https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/IMERG_Precipitation_Rate/default/{time}/GoogleMapsCompatible_Level6/{z}/{y}/{x}.png",
-            "EPSG:3857",
-            False,
-            True,
-        ),
+        tile_source=MapTileSource("src-gpm-imerg", "cog", None, "EPSG:4326", True, False),
         is_synthetic_preview=False,
         preview_property_key=None,
-        unavailable_reason=None,
+        unavailable_reason=(
+            "No ingested GPM IMERG V07 precipitation dataset found in storage. "
+            "Ingest observations via Data Sources."
+        ),
     ),
     LayerDefinition(
         id="soil-moisture-smap",
@@ -286,10 +270,10 @@ OBSERVATION_LAYERS: tuple[LayerDefinition, ...] = (
         native_spatial_resolution="9 km (EASE-Grid 2.0)",
         temporal_resolution="Daily (AM/PM)",
         available_time_range=AvailableTimeRange("2015-03-31", "2025-12-31", "daily"),
-        attribution="NASA NSIDC DAAC · SMAP SPL3SMP_E / NASA GIBS",
-        availability_status="connected",
+        attribution="NASA NSIDC DAAC · SMAP SPL3SMP_E",
+        availability_status="unavailable",
         rendering_type="raster",
-        supported_tile_formats=("wmts", "xyz", "cog", "zarr"),
+        supported_tile_formats=("cog", "xyz", "zarr"),
         qa_policy=(
             "Retrieval quality bit 0 (recommended); frozen soil, water, "
             "and high VWC (>5 kg/m²) excluded"
@@ -313,14 +297,10 @@ OBSERVATION_LAYERS: tuple[LayerDefinition, ...] = (
             nodata_label="Frozen / Dense canopy / RFI masked",
             stops=SOIL_MOISTURE_RAMP,
         ),
-        tile_source=MapTileSource(
-            "src-smap-spl3smp-e",
-            "wmts",
-            "https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/SMAP_L3_Passive_Enhanced_Day_Soil_Moisture/default/{time}/GoogleMapsCompatible_Level6/{z}/{y}/{x}.png",
-            "EPSG:3857",
-            False,
-            True,
+        tile_source=MapTileSource("src-smap-spl3smp-e", "cog", None, "EPSG:4326", True, False),
+        unavailable_reason=(
+            "No ingested SMAP SPL3SMP_E.006 soil moisture dataset found in storage. "
+            "Ingest observations via Data Sources."
         ),
-        unavailable_reason=None,
     ),
 )
