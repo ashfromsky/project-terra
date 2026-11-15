@@ -10,12 +10,13 @@ import pytest
 from terra_scientific.adapters.ghs import LocalArtifactDatasetLoader, map_ghs_dataset_payload
 from terra_scientific.domain.enums import (
     AssessmentStatus,
+    BaselineType,
     DataSourceId,
     TemporalCadence,
     TemporalSemantics,
 )
 from terra_scientific.domain.exceptions import ScientificInputError
-from terra_scientific.domain.models.request import AssessmentRequest
+from terra_scientific.domain.models.request import AssessmentRequest, BaselineConfig
 from terra_scientific.pipeline.service import ScientificAssessmentService
 from terra_scientific.sources.catalog import MODIS_SINUSOIDAL_WKT
 
@@ -488,15 +489,47 @@ def test_short_window_assessment_adapts_baseline_for_mod11a2() -> None:
     }
 
     dataset = map_ghs_dataset_payload(payload)
-    request = AssessmentRequest(
-        request_id="short-window-mod11a2",
+    default_request = AssessmentRequest(
+        request_id="short-window-mod11a2-default",
         analysis_start=datetime(2024, 6, 1, tzinfo=UTC),
         analysis_end=datetime(2024, 7, 31, tzinfo=UTC),
     )
 
-    result = ScientificAssessmentService().run_assessment(request, datasets=[dataset])
-    assert result.status in {AssessmentStatus.COMPLETED, AssessmentStatus.COMPLETED_PARTIAL}
-    assert len(result.baselines) == 1
-    assert len(result.anomalies) == 1
-    assert any("full-period baseline" in note.lower() for note in result.baselines[0].warnings)
-    assert any(np.isfinite(val) for val in result.anomalies[0].standard_zscores if val is not None)
+    default_result = ScientificAssessmentService().run_assessment(
+        default_request, datasets=[dataset]
+    )
+    assert default_result.status == AssessmentStatus.INSUFFICIENT_DATA
+    assert len(default_result.baselines) == 1
+    assert default_result.baselines[0].baseline_type == BaselineType.FIXED_REFERENCE
+    assert default_result.baselines[0].sufficient is False
+    assert any(
+        "historical reference data" in note.lower() for note in default_result.baselines[0].warnings
+    )
+
+    explicit_request = AssessmentRequest(
+        request_id="short-window-mod11a2-explicit",
+        analysis_start=datetime(2024, 6, 1, tzinfo=UTC),
+        analysis_end=datetime(2024, 7, 31, tzinfo=UTC),
+        baseline=BaselineConfig(
+            baseline_type=BaselineType.FULL_PERIOD_EXPLICIT,
+            allow_explicit_full_period=True,
+            min_years_required=1,
+            min_samples_per_bin=1,
+        ),
+    )
+    explicit_result = ScientificAssessmentService().run_assessment(
+        explicit_request, datasets=[dataset]
+    )
+    assert explicit_result.status in {
+        AssessmentStatus.COMPLETED,
+        AssessmentStatus.COMPLETED_PARTIAL,
+    }
+    assert len(explicit_result.baselines) == 1
+    assert explicit_result.baselines[0].baseline_type == BaselineType.FULL_PERIOD_EXPLICIT
+    assert len(explicit_result.anomalies) == 1
+    assert any(
+        "full-period baseline" in note.lower() for note in explicit_result.baselines[0].warnings
+    )
+    assert any(
+        np.isfinite(val) for val in explicit_result.anomalies[0].standard_zscores if val is not None
+    )
