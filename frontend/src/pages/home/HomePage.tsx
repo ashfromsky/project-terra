@@ -1,5 +1,6 @@
 import { EarthObservatorySection } from '../../widgets/earth-observatory/EarthObservatorySection'
 import { AnalyticsWorkspaceSection } from '../../widgets/analytics-workspace/AnalyticsWorkspaceSection'
+import { MvpWorkflowSection } from './MvpWorkflowSection'
 
 export default function HomePage() {
   return (
@@ -9,6 +10,7 @@ export default function HomePage() {
       data-name="PROJECT TERRA · Earth intelligence"
     >
       <EarthObservatorySection />
+      <MvpWorkflowSection />
       <AnalyticsWorkspaceSection />
     </div>
   )

@@ -51,6 +51,38 @@ The platform connects a geographic **Area of Interest (AOI)** to **real NASA obs
 
 ---
 
+## Browser-native live environment (MVP)
+
+The primary map workflow does **not** require Core, GHS, PostgreSQL, R2, or a background worker. The browser talks directly to public providers and computes supported statistics locally in a Web Worker.
+
+| Capability | Direct source | How it works |
+| :--- | :--- | :--- |
+| Global NDVI / EVI visualization | NASA GIBS WMTS | `MODIS_Terra_L3_NDVI_16Day`, `MODIS_Terra_L3_EVI_16Day` tiles are loaded directly by MapLibre. |
+| Land surface temperature | NASA GIBS WMTS | Day and night `MODIS_Terra_Land_Surface_Temp_*` layers with date-aware tiles. |
+| Precipitation | NASA GIBS WMTS | `IMERG_Precipitation_Rate` global visualization. |
+| Soil moisture | NASA GIBS WMTS | `SMAP_L4_Analyzed_Surface_Soil_Moisture`. |
+| Snow cover | NASA GIBS WMTS | `MODIS_Terra_NDSI_Snow_Cover`. |
+| MODIS NDVI numerical AOI statistics | Microsoft Planetary Computer STAC + COG | STAC search → SAS signing → `geotiff.js` HTTP Range reads of only the AOI window → scaled NDVI statistics, time series, anomalies, Mann–Kendall and Theil–Sen. |
+| Point meteorology | NASA POWER API | Monthly point series for temperature, humidity, precipitation, radiation, and wind, parsed and analysed in the browser. |
+
+**Scientific boundary:** GIBS tiles are pre-rendered visualizations. They are never used as numerical NDVI, LST, precipitation, or soil-moisture values. Numerical NDVI comes from the MOD13Q1 COG asset; point meteorology comes from NASA POWER.
+
+**MVP limits, stated explicitly:**
+
+- MODIS numerical series currently reads at most 12 Terra composites for the selected period and applies no QA layer yet; fill/NoData pixels remain missing.
+- Planetary Computer SAS signing is rate-limited; transient `429` responses are retried, and unread composites are reported as missing.
+- The geotiff reader is loaded from the `esm.sh` ESM CDN at calculation time; the map and POWER path do not depend on it.
+- Standard (not seasonal) Mann–Kendall and approximate Theil–Sen confidence bounds are used client-side; p-values can be optimistic for serially correlated series.
+- No raster data is uploaded to or persisted by TERRA.
+
+```bash
+# The live map and POWER/MODIS calculations work even when Core is stopped.
+cd frontend && pnpm dev
+# Open http://localhost:5173/explore
+```
+
+---
+
 ## What TERRA does
 
 | Capability | What it means in practice |

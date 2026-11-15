@@ -5,6 +5,7 @@ import {
   buildDraftCompletionAoi,
   mergeRoleExclusiveAoi,
 } from './explore-aoi-helpers'
+import { findLiveLayer } from '../../../shared/config/live-environment'
 import {
   DEFAULT_VIEWPORT,
   resolveLayerControlState,
@@ -106,6 +107,18 @@ export const useExploreStore = create<ExploreState>()((set, get) => ({
   toggleTemporalPlaying: () => set((state) => ({ temporalPlaying: !state.temporalPlaying })),
   temporalCadence: 'monthly',
   setTemporalCadence: (temporalCadence) => set({ temporalCadence }),
+
+  gibsLayerId: 'MODIS_Terra_L3_NDVI_16Day',
+  gibsDate: '2026-10-16',
+  setGibsLayer: (gibsLayerId) =>
+    set((state) => {
+      const layer = findLiveLayer(gibsLayerId)
+      return {
+        gibsLayerId: layer?.id ?? null,
+        gibsDate: layer?.defaultObservationDate ?? state.gibsDate,
+      }
+    }),
+  setGibsDate: (gibsDate) => set({ gibsDate }),
 
   analysisStart: '2024-01-01',
   analysisEnd: '2024-12-31',
