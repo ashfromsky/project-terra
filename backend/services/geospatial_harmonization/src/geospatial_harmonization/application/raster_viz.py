@@ -422,12 +422,12 @@ def _merge_dataset_variable_spec(
     # Never apply integer packing scale/offset from dataset metadata onto an already-float raster.
     resolved_scale = (
         decoded_spec.scale_factor
-        if decoded_spec.scale_factor is not None or decoded_is_float
+        if decoded_is_float or ds_spec.scale_factor is None
         else ds_spec.scale_factor
     )
     resolved_offset = (
         decoded_spec.add_offset
-        if decoded_spec.add_offset is not None or decoded_is_float
+        if decoded_is_float or ds_spec.add_offset is None
         else ds_spec.add_offset
     )
     return replace(

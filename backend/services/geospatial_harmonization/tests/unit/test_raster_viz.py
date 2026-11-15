@@ -517,3 +517,28 @@ async def test_lst_float_geotiff_never_double_scales_or_double_converts_and_qa_r
         )
         assert derived_tile.status_code == 200
         assert derived_tile.content[:8] == b"\x89PNG\r\n\x1a\n"
+
+
+def test_curated_scale_overrides_non_cf_hdf4_divisor(tmp_path: Path) -> None:
+    from geospatial_harmonization.application.raster_viz import _merge_dataset_variable_spec
+
+    asset = AssetReference(
+        asset_id="lst.hdf",
+        uri=str(tmp_path / "lst.hdf"),
+        data_format="hdf4",
+        media_type="application/x-hdf",
+    )
+    dataset = _make_dataset(asset=asset)
+    decoded_spec = VariableSpec(
+        name="LST_Day_1km",
+        units="K",
+        dtype="uint16",
+        dimensions=("y", "x"),
+        semantics="continuous_intensive",
+        nodata=0,
+        scale_factor=10000.0,
+    )
+
+    merged = _merge_dataset_variable_spec("LST_Day_1km", decoded_spec, dataset)
+
+    assert merged.scale_factor == 0.02
