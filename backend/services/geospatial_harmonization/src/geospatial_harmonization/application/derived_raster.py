@@ -28,6 +28,7 @@ from geospatial_harmonization.domain.models.temporal import TemporalSpec
 from geospatial_harmonization.domain.ports import DatasetRepository, StoragePort
 from geospatial_harmonization.storage.dedup import ContentDeduplicationService, compute_file_sha256
 from geospatial_harmonization.storage.quota import StorageQuotaManager
+from geospatial_harmonization.storage.scratch import scratch_base_dir
 from geospatial_harmonization.storage.zones import StorageZoneManager
 from geospatial_harmonization.transformations._warp import WarpedVariable, write_variable_geotiff
 
@@ -128,7 +129,7 @@ async def persist_derived_raster(
     )
 
     now = datetime.now(UTC)
-    with tempfile.TemporaryDirectory(prefix="ghs-derived-") as tmp_dir:
+    with tempfile.TemporaryDirectory(prefix="ghs-derived-", dir=scratch_base_dir()) as tmp_dir:
         out_path = Path(tmp_dir) / f"{dataset_id}.tif"
         write_variable_geotiff(
             out_path,

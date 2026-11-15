@@ -1,9 +1,10 @@
 """FastAPI health and versioned business routers for GHS."""
 
 import hmac
+import logging
 from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
-from typing import Literal
+from typing import Any, Literal
 from urllib.parse import quote, unquote, urlparse
 from uuid import UUID, uuid4
 
@@ -50,6 +51,8 @@ from geospatial_harmonization.api.schemas import (
     StorageHealthOut,
     StoragePolicyOut,
     StorageUsageOut,
+    ZonalStatisticsIn,
+    ZonalStatisticsOut,
 )
 from geospatial_harmonization.application.derived_raster import persist_derived_raster
 from geospatial_harmonization.application.raster_viz import (
@@ -59,6 +62,10 @@ from geospatial_harmonization.application.raster_viz import (
     query_dataset_point,
     render_dataset_bbox,
     render_dataset_tile,
+)
+from geospatial_harmonization.application.zonal_stats import (
+    ZonalStatsError,
+    compute_dataset_zonal_statistics,
 )
 from geospatial_harmonization.config.settings import Settings
 from geospatial_harmonization.domain.exceptions import (
@@ -72,9 +79,11 @@ from geospatial_harmonization.handlers.catalog import (
     build_provider_status_snapshots,
 )
 from geospatial_harmonization.infrastructure.database import check_database_health
+from geospatial_harmonization.titiler.router import render_dataset_tile_titiler
 
 health_router = APIRouter(tags=["health"])
 v1_router = APIRouter(tags=["harmonization"])
+logger = logging.getLogger(__name__)
 
 
 @health_router.get("/health", response_model=HealthResponse)
@@ -447,6 +456,7 @@ async def get_dataset_tile(
     datasets: DatasetRepoDep,
     storage: StorageDep,
     readers: ReadersDep,
+    settings: SettingsDep,
     variable: str | None = None,
     timestamp: str | None = None,
     colormap: str | None = None,
@@ -454,7 +464,7 @@ async def get_dataset_tile(
     vmax: float | None = None,
     unit_conversion: str | None = None,
 ) -> Response:
-    """Render an XYZ RGBA PNG tile from a raster dataset using nearest-neighbor sampling."""
+    """Render an XYZ RGBA PNG tile from a raster dataset using TiTiler/rio-tiler."""
     if z < 0 or z > 22:
         raise HTTPException(status_code=422, detail="Zoom z must be between 0 and 22")
     max_index = 2**z
@@ -464,10 +474,11 @@ async def get_dataset_tile(
     if ds is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Dataset not found")
     try:
-        png_bytes = await render_dataset_tile(
+        png_bytes = await render_dataset_tile_titiler(
             ds,
             storage,
             readers,
+            datasets,
             z=z,
             x=x,
             y=y,
@@ -477,20 +488,109 @@ async def get_dataset_tile(
             vmin=vmin,
             vmax=vmax,
             unit_conversion=unit_conversion,
+            settings=settings,
         )
-    except RasterAssetUnavailableError as exc:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
-    except (
-        UnsupportedRasterFormatError,
-        RasterVariableNotFoundError,
-        IncompatibleDatasetError,
-    ) as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.debug("TiTiler tile rendering falling back to raster_viz: %s", exc)
+        try:
+            png_bytes = await render_dataset_tile(
+                ds,
+                storage,
+                readers,
+                z=z,
+                x=x,
+                y=y,
+                variable=variable,
+                timestamp=timestamp,
+                colormap=colormap,
+                vmin=vmin,
+                vmax=vmax,
+                unit_conversion=unit_conversion,
+            )
+        except RasterAssetUnavailableError as err:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(err)) from err
+        except (
+            UnsupportedRasterFormatError,
+            RasterVariableNotFoundError,
+            IncompatibleDatasetError,
+        ) as err:
+            raise HTTPException(status_code=422, detail=str(err)) from err
     return Response(
         content=png_bytes,
         media_type="image/png",
         headers={"Cache-Control": "public, max-age=300"},
     )
+
+
+@v1_router.get("/datasets/{dataset_id}/tilejson.json")
+async def get_dataset_tilejson(
+    dataset_id: UUID,
+    request: Request,
+    datasets: DatasetRepoDep,
+    variable: str | None = None,
+    timestamp: str | None = None,
+) -> dict[str, Any]:
+    """Return TileJSON 2.2.0 metadata for the dataset's raster tiles."""
+    ds = await datasets.get_by_id(dataset_id)
+    if ds is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Dataset not found")
+
+    b = ds.spatial_metadata.bounds
+    bounds_list = (
+        [b.min_x, b.min_y, b.max_x, b.max_y] if b is not None else [-180.0, -90.0, 180.0, 90.0]
+    )
+
+    base_url = str(request.base_url).rstrip("/")
+    tile_url = f"{base_url}/api/v1/datasets/{dataset_id}/tiles/{{z}}/{{x}}/{{y}}.png"
+    query_parts = []
+    if variable:
+        query_parts.append(f"variable={variable}")
+    if timestamp:
+        query_parts.append(f"timestamp={timestamp}")
+    if query_parts:
+        tile_url += "?" + "&".join(query_parts)
+
+    return {
+        "tilejson": "2.2.0",
+        "name": f"{ds.provider}_{ds.product}_{dataset_id}",
+        "description": f"Project TERRA raster tiles for {ds.product}",
+        "version": "1.0.0",
+        "scheme": "xyz",
+        "tiles": [tile_url],
+        "minzoom": 0,
+        "maxzoom": 18,
+        "bounds": bounds_list,
+    }
+
+
+@v1_router.post("/datasets/{dataset_id}/zonal-statistics", response_model=ZonalStatisticsOut)
+async def post_dataset_zonal_statistics(
+    dataset_id: UUID,
+    body: ZonalStatisticsIn,
+    datasets: DatasetRepoDep,
+    storage: StorageDep,
+    readers: ReadersDep,
+) -> ZonalStatisticsOut:
+    """Calculate exact zonal statistics on physical raster array for an AOI geometry."""
+    ds = await datasets.get_by_id(dataset_id)
+    if ds is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Dataset not found")
+    try:
+        raw_stats = await compute_dataset_zonal_statistics(
+            ds,
+            body.geometry,
+            storage,
+            readers,
+            datasets,
+            variable=body.variable,
+            timestamp=body.timestamp,
+            unit_conversion=body.unit_conversion,
+        )
+        return ZonalStatisticsOut.model_validate(raw_stats)
+    except ZonalStatsError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
+        ) from exc
 
 
 @v1_router.get("/datasets/{dataset_id}/render.png")

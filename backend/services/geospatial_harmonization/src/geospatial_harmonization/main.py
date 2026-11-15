@@ -1,5 +1,6 @@
 """FastAPI application factory, exception translation, and Granian ASGI entrypoint."""
 
+import asyncio
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -21,6 +22,7 @@ from geospatial_harmonization.domain.exceptions import (
     ProviderDisabledError,
     ProviderIngestionError,
     ProviderResponseError,
+    ScratchCapacityError,
     StorageBudgetExceededError,
     StorageImmutabilityError,
     TransientTransferError,
@@ -47,6 +49,7 @@ from geospatial_harmonization.storage import (
     StorageQuotaManager,
     StorageZoneManager,
 )
+from geospatial_harmonization.storage.scratch import sweep_stale_scratch
 
 logger = logging.getLogger("geospatial_harmonization")
 
@@ -79,6 +82,18 @@ async def _handle_object_too_large(_request: Request, exc: Exception) -> JSONRes
             "requested_bytes": exc.requested_bytes,
             "limit_bytes": exc.limit_bytes,
             "scope": exc.scope,
+        },
+    )
+
+
+async def _handle_scratch_capacity(_request: Request, exc: Exception) -> JSONResponse:
+    assert isinstance(exc, ScratchCapacityError)
+    return JSONResponse(
+        status_code=status.HTTP_507_INSUFFICIENT_STORAGE,
+        content={
+            "detail": str(exc),
+            "error_type": type(exc).__name__,
+            "code": exc.code,
         },
     )
 
@@ -176,6 +191,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.harmonization_service = service
     logger.info("Started %s (%s)", settings.app_name, __version__)
     try:
+        # Reclaim scratch directories abandoned by crashes or SIGKILL from a
+        # previous process before serving new requests.
+        removed_dirs, _ = await asyncio.to_thread(sweep_stale_scratch, settings)
+        if removed_dirs:
+            logger.info("Startup scratch sweep removed %d abandoned directories", removed_dirs)
         yield
     finally:
         await engine.dispose()
@@ -199,12 +219,19 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     app.add_exception_handler(StorageBudgetExceededError, _handle_budget_exceeded)
     app.add_exception_handler(ObjectTooLargeError, _handle_object_too_large)
+    app.add_exception_handler(ScratchCapacityError, _handle_scratch_capacity)
     app.add_exception_handler(StorageImmutabilityError, _handle_storage_immutability)
     app.add_exception_handler(ProviderIngestionError, _handle_provider_ingestion_error)
     app.add_exception_handler(DomainError, _handle_domain_error)
     app.include_router(health_router)
     app.include_router(health_router, prefix=cfg.api_v1_prefix)
     app.include_router(v1_router, prefix=cfg.api_v1_prefix)
+
+    from geospatial_harmonization.titiler.router import create_titiler_router
+
+    titiler_r = create_titiler_router(cfg)
+    app.include_router(titiler_r, prefix="/cog")
+    app.include_router(titiler_r, prefix="/titiler")
     return app
 
 

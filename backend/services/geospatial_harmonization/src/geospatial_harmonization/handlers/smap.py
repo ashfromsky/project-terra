@@ -1,7 +1,6 @@
 """SMAP SPL3SMP_E handler distinguishing 9 km EASE-Grid 2.0 from ~36 km native footprint."""
 
 import asyncio
-import tempfile
 from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
@@ -46,6 +45,7 @@ from geospatial_harmonization.handlers.base import (
 )
 from geospatial_harmonization.handlers.catalog import DiscoveryResult
 from geospatial_harmonization.readers import ReaderRegistry, build_default_reader_registry
+from geospatial_harmonization.storage.scratch import run_with_owned_base_dir
 
 _EASE2_CRS = {"global": "EPSG:6933", "polar": "EPSG:6931"}
 _SMAP_SPATIAL_RESOLUTION = "9 km EASE-Grid 2.0 (~36 km native radiometer footprint)"
@@ -383,6 +383,17 @@ class SMAPHandler:
 
     async def handle_payload(self, payload: Mapping[str, object]) -> SpatialDataset:
         """Fetch SMAP granule batch, classify QA/surface flags, and assemble time series."""
+        return await run_with_owned_base_dir(
+            lambda base_dir: self._handle_payload(payload, base_dir),
+            settings=self._settings,
+            prefix="ghs_smap_",
+            raw_dir=self._raw_dir,
+        )
+
+    async def _handle_payload(
+        self, payload: Mapping[str, object], base_dir: Path
+    ) -> SpatialDataset:
+        """Fetch SMAP granules into ``base_dir``, classify QA/surface flags, assemble series."""
         if not self._settings.is_provider_enabled(self.provider):
             raise ProviderDisabledError(
                 "SMAP provider is disabled by configuration (SMAP_ENABLED=false)",
@@ -433,7 +444,6 @@ class SMAPHandler:
             )
             targets = [(idx, g.data_url, g) for idx, g in enumerate(ordered_granules)]
 
-        base_dir = self._raw_dir or Path(tempfile.mkdtemp(prefix="ghs_smap_"))
         is_batch = len(targets) > 1
 
         async def _ingest_one(item: tuple[int, str, CmrGranule | None]) -> _SmapGranuleOutcome:

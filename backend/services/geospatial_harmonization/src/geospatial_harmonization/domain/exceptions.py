@@ -1,5 +1,7 @@
 """Domain exceptions for Geospatial Harmonization Service."""
 
+import errno
+import os
 from typing import Literal
 
 ErrorCategory = Literal[
@@ -106,8 +108,14 @@ def classify_exception(exc: Exception) -> tuple[ErrorCategory, bool]:
     """Map an arbitrary exception to an explicit failure category and retryability flag."""
     if isinstance(exc, ProviderIngestionError):
         return exc.error_category, exc.retryable
-    if isinstance(exc, StorageError):
+    if isinstance(exc, (StorageError, ScratchCapacityError)):
         return "storage", False
+    if isinstance(exc, OSError):
+        # EDQUOT/ENOSPC (quota/no-space) are deterministic: retrying the same
+        # materialization against the same constrained volume repeats the failure.
+        if exc.errno in _SCRATCH_CAPACITY_ERRNOS:
+            return "storage", False
+        return "unknown", True
     if isinstance(
         exc,
         (
@@ -182,3 +190,42 @@ class StorageIntegrityError(StorageError):
 
 class StorageReservationError(StorageQuotaError):
     """Raised on invalid reservation lookup, expiration, or state transition."""
+
+
+class ScratchCapacityError(StorageError):
+    """Raised when a scratch write hits a disk-quota (EDQUOT) or no-space (ENOSPC) condition.
+
+    Deliberately non-retryable: retrying the same materialization against the
+    same constrained scratch volume would repeat the identical disk failure.
+    """
+
+    error_category: ErrorCategory = "storage"
+    retryable: bool = False
+    code: str = "SCRATCH_CAPACITY_EXCEEDED"
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        requested_bytes: int | None = None,
+        available_bytes: int | None = None,
+        os_errno: int | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.requested_bytes = requested_bytes
+        self.available_bytes = available_bytes
+        self.os_errno = os_errno
+
+
+_SCRATCH_CAPACITY_ERRNOS = frozenset({errno.EDQUOT, errno.ENOSPC})
+
+
+def scratch_capacity_error_from_oserror(exc: OSError) -> ScratchCapacityError | None:
+    """Translate EDQUOT/ENOSPC OSErrors into :class:`ScratchCapacityError`, else None."""
+    if exc.errno not in _SCRATCH_CAPACITY_ERRNOS:
+        return None
+    errno_name = os.strerror(exc.errno) if exc.errno is not None else str(exc.errno)
+    return ScratchCapacityError(
+        f"Scratch storage write failed ({errno_name}): {exc}",
+        os_errno=exc.errno,
+    )

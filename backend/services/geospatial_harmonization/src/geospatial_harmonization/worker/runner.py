@@ -71,10 +71,36 @@ class WorkerRunner:
             await self._lifecycle.run_maintenance_cycle(
                 dry_run=False, include_expired_derived=True, now=now
             )
+        await self._sweep_stale_scratch()
         self._last_maintenance_at = now
+
+    async def _sweep_stale_scratch(self) -> None:
+        """Reclaim scratch directories abandoned by dead processes or crashes."""
+        from geospatial_harmonization.storage.scratch import sweep_stale_scratch
+
+        try:
+            removed_dirs, removed_files = await asyncio.to_thread(sweep_stale_scratch)
+            if removed_dirs or removed_files:
+                logger.info(
+                    "Scratch sweep removed %d abandoned directories and %d temp files",
+                    removed_dirs,
+                    removed_files,
+                )
+        except Exception:
+            logger.exception("Scratch directory sweep failed")
 
     async def _maybe_run_maintenance(self) -> None:
         if self._quota is None and self._lifecycle is None:
+            # No storage managers configured: still run the scratch janitor so
+            # abandoned temporary directories cannot accumulate indefinitely.
+            now = self._clock()
+            if (
+                self._last_maintenance_at is not None
+                and (now - self._last_maintenance_at).total_seconds() < self._maintenance_interval
+            ):
+                return
+            await self._sweep_stale_scratch()
+            self._last_maintenance_at = now
             return
         now = self._clock()
         if (

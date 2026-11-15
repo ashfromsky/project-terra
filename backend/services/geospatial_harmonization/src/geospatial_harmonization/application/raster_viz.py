@@ -5,9 +5,12 @@ import contextlib
 import hashlib
 import logging
 import math
+import os
+import re
 import struct
 import tempfile
 import threading
+import time
 import zlib
 from collections import OrderedDict
 from collections.abc import Mapping
@@ -23,7 +26,11 @@ from pyproj import Transformer
 from rasterio.errors import WindowError
 from rasterio.warp import transform_bounds
 
-from geospatial_harmonization.domain.exceptions import IncompatibleDatasetError
+from geospatial_harmonization.domain.exceptions import (
+    IncompatibleDatasetError,
+    ScratchCapacityError,
+    scratch_capacity_error_from_oserror,
+)
 from geospatial_harmonization.domain.models.dataset import (
     AssetReference,
     DataFormat,
@@ -47,11 +54,124 @@ _SUPPORTED_RASTER_FORMATS: frozenset[DataFormat] = frozenset(
 _QA_TOKENS = ("qa", "qc", "qual", "flag", "reliability", "bitmask", "lat", "lon")
 
 logger = logging.getLogger(__name__)
-_ASSET_CACHE_DIR = Path(tempfile.gettempdir()) / "ghs_raster_cache"
+
+_CACHE_SWEEP_LOCK = threading.Lock()
+
+
+def _pid_alive(pid: int) -> bool:
+    """POSIX liveness probe for a cache-entry owner pid."""
+    if pid <= 0:
+        return False
+    if pid == os.getpid():
+        return True
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    except (OverflowError, OSError):
+        return False
+    return True
+
+
+# ---------------------------------------------------------------------------
+# Bounded materialized-asset cache
+#
+# Materialized raster assets are cached on disk under
+# ``<GHS_STORAGE_TEMP_DIR | system tmp>/ghs_raster_cache``. Files are named
+# ``{key}.{pid}.{hint}`` so a process restart can identify and drop entries
+# created by dead processes. In-memory accounting is deliberately per-process:
+# the ownership marker in each filename lets a fresh process reclaim the
+# on-disk leftovers of its predecessors without removing files actively used
+# by other live workers.
+#
+# Concurrency model:
+# - Per-key asyncio locks prevent duplicate concurrent materialization.
+# - Check-out/check-in reference counts protect files rendered by in-flight
+#   requests; eviction skips entries currently in use and deletes deferred
+#   evictions once the last user checks in.
+# ---------------------------------------------------------------------------
+
+_ASSET_CACHE_DIRNAME = "ghs_raster_cache"
 _ASSET_CACHE_MAX_BYTES = 256 * 1024 * 1024
 _ASSET_CACHE_LOCKS: dict[str, asyncio.Lock] = {}
 _ASSET_CACHE_ENTRIES: OrderedDict[str, tuple[Path, int]] = OrderedDict()
 _ASSET_CACHE_TOTAL_BYTES = 0
+_ASSET_CACHE_IN_USE: dict[str, int] = {}
+_ASSET_CACHE_EVICTION_PENDING: dict[str, Path] = {}
+_CACHE_SWEEP_DONE = False
+
+# Assets whose known size exceeds half the cache budget are never persisted
+# into the cache directory; they are materialized once, per request, into the
+# request-owned scratch directory instead.
+_MAX_CACHEABLE_ASSET_BYTES = _ASSET_CACHE_MAX_BYTES // 2
+
+
+def _resolve_cache_dir() -> Path:
+    from geospatial_harmonization.storage.scratch import scratch_base_dir
+
+    return scratch_base_dir() / _ASSET_CACHE_DIRNAME
+
+
+def _scratch_base() -> Path:
+    """Scratch base directory for render/point-query TemporaryDirectory targets."""
+    from geospatial_harmonization.storage.scratch import scratch_base_dir
+
+    return scratch_base_dir()
+
+
+_CACHE_NAME_PATTERN = re.compile(r"^(?P<key>[0-9a-f]{24})\.(?P<pid>\d+)\.")
+
+
+def _cache_pid_alive(name: str) -> bool | None:
+    """Return entry-pid liveness parsed from a cache filename, None if unnamed."""
+    match = _CACHE_NAME_PATTERN.match(name)
+    if match is None:
+        return None
+    return _pid_alive(int(match.group("pid")))
+
+
+def _sweep_stale_cache_entries() -> None:
+    """One-time per-process scan removing cache files owned by dead processes.
+
+    Unparseable files (e.g. leftovers from a previous format or interrupted
+    moves) are removed once their age exceeds the abandoned-temp grace period.
+    """
+    global _CACHE_SWEEP_DONE
+    cache_dir = _resolve_cache_dir()
+    if not cache_dir.is_dir():
+        return
+    from geospatial_harmonization.storage.scratch import (
+        get_settings as scratch_get_settings,
+    )
+
+    max_age = scratch_get_settings().ghs_storage_abandoned_temp_max_age_seconds
+    now = time.time()
+    removed = 0
+    try:
+        with os.scandir(cache_dir) as entries:
+            for entry in entries:
+                if not entry.is_file(follow_symlinks=False):
+                    continue
+                alive = _cache_pid_alive(entry.name)
+                if alive is False or (alive is None and now - entry.stat().st_mtime > max_age):
+                    with contextlib.suppress(OSError):
+                        Path(entry.path).unlink(missing_ok=True)
+                        removed += 1
+    except OSError:
+        logger.debug("Raster cache sweep scan failed for %s", cache_dir, exc_info=True)
+    if removed:
+        logger.info("Removed %d raster cache entries from dead processes", removed)
+
+
+def _ensure_cache_swept() -> None:
+    global _CACHE_SWEEP_DONE
+    if _CACHE_SWEEP_DONE:
+        return
+    with contextlib.suppress(Exception):
+        _sweep_stale_cache_entries()
+    _CACHE_SWEEP_DONE = True
 
 
 def _cache_entry_key(asset: AssetReference, storage: StoragePort) -> str:
@@ -64,51 +184,171 @@ def _cache_entry_key(asset: AssetReference, storage: StoragePort) -> str:
 
 def _evict_asset_cache_if_needed() -> None:
     global _ASSET_CACHE_TOTAL_BYTES
-    while _ASSET_CACHE_TOTAL_BYTES > _ASSET_CACHE_MAX_BYTES and _ASSET_CACHE_ENTRIES:
-        _, (old_path, old_size) = _ASSET_CACHE_ENTRIES.popitem(last=False)
+    while _ASSET_CACHE_TOTAL_BYTES > _ASSET_CACHE_MAX_BYTES:
+        victim: str | None = None
+        for key in _ASSET_CACHE_ENTRIES:  # oldest (LRU) first
+            if _ASSET_CACHE_IN_USE.get(key, 0) == 0:
+                victim = key
+                break
+        if victim is None:
+            # Every entry is in active use by a concurrent render; allow the
+            # bounded overshoot and retry eviction on the next check-in.
+            return
+        entry: tuple[Path, int] = _ASSET_CACHE_ENTRIES.pop(victim)
+        old_path, old_size = entry
         _ASSET_CACHE_TOTAL_BYTES = max(0, _ASSET_CACHE_TOTAL_BYTES - old_size)
         with contextlib.suppress(OSError):
             old_path.unlink(missing_ok=True)
+
+
+def _checkout_cached(cache_key: str) -> Path | None:
+    """Return a checked-out (ref-counted) cache path, or None when absent."""
+    with _CACHE_SWEEP_LOCK:
+        cached = _ASSET_CACHE_ENTRIES.get(cache_key)
+        if cached is None:
+            return None
+        cached_path, _ = cached
+        if not cached_path.is_file():
+            _ASSET_CACHE_ENTRIES.pop(cache_key, None)
+            return None
+        _ASSET_CACHE_IN_USE[cache_key] = _ASSET_CACHE_IN_USE.get(cache_key, 0) + 1
+        _ASSET_CACHE_ENTRIES.move_to_end(cache_key)
+        return cached_path
+
+
+def _checkin_cached(cache_key: str) -> None:
+    with _CACHE_SWEEP_LOCK:
+        remaining = _ASSET_CACHE_IN_USE.get(cache_key, 1) - 1
+        if remaining > 0:
+            _ASSET_CACHE_IN_USE[cache_key] = remaining
+            return
+        _ASSET_CACHE_IN_USE.pop(cache_key, None)
+        pending = _ASSET_CACHE_EVICTION_PENDING.pop(cache_key, None)
+        entry = _ASSET_CACHE_ENTRIES.get(cache_key)
+        if entry is None and pending is not None:
+            with contextlib.suppress(OSError):
+                pending.unlink(missing_ok=True)
+
+
+class _CheckedOutCacheAsset:
+    """Owns a checked-out or request-owned materialized path until check-in."""
+
+    def __init__(self, path: Path, cache_key: str | None) -> None:
+        self.path = path
+        self.cache_key = cache_key
+
+    def release(self) -> None:
+        if self.cache_key is not None:
+            _checkin_cached(self.cache_key)
+
+
+def _known_asset_bytes(asset: AssetReference, head_size: int | None) -> int | None:
+    """Best-effort metadata size for the asset, preferring explicit bytes."""
+    if asset.size_bytes and asset.size_bytes > 0:
+        return int(asset.size_bytes)
+    return head_size
 
 
 async def _materialize_asset(
     asset: AssetReference,
     storage: StoragePort | None,
     tmp_dir: Path,
-) -> Path:
+) -> _CheckedOutCacheAsset:
+    """Materialize a renderable asset, caching small assets under the cache dir.
+
+    Returns a checked-out handle: callers must invoke ``release()`` when the
+    path is no longer being read so eviction can reclaim it safely.
+    """
     global _ASSET_CACHE_TOTAL_BYTES
+    _ensure_cache_swept()
+    from geospatial_harmonization.storage.scratch import check_scratch_capacity
+
     source_name = asset.storage_key or urlparse(asset.uri).path or "asset.bin"
     name_hint = Path(source_name).name or "asset.bin"
     dest = tmp_dir / name_hint
     if asset.storage_key and storage is not None:
         cache_key = _cache_entry_key(asset, storage)
-        cached = _ASSET_CACHE_ENTRIES.get(cache_key)
-        if cached is not None:
-            cached_path, _ = cached
-            if cached_path.is_file():
-                _ASSET_CACHE_ENTRIES.move_to_end(cache_key)
-                return cached_path
-            _ASSET_CACHE_ENTRIES.pop(cache_key, None)
+        checked_out = _checkout_cached(cache_key)
+        if checked_out is not None:
+            return _CheckedOutCacheAsset(checked_out, cache_key)
 
         lock = _ASSET_CACHE_LOCKS.setdefault(cache_key, asyncio.Lock())
         async with lock:
-            cached = _ASSET_CACHE_ENTRIES.get(cache_key)
-            if cached is not None and cached[0].is_file():
-                _ASSET_CACHE_ENTRIES.move_to_end(cache_key)
-                return cached[0]
+            checked_out = _checkout_cached(cache_key)
+            if checked_out is not None:
+                return _CheckedOutCacheAsset(checked_out, cache_key)
+
+            head_size: int | None = None
+            if asset.size_bytes is None or asset.size_bytes <= 0:
+                with contextlib.suppress(Exception):
+                    info = await storage.head_object(asset.storage_key)
+                    if info is not None:
+                        head_size = info.size_bytes
+            known_size = _known_asset_bytes(asset, head_size)
+
+            # Metadata-based sizing prevents streaming oversized assets into the
+            # persistent cache at all; they go straight to the request scratch dir.
+            cacheable = known_size is not None and known_size <= _MAX_CACHEABLE_ASSET_BYTES
+            if known_size is not None and cacheable:
+                try:
+                    check_scratch_capacity(None, known_size)
+                except ScratchCapacityError:
+                    cacheable = False
+
+            cache_file = _resolve_cache_dir() / f"{cache_key}.{os.getpid()}.{name_hint}"
             try:
-                _ASSET_CACHE_DIR.mkdir(parents=True, exist_ok=True)
-                cache_file = _ASSET_CACHE_DIR / f"{cache_key}_{name_hint}"
-                materialized = await storage.materialize_to_path(asset.storage_key, cache_file)
-                size = materialized.stat().st_size if materialized.is_file() else 0
-                if size > 0 and size <= _ASSET_CACHE_MAX_BYTES // 2:
+                if cacheable:
+                    _resolve_cache_dir().mkdir(parents=True, exist_ok=True)
+                    materialized = await storage.materialize_to_path(asset.storage_key, cache_file)
+                    size = materialized.stat().st_size if materialized.is_file() else 0
+                    if size <= 0 or size > _MAX_CACHEABLE_ASSET_BYTES:
+                        # Single-download oversized asset: hand it to this
+                        # request directly without registering it in the cache.
+                        return _CheckedOutCacheAsset(materialized, None)
                     _ASSET_CACHE_ENTRIES[cache_key] = (materialized, size)
                     _ASSET_CACHE_TOTAL_BYTES += size
                     _evict_asset_cache_if_needed()
-                    return materialized
-                return await storage.materialize_to_path(asset.storage_key, dest)
+                    checked_out = _checkout_cached(cache_key)
+                    if checked_out is not None:
+                        return _CheckedOutCacheAsset(checked_out, cache_key)
+                    return _CheckedOutCacheAsset(materialized, None)
+                # Unknown or oversized assets stream into the request scratch
+                # dir; unknown-size downloads that turn out small are then
+                # moved into the cache, never re-downloaded.
+                storage_path = await storage.materialize_to_path(asset.storage_key, dest)
+                size = storage_path.stat().st_size if storage_path.is_file() else 0
+                if known_size is None and 0 < size <= _MAX_CACHEABLE_ASSET_BYTES:
+                    try:
+                        _resolve_cache_dir().mkdir(parents=True, exist_ok=True)
+                        os.replace(storage_path, cache_file)
+                    except OSError:
+                        logger.debug(
+                            "Could not move asset %s into cache; using request dir",
+                            asset.storage_key,
+                            exc_info=True,
+                        )
+                    else:
+                        _ASSET_CACHE_ENTRIES[cache_key] = (cache_file, size)
+                        _ASSET_CACHE_TOTAL_BYTES += size
+                        _evict_asset_cache_if_needed()
+                        checked_out = _checkout_cached(cache_key)
+                        if checked_out is not None:
+                            return _CheckedOutCacheAsset(checked_out, cache_key)
+                        return _CheckedOutCacheAsset(cache_file, None)
+                return _CheckedOutCacheAsset(storage_path, None)
             except FileNotFoundError:
                 pass
+            except OSError as exc:
+                capacity = scratch_capacity_error_from_oserror(exc)
+                if capacity is not None:
+                    raise capacity from exc
+                logger.warning(
+                    "Materialization from storage failed for key '%s': %s",
+                    asset.storage_key,
+                    exc,
+                )
+            except ScratchCapacityError:
+                raise
             except Exception as exc:
                 logger.warning(
                     "Materialization from storage failed for key '%s': %s",
@@ -117,7 +357,7 @@ async def _materialize_asset(
                 )
     local_candidate = _local_path_from_uri(asset.uri)
     if local_candidate is not None:
-        return local_candidate
+        return _CheckedOutCacheAsset(local_candidate, None)
     if storage is not None and asset.storage_key:
         try:
             data = await storage.get_bytes(asset.storage_key)
@@ -129,8 +369,14 @@ async def _materialize_asset(
             raise RasterAssetUnavailableError(
                 f"Failed to read raster asset '{asset.asset_id}' from storage: {exc}"
             ) from exc
-        dest.write_bytes(data)
-        return dest
+        try:
+            dest.write_bytes(data)
+        except OSError as exc:
+            capacity = scratch_capacity_error_from_oserror(exc)
+            if capacity is not None:
+                raise capacity from exc
+            raise
+        return _CheckedOutCacheAsset(dest, None)
     raise RasterAssetUnavailableError(
         f"Raster asset '{asset.asset_id}' could not be materialized from storage."
     )
@@ -459,7 +705,9 @@ def _select_raster_variable(
         matched = _match_variable_name(quant_names, variable) or _match_variable_name(
             all_names, variable
         )
-        if matched is None:
+        if matched is None and len(quant_names) == 1 and variable in dataset.variables:
+            matched = quant_names[0]
+        elif matched is None:
             raise RasterVariableNotFoundError(
                 f"Variable '{variable}' not found in raster asset (available: {all_names})."
             )
@@ -872,25 +1120,28 @@ async def render_dataset_tile(
             unit_conversion=unit_conversion,
         )
 
-    with tempfile.TemporaryDirectory(prefix="ghs-tile-") as tmp_root:
-        local_path = await _materialize_asset(asset, storage, Path(tmp_root))
-        return await asyncio.to_thread(
-            _render_sync,
-            asset=asset,
-            asset_path=local_path,
-            readers=readers,
-            dataset=dataset,
-            dst_bounds=dst_bounds,
-            dst_crs="EPSG:3857",
-            width=256,
-            height=256,
-            step_idx=step_idx,
-            variable=variable,
-            colormap=colormap,
-            vmin=vmin,
-            vmax=vmax,
-            unit_conversion=unit_conversion,
-        )
+    with tempfile.TemporaryDirectory(prefix="ghs-tile-", dir=_scratch_base()) as tmp_root:
+        handle = await _materialize_asset(asset, storage, Path(tmp_root))
+        try:
+            return await asyncio.to_thread(
+                _render_sync,
+                asset=asset,
+                asset_path=handle.path,
+                readers=readers,
+                dataset=dataset,
+                dst_bounds=dst_bounds,
+                dst_crs="EPSG:3857",
+                width=256,
+                height=256,
+                step_idx=step_idx,
+                variable=variable,
+                colormap=colormap,
+                vmin=vmin,
+                vmax=vmax,
+                unit_conversion=unit_conversion,
+            )
+        finally:
+            handle.release()
 
 
 async def render_dataset_bbox(
@@ -912,25 +1163,28 @@ async def render_dataset_bbox(
     """Render a georeferenced RGBA PNG image for a bounding box over a raster dataset."""
     asset, step_idx = _select_raster_asset(dataset, timestamp=timestamp, variable=variable)
     dst_bounds = SpatialBounds(*bbox)
-    with tempfile.TemporaryDirectory(prefix="ghs-bbox-") as tmp_root:
-        local_path = await _materialize_asset(asset, storage, Path(tmp_root))
-        return await asyncio.to_thread(
-            _render_sync,
-            asset=asset,
-            asset_path=local_path,
-            readers=readers,
-            dataset=dataset,
-            dst_bounds=dst_bounds,
-            dst_crs=crs,
-            width=width,
-            height=height,
-            step_idx=step_idx,
-            variable=variable,
-            colormap=colormap,
-            vmin=vmin,
-            vmax=vmax,
-            unit_conversion=unit_conversion,
-        )
+    with tempfile.TemporaryDirectory(prefix="ghs-bbox-", dir=_scratch_base()) as tmp_root:
+        handle = await _materialize_asset(asset, storage, Path(tmp_root))
+        try:
+            return await asyncio.to_thread(
+                _render_sync,
+                asset=asset,
+                asset_path=handle.path,
+                readers=readers,
+                dataset=dataset,
+                dst_bounds=dst_bounds,
+                dst_crs=crs,
+                width=width,
+                height=height,
+                step_idx=step_idx,
+                variable=variable,
+                colormap=colormap,
+                vmin=vmin,
+                vmax=vmax,
+                unit_conversion=unit_conversion,
+            )
+        finally:
+            handle.release()
 
 
 def _evaluate_qa_pass(product: str, qa_code: float | int, qa_var_name: str = "") -> bool | None:
@@ -1186,18 +1440,21 @@ async def query_dataset_point(
 ) -> dict[str, Any]:
     """Sample exact native grid pixel value and QA metadata at WGS 84 (lon, lat)."""
     asset, step_idx = _select_raster_asset(dataset, timestamp=timestamp, variable=variable)
-    with tempfile.TemporaryDirectory(prefix="ghs-pt-") as tmp_root:
-        local_path = await _materialize_asset(asset, storage, Path(tmp_root))
-        return await asyncio.to_thread(
-            _point_query_sync,
-            asset=asset,
-            asset_path=local_path,
-            readers=readers,
-            dataset=dataset,
-            lon=lon,
-            lat=lat,
-            step_idx=step_idx,
-            variable=variable,
-            timestamp=timestamp,
-            unit_conversion=unit_conversion,
-        )
+    with tempfile.TemporaryDirectory(prefix="ghs-pt-", dir=_scratch_base()) as tmp_root:
+        handle = await _materialize_asset(asset, storage, Path(tmp_root))
+        try:
+            return await asyncio.to_thread(
+                _point_query_sync,
+                asset=asset,
+                asset_path=handle.path,
+                readers=readers,
+                dataset=dataset,
+                lon=lon,
+                lat=lat,
+                step_idx=step_idx,
+                variable=variable,
+                timestamp=timestamp,
+                unit_conversion=unit_conversion,
+            )
+        finally:
+            handle.release()

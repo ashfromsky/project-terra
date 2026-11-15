@@ -1,7 +1,6 @@
 """MODIS handler (MOD13Q1.061, MOD11A2.061) with Sinusoidal CRS and bitmask QA screening."""
 
 import asyncio
-import tempfile
 from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
@@ -46,6 +45,7 @@ from geospatial_harmonization.handlers.base import (
 )
 from geospatial_harmonization.handlers.catalog import DiscoveryResult
 from geospatial_harmonization.readers import ReaderRegistry, build_default_reader_registry
+from geospatial_harmonization.storage.scratch import run_with_owned_base_dir
 
 MODIS_SINUSOIDAL_WKT = CRS.from_proj4(
     "+proj=sinu +lon_0=0 +x_0=0 +y_0=0 +R=6371007.181 +units=m +no_defs"
@@ -439,6 +439,17 @@ class MODISHandler:
 
     async def handle_payload(self, payload: Mapping[str, object]) -> SpatialDataset:
         """Download MODIS granule batch via CMR/Earthdata, apply QA screening, and build dataset."""
+        return await run_with_owned_base_dir(
+            lambda base_dir: self._handle_payload(payload, base_dir),
+            settings=self._settings,
+            prefix="ghs_modis_",
+            raw_dir=self._raw_dir,
+        )
+
+    async def _handle_payload(
+        self, payload: Mapping[str, object], base_dir: Path
+    ) -> SpatialDataset:
+        """Download MODIS granules into ``base_dir``, apply QA screening, build dataset."""
         if not self._settings.is_provider_enabled(self.provider):
             raise ProviderDisabledError(
                 "MODIS provider is disabled by configuration (MODIS_ENABLED=false)",
@@ -492,7 +503,6 @@ class MODISHandler:
             )
             targets = [(idx, g.data_url, g) for idx, g in enumerate(ordered_granules)]
 
-        base_dir = self._raw_dir or Path(tempfile.mkdtemp(prefix="ghs_modis_"))
         is_batch = len(targets) > 1
 
         async def _ingest_one(item: tuple[int, str, CmrGranule | None]) -> _ModisGranuleOutcome:

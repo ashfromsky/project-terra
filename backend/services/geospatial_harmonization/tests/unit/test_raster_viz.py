@@ -54,8 +54,42 @@ def _decode_rgba_png(png_bytes: bytes) -> tuple[int, int, NDArray[np.uint8]]:
     stride = 1 + width * 4
     assert len(raw) == height * stride
     rows = np.frombuffer(raw, dtype=np.uint8).reshape((height, stride))
-    assert np.all(rows[:, 0] == 0)
-    rgba = rows[:, 1:].reshape((height, width, 4))
+    if np.all(rows[:, 0] == 0):
+        rgba = rows[:, 1:].reshape((height, width, 4))
+    else:
+        out = bytearray(height * width * 4)
+        prev_row = bytearray(width * 4)
+        for y in range(height):
+            row_start = y * stride
+            f_type = raw[row_start]
+            r_data = raw[row_start + 1 : row_start + stride]
+            curr_row = bytearray(width * 4)
+            for x in range(width * 4):
+                filt = r_data[x]
+                a = curr_row[x - 4] if x >= 4 else 0
+                b = prev_row[x]
+                c = prev_row[x - 4] if x >= 4 else 0
+                if f_type == 0:
+                    val = filt
+                elif f_type == 1:
+                    val = (filt + a) & 0xFF
+                elif f_type == 2:
+                    val = (filt + b) & 0xFF
+                elif f_type == 3:
+                    val = (filt + ((a + b) >> 1)) & 0xFF
+                elif f_type == 4:
+                    p = a + b - c
+                    pa = abs(p - a)
+                    pb = abs(p - b)
+                    pc = abs(p - c)
+                    pr = a if pa <= pb and pa <= pc else (b if pb <= pc else c)
+                    val = (filt + pr) & 0xFF
+                else:
+                    val = filt
+                curr_row[x] = val
+            out[y * width * 4 : (y + 1) * width * 4] = curr_row
+            prev_row = curr_row
+        rgba = np.frombuffer(out, dtype=np.uint8).reshape((height, width, 4))
     return width, height, rgba
 
 

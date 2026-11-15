@@ -2,7 +2,6 @@
 
 import json
 import math
-import tempfile
 from collections.abc import Mapping
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
@@ -37,6 +36,7 @@ from geospatial_harmonization.handlers.base import (
     write_raw_asset,
 )
 from geospatial_harmonization.handlers.catalog import DiscoveryResult
+from geospatial_harmonization.storage.scratch import run_with_owned_base_dir
 
 # tuple: (daily_unit, hourly_unit, native_res_deg, source_product, semantics)
 _POWER_META: dict[str, tuple[str, str, str, str, VariableSemantics]] = {
@@ -325,6 +325,17 @@ class NASAPowerHandler:
 
     async def handle_payload(self, payload: Mapping[str, object]) -> SpatialDataset:
         """Fetch NASA POWER JSON publicly (no Earthdata auth), validate values, and harmonize."""
+        return await run_with_owned_base_dir(
+            lambda base_dir: self._handle_payload(payload, base_dir),
+            settings=self._settings,
+            prefix="ghs_power_",
+            raw_dir=self._raw_dir,
+        )
+
+    async def _handle_payload(
+        self, payload: Mapping[str, object], base_dir: Path
+    ) -> SpatialDataset:
+        """Fetch NASA POWER JSON into ``base_dir``, validate values, and harmonize."""
         if not self._settings.is_provider_enabled(self.provider):
             raise ProviderDisabledError(
                 "NASA POWER provider is disabled by configuration (NASA_POWER_ENABLED=false)",
@@ -362,7 +373,6 @@ class NASAPowerHandler:
         end_d = req.end_date
         assert start_d is not None and end_d is not None
 
-        base_dir = self._raw_dir or Path(tempfile.mkdtemp(prefix="ghs_power_"))
         fname = f"power_{req.mode}_{req.temporal}_{start_d:%Y%m%d}_{end_d:%Y%m%d}.json"
         _, asset = write_raw_asset(base_dir, fname, raw_payload, "json", last_media)
 
