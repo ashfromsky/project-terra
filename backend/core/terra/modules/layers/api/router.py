@@ -1,6 +1,6 @@
 """Layers catalog REST API endpoints under ``/api/v1/layers``."""
 
-from typing import Annotated
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 
@@ -139,6 +139,45 @@ async def get_layer_tile(
         media_type="image/png",
         headers={"Cache-Control": "public, max-age=300"},
     )
+
+
+@router.get("/{layer_id}/tilejson.json")
+async def get_layer_tilejson(
+    layer_id: str,
+    service: LayerServiceDep,
+    timestamp: str | None = None,
+    vmin: float | None = None,
+    vmax: float | None = None,
+) -> dict[str, Any]:
+    """Return TileJSON 2.2.0 metadata for this layer."""
+    layer = await _load_layer_or_404(layer_id, service)
+    bounds = list(layer.dataset_bbox) if layer.dataset_bbox else [-180.0, -90.0, 180.0, 90.0]
+    center_lon = (bounds[0] + bounds[2]) / 2.0
+    center_lat = (bounds[1] + bounds[3]) / 2.0
+
+    tile_url = f"/api/v1/layers/{layer_id}/tiles/{{z}}/{{x}}/{{y}}.png"
+    query_parts: list[str] = []
+    if timestamp:
+        query_parts.append(f"timestamp={timestamp}")
+    if vmin is not None:
+        query_parts.append(f"vmin={vmin}")
+    if vmax is not None:
+        query_parts.append(f"vmax={vmax}")
+    if query_parts:
+        tile_url += "?" + "&".join(query_parts)
+
+    return {
+        "tilejson": "2.2.0",
+        "name": layer.name,
+        "description": layer.description,
+        "version": "1.0.0",
+        "scheme": "xyz",
+        "tiles": [tile_url],
+        "minzoom": 0,
+        "maxzoom": 18,
+        "bounds": bounds,
+        "center": [center_lon, center_lat, 2],
+    }
 
 
 @router.get(

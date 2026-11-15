@@ -134,6 +134,8 @@ class Settings(BaseSettings):
         if self.database_url.startswith("sqlite+aiosqlite:///./"):
             rel_part = self.database_url.removeprefix("sqlite+aiosqlite:///./")
             self.database_url = f"sqlite+aiosqlite:///{(_REPO_ROOT / rel_part).resolve()}"
+        if self.environment == "test" and "ghs_timeout_seconds" not in self.model_fields_set:
+            self.ghs_timeout_seconds = 0.05
         if self.environment == "production":
             secret = self.jwt_secret_key.get_secret_value()
             if not secret or secret == _DEFAULT_DEV_JWT_SECRET or len(secret) < 32:
