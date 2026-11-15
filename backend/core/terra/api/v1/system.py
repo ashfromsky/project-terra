@@ -22,4 +22,5 @@ async def system_info(settings: SettingsDep) -> SystemInfoResponse:
         github_oauth_configured=bool(
             settings.github_client_id and settings.github_client_secret.get_secret_value()
         ),
+        dev_auth_enabled=settings.environment == "development",
     )

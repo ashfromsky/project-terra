@@ -306,6 +306,28 @@
         }
       }
     },
+    "/api/v1/auth/dev-session": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Dev Session",
+        "description": "Issue a local researcher session cookie and bearer token in development mode.",
+        "operationId": "dev_session_api_v1_auth_dev_session_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthCallbackResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/regions": {
       "get": {
         "tags": [
@@ -897,6 +919,293 @@
         }
       }
     },
+    "/api/v1/data-sources/providers": {
+      "get": {
+        "tags": [
+          "data-sources"
+        ],
+        "summary": "List Providers",
+        "description": "List registered GHS environmental data providers and their capability metadata.",
+        "operationId": "list_providers_api_v1_data_sources_providers_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ProviderStatusResponse"
+                  },
+                  "type": "array",
+                  "title": "Response List Providers Api V1 Data Sources Providers Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/data-sources/discover": {
+      "post": {
+        "tags": [
+          "data-sources"
+        ],
+        "summary": "Discover Observations",
+        "description": "Discover real satellite granules or station series for an AOI and time window.",
+        "operationId": "discover_observations_api_v1_data_sources_discover_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DiscoverObservationsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DiscoverObservationsResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/data-sources/ingestions": {
+      "get": {
+        "tags": [
+          "data-sources"
+        ],
+        "summary": "List Ingestions",
+        "description": "List persisted user ingestion operations synced with current GHS job status.",
+        "operationId": "list_ingestions_api_v1_data_sources_ingestions_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/IngestionOperationResponse"
+                  },
+                  "type": "array",
+                  "title": "Response List Ingestions Api V1 Data Sources Ingestions Get"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "data-sources"
+        ],
+        "summary": "Start Ingestion",
+        "description": "Launch a bounded GHS multi-observation ingestion job for an AOI.",
+        "operationId": "start_ingestion_api_v1_data_sources_ingestions_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StartIngestionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IngestionOperationResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/data-sources/ingestions/{operation_id}": {
+      "get": {
+        "tags": [
+          "data-sources"
+        ],
+        "summary": "Get Ingestion",
+        "description": "Get detailed status and dataset summary for one ingestion operation.",
+        "operationId": "get_ingestion_api_v1_data_sources_ingestions__operation_id__get",
+        "parameters": [
+          {
+            "name": "operation_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Operation Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IngestionOperationResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/data-sources/datasets": {
+      "get": {
+        "tags": [
+          "data-sources"
+        ],
+        "summary": "List Prepared Datasets",
+        "description": "List harmonized datasets persisted in GHS with Core lineage annotations.",
+        "operationId": "list_prepared_datasets_api_v1_data_sources_datasets_get",
+        "parameters": [
+          {
+            "name": "provider",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Provider"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
+              "default": 50,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/PreparedDatasetSummaryResponse"
+                  },
+                  "title": "Response List Prepared Datasets Api V1 Data Sources Datasets Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/data-sources/datasets/{dataset_id}": {
+      "get": {
+        "tags": [
+          "data-sources"
+        ],
+        "summary": "Get Prepared Dataset",
+        "description": "Inspect metadata, provenance, quality summary, and series preview for one GHS dataset.",
+        "operationId": "get_prepared_dataset_api_v1_data_sources_datasets__dataset_id__get",
+        "parameters": [
+          {
+            "name": "dataset_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Dataset Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PreparedDatasetSummaryResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/assessments/methods": {
       "get": {
         "tags": [
@@ -1076,6 +1385,48 @@
           }
         }
       }
+    },
+    "/api/v1/assessments/compare": {
+      "post": {
+        "tags": [
+          "assessments"
+        ],
+        "summary": "Compare Assessments",
+        "description": "Compare two completed Scientific Assessments owned by the current user.",
+        "operationId": "compare_assessments_api_v1_assessments_compare_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CompareAssessmentsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AssessmentComparisonResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -1183,6 +1534,71 @@
         ],
         "title": "AoiPropertiesResponse",
         "description": "GeoJSON Feature properties matching frontend AoiFeature contract."
+      },
+      "AssessmentComparisonResponse": {
+        "properties": {
+          "primary": {
+            "$ref": "#/components/schemas/AssessmentDetailResponse"
+          },
+          "comparison": {
+            "$ref": "#/components/schemas/AssessmentDetailResponse"
+          },
+          "sharedVariables": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Sharedvariables"
+          },
+          "primaryOnlyVariables": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Primaryonlyvariables"
+          },
+          "comparisonOnlyVariables": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Comparisononlyvariables"
+          },
+          "variableComparisons": {
+            "items": {
+              "$ref": "#/components/schemas/VariableComparisonSummary"
+            },
+            "type": "array",
+            "title": "Variablecomparisons"
+          },
+          "compatibilityWarnings": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Compatibilitywarnings"
+          },
+          "methodologyNotes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Methodologynotes"
+          }
+        },
+        "type": "object",
+        "required": [
+          "primary",
+          "comparison",
+          "sharedVariables",
+          "primaryOnlyVariables",
+          "comparisonOnlyVariables",
+          "variableComparisons",
+          "compatibilityWarnings",
+          "methodologyNotes"
+        ],
+        "title": "AssessmentComparisonResponse",
+        "description": "Side-by-side scientific comparison payload between two assessments."
       },
       "AssessmentDetailResponse": {
         "properties": {
@@ -1509,6 +1925,27 @@
         "title": "ColorRampStopResponse",
         "description": "Single stop in a layer color ramp."
       },
+      "CompareAssessmentsRequest": {
+        "properties": {
+          "primaryAssessmentId": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Primaryassessmentid"
+          },
+          "comparisonAssessmentId": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Comparisonassessmentid"
+          }
+        },
+        "type": "object",
+        "required": [
+          "primaryAssessmentId",
+          "comparisonAssessmentId"
+        ],
+        "title": "CompareAssessmentsRequest",
+        "description": "Request payload selecting two completed user assessments for comparison."
+      },
       "CreateAssessmentRequest": {
         "properties": {
           "title": {
@@ -1580,6 +2017,249 @@
         ],
         "title": "DependencyHealth",
         "description": "Status of a single runtime dependency."
+      },
+      "DiscoverObservationsRequest": {
+        "properties": {
+          "provider": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Provider"
+          },
+          "product": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Product"
+          },
+          "regionId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Regionid"
+          },
+          "bbox": {
+            "anyOf": [
+              {
+                "prefixItems": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "number"
+                  }
+                ],
+                "type": "array",
+                "maxItems": 4,
+                "minItems": 4
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bbox"
+          },
+          "startTime": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Starttime"
+          },
+          "endTime": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Endtime"
+          },
+          "limit": {
+            "type": "integer",
+            "maximum": 50.0,
+            "minimum": 1.0,
+            "title": "Limit",
+            "default": 20
+          }
+        },
+        "type": "object",
+        "required": [
+          "provider",
+          "product",
+          "startTime",
+          "endTime"
+        ],
+        "title": "DiscoverObservationsRequest",
+        "description": "Discovery query parameters for searching real observations for an AOI."
+      },
+      "DiscoverObservationsResponse": {
+        "properties": {
+          "provider": {
+            "type": "string",
+            "title": "Provider"
+          },
+          "product": {
+            "type": "string",
+            "title": "Product"
+          },
+          "count": {
+            "type": "integer",
+            "title": "Count"
+          },
+          "bbox": {
+            "prefixItems": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              }
+            ],
+            "type": "array",
+            "maxItems": 4,
+            "minItems": 4,
+            "title": "Bbox"
+          },
+          "observations": {
+            "items": {
+              "$ref": "#/components/schemas/DiscoveredObservationResponse"
+            },
+            "type": "array",
+            "title": "Observations"
+          }
+        },
+        "type": "object",
+        "required": [
+          "provider",
+          "product",
+          "count",
+          "bbox"
+        ],
+        "title": "DiscoverObservationsResponse",
+        "description": "Collection of candidate observations matching AOI and period."
+      },
+      "DiscoveredObservationResponse": {
+        "properties": {
+          "observationId": {
+            "type": "string",
+            "title": "Observationid"
+          },
+          "provider": {
+            "type": "string",
+            "title": "Provider"
+          },
+          "product": {
+            "type": "string",
+            "title": "Product"
+          },
+          "productVersion": {
+            "type": "string",
+            "title": "Productversion"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "timeStart": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Timestart"
+          },
+          "timeEnd": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Timeend"
+          },
+          "bbox": {
+            "anyOf": [
+              {
+                "prefixItems": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "number"
+                  }
+                ],
+                "type": "array",
+                "maxItems": 4,
+                "minItems": 4
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bbox"
+          },
+          "queryMode": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Querymode"
+          },
+          "accessHint": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Accesshint"
+          },
+          "metadata": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Metadata"
+          }
+        },
+        "type": "object",
+        "required": [
+          "observationId",
+          "provider",
+          "product",
+          "productVersion",
+          "title"
+        ],
+        "title": "DiscoveredObservationResponse",
+        "description": "Single candidate satellite granule or station observation."
       },
       "GeoJsonMultiPolygonInputSchema": {
         "properties": {
@@ -1827,6 +2507,130 @@
         ],
         "title": "HealthResponse",
         "description": "Health probe payload."
+      },
+      "IngestionOperationResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "regionId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Regionid"
+          },
+          "ghsJobId": {
+            "type": "string",
+            "title": "Ghsjobid"
+          },
+          "provider": {
+            "type": "string",
+            "title": "Provider"
+          },
+          "product": {
+            "type": "string",
+            "title": "Product"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "progressPct": {
+            "type": "number",
+            "title": "Progresspct"
+          },
+          "datasetId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Datasetid"
+          },
+          "errorMessage": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Errormessage"
+          },
+          "errorCategory": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Errorcategory"
+          },
+          "requestSummary": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Requestsummary"
+          },
+          "datasetSummary": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PreparedDatasetSummaryResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "createdAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Createdat"
+          },
+          "updatedAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updatedat"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "ghsJobId",
+          "provider",
+          "product",
+          "status",
+          "progressPct"
+        ],
+        "title": "IngestionOperationResponse",
+        "description": "Persisted Core tracking record for a submitted GHS ingestion workflow."
       },
       "LayerDefinitionResponse": {
         "properties": {
@@ -2420,6 +3224,438 @@
         "title": "MethodCatalogItemResponse",
         "description": "Catalog metadata describing an implemented (P0/P1) or deferred (P2) scientific method."
       },
+      "PreparedDatasetSummaryResponse": {
+        "properties": {
+          "datasetId": {
+            "type": "string",
+            "title": "Datasetid"
+          },
+          "sourceId": {
+            "type": "string",
+            "title": "Sourceid"
+          },
+          "provider": {
+            "type": "string",
+            "title": "Provider"
+          },
+          "product": {
+            "type": "string",
+            "title": "Product"
+          },
+          "productVersion": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Productversion"
+          },
+          "granuleId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Granuleid"
+          },
+          "units": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Units"
+          },
+          "variables": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Variables"
+          },
+          "temporalStart": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Temporalstart"
+          },
+          "temporalEnd": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Temporalend"
+          },
+          "temporalCadence": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Temporalcadence"
+          },
+          "temporalSemantics": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Temporalsemantics"
+          },
+          "spatialCrs": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Spatialcrs"
+          },
+          "nominalResolutionM": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Nominalresolutionm"
+          },
+          "observationCount": {
+            "type": "integer",
+            "title": "Observationcount",
+            "default": 0
+          },
+          "validFraction": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Validfraction"
+          },
+          "qaPolicy": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Qapolicy"
+          },
+          "regionId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Regionid"
+          },
+          "ingestionOperationId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ingestionoperationid"
+          },
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Warnings"
+          },
+          "timeSeriesPreviews": {
+            "items": {
+              "$ref": "#/components/schemas/PreparedDatasetTimeSeriesPreviewSchema"
+            },
+            "type": "array",
+            "title": "Timeseriespreviews"
+          },
+          "provenance": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Provenance"
+          },
+          "qualityMetadata": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Qualitymetadata"
+          },
+          "spatialMetadata": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Spatialmetadata"
+          },
+          "temporalMetadata": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Temporalmetadata"
+          }
+        },
+        "type": "object",
+        "required": [
+          "datasetId",
+          "sourceId",
+          "provider",
+          "product"
+        ],
+        "title": "PreparedDatasetSummaryResponse",
+        "description": "Summary and provenance view of a harmonized dataset stored in GHS."
+      },
+      "PreparedDatasetTimeSeriesPreviewSchema": {
+        "properties": {
+          "variable": {
+            "type": "string",
+            "title": "Variable"
+          },
+          "count": {
+            "type": "integer",
+            "title": "Count"
+          },
+          "start": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Start"
+          },
+          "end": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "End"
+          },
+          "units": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Units"
+          },
+          "timestamps": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Timestamps"
+          },
+          "values": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "type": "array",
+            "title": "Values"
+          }
+        },
+        "type": "object",
+        "required": [
+          "variable",
+          "count"
+        ],
+        "title": "PreparedDatasetTimeSeriesPreviewSchema",
+        "description": "Reduced AOI time-series preview extracted from a prepared GHS dataset."
+      },
+      "ProviderProductSchema": {
+        "properties": {
+          "product": {
+            "type": "string",
+            "title": "Product"
+          },
+          "version": {
+            "type": "string",
+            "title": "Version"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "spatialResolution": {
+            "type": "string",
+            "title": "Spatialresolution"
+          },
+          "temporalResolution": {
+            "type": "string",
+            "title": "Temporalresolution"
+          },
+          "crs": {
+            "type": "string",
+            "title": "Crs"
+          },
+          "sourceFormat": {
+            "type": "string",
+            "title": "Sourceformat"
+          },
+          "variables": {
+            "items": {
+              "$ref": "#/components/schemas/ProviderVariableSchema"
+            },
+            "type": "array",
+            "title": "Variables"
+          }
+        },
+        "type": "object",
+        "required": [
+          "product",
+          "version",
+          "title",
+          "spatialResolution",
+          "temporalResolution",
+          "crs",
+          "sourceFormat"
+        ],
+        "title": "ProviderProductSchema",
+        "description": "Product metadata registered in GHS."
+      },
+      "ProviderStatusResponse": {
+        "properties": {
+          "provider": {
+            "type": "string",
+            "title": "Provider"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled"
+          },
+          "authRequired": {
+            "type": "boolean",
+            "title": "Authrequired"
+          },
+          "authConfigured": {
+            "type": "boolean",
+            "title": "Authconfigured"
+          },
+          "authMechanism": {
+            "type": "string",
+            "title": "Authmechanism"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "supportsDiscovery": {
+            "type": "boolean",
+            "title": "Supportsdiscovery"
+          },
+          "registeredProducts": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Registeredproducts"
+          },
+          "products": {
+            "items": {
+              "$ref": "#/components/schemas/ProviderProductSchema"
+            },
+            "type": "array",
+            "title": "Products"
+          }
+        },
+        "type": "object",
+        "required": [
+          "provider",
+          "title",
+          "enabled",
+          "authRequired",
+          "authConfigured",
+          "authMechanism",
+          "status",
+          "supportsDiscovery"
+        ],
+        "title": "ProviderStatusResponse",
+        "description": "Capability, configuration, and credential readiness status of a GHS provider."
+      },
+      "ProviderVariableSchema": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "units": {
+            "type": "string",
+            "title": "Units"
+          },
+          "semantics": {
+            "type": "string",
+            "title": "Semantics"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "units",
+          "semantics",
+          "description"
+        ],
+        "title": "ProviderVariableSchema",
+        "description": "Variable metadata exposed by a registered GHS environmental provider."
+      },
       "ReadinessResponse": {
         "properties": {
           "status": {
@@ -2954,6 +4190,172 @@
         "title": "RegionUpdateMetadataRequest",
         "description": "Partial metadata update payload for an existing region."
       },
+      "StartIngestionRequest": {
+        "properties": {
+          "provider": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Provider"
+          },
+          "product": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Product"
+          },
+          "regionId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Regionid"
+          },
+          "bbox": {
+            "anyOf": [
+              {
+                "prefixItems": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "number"
+                  }
+                ],
+                "type": "array",
+                "maxItems": 4,
+                "minItems": 4
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bbox"
+          },
+          "startTime": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Starttime"
+          },
+          "endTime": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Endtime"
+          },
+          "maxGranules": {
+            "type": "integer",
+            "maximum": 64.0,
+            "minimum": 1.0,
+            "title": "Maxgranules",
+            "default": 24
+          },
+          "variables": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Variables"
+          },
+          "targetCadence": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Targetcadence"
+          },
+          "targetAggregation": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Targetaggregation"
+          },
+          "runType": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Runtype"
+          },
+          "overpass": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Overpass"
+          },
+          "parameters": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Parameters"
+          },
+          "community": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Community"
+          },
+          "executeNow": {
+            "type": "boolean",
+            "title": "Executenow",
+            "default": false
+          },
+          "idempotencyKey": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 64,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Idempotencykey"
+          }
+        },
+        "type": "object",
+        "required": [
+          "provider",
+          "product",
+          "startTime",
+          "endTime"
+        ],
+        "title": "StartIngestionRequest",
+        "description": "Request to launch bounded GHS ingestion and harmonization for an AOI."
+      },
       "SystemInfoResponse": {
         "properties": {
           "service": {
@@ -2983,6 +4385,11 @@
           "githubOauthConfigured": {
             "type": "boolean",
             "title": "Githuboauthconfigured"
+          },
+          "devAuthEnabled": {
+            "type": "boolean",
+            "title": "Devauthenabled",
+            "default": false
           }
         },
         "type": "object",
@@ -3203,6 +4610,273 @@
         ],
         "title": "ValueRangeResponse",
         "description": "Valid range and default stretch bounds."
+      },
+      "VariableComparisonSummary": {
+        "properties": {
+          "variableName": {
+            "type": "string",
+            "title": "Variablename"
+          },
+          "primarySensSlope": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Primarysensslope"
+          },
+          "comparisonSensSlope": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Comparisonsensslope"
+          },
+          "sensSlopeDelta": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sensslopedelta"
+          },
+          "slopeUnit": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Slopeunit"
+          },
+          "primaryDirection": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Primarydirection"
+          },
+          "comparisonDirection": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Comparisondirection"
+          },
+          "primaryPValue": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Primarypvalue"
+          },
+          "comparisonPValue": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Comparisonpvalue"
+          },
+          "primaryResistance": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Primaryresistance"
+          },
+          "comparisonResistance": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Comparisonresistance"
+          },
+          "resistanceDelta": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resistancedelta"
+          },
+          "primaryRecovery": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Primaryrecovery"
+          },
+          "comparisonRecovery": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Comparisonrecovery"
+          },
+          "recoveryDelta": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Recoverydelta"
+          },
+          "primaryStability": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Primarystability"
+          },
+          "comparisonStability": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Comparisonstability"
+          },
+          "stabilityDelta": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stabilitydelta"
+          },
+          "primarySensitivity": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Primarysensitivity"
+          },
+          "comparisonSensitivity": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Comparisonsensitivity"
+          },
+          "sensitivityDelta": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sensitivitydelta"
+          },
+          "primaryMeanValue": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Primarymeanvalue"
+          },
+          "comparisonMeanValue": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Comparisonmeanvalue"
+          },
+          "meanValueDelta": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Meanvaluedelta"
+          }
+        },
+        "type": "object",
+        "required": [
+          "variableName"
+        ],
+        "title": "VariableComparisonSummary",
+        "description": "Variable-level trend, resilience, and series mean deltas between two runs."
       }
     }
   }
