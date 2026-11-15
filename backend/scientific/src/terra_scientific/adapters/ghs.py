@@ -124,7 +124,6 @@ def _resolve_catalog_var(
     return catalog_spec.variables.get(canonical)
 
 
-<<<<<<< HEAD
 def _optional_float(value: Any, default: float | None = None) -> float | None:
     if value is None:
         return default
@@ -134,12 +133,6 @@ def _optional_float(value: Any, default: float | None = None) -> float | None:
 def _float_or_default(value: Any, default: float) -> float:
     if value is None:
         return default
-=======
-def _coerce_numeric_attr(value: Any, fallback: float) -> float:
-    """Treat an explicit null scale/offset as absent and use the catalog fallback."""
-    if value is None:
-        return fallback
->>>>>>> 36ac114 (feat: backend (adapters))
     return float(value)
 
 
@@ -149,7 +142,6 @@ def _map_variable_spec(
     catalog_spec: SourceProductSpec | None,
 ) -> VariableMetadata:
     catalog_var = _resolve_catalog_var(name, catalog_spec)
-<<<<<<< HEAD
     scale_factor = _float_or_default(
         raw_spec.get("scale_factor"),
         catalog_var.scale_factor if catalog_var else 1.0,
@@ -158,12 +150,6 @@ def _map_variable_spec(
         raw_spec.get("add_offset"),
         catalog_var.add_offset if catalog_var else 0.0,
     )
-=======
-    catalog_scale = catalog_var.scale_factor if catalog_var else 1.0
-    catalog_offset = catalog_var.add_offset if catalog_var else 0.0
-    scale_factor = _coerce_numeric_attr(raw_spec.get("scale_factor"), catalog_scale)
-    add_offset = _coerce_numeric_attr(raw_spec.get("add_offset"), catalog_offset)
->>>>>>> 36ac114 (feat: backend (adapters))
 
     attrs = dict(raw_spec.get("attributes") or {})
     str_attrs = {str(k): str(v) for k, v in attrs.items()}
