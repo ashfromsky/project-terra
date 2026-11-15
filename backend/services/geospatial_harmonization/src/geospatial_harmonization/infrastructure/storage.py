@@ -16,7 +16,10 @@ import boto3
 from botocore.config import Config as BotoConfig
 
 from geospatial_harmonization.config.settings import Settings
-from geospatial_harmonization.domain.exceptions import StorageIntegrityError
+from geospatial_harmonization.domain.exceptions import (
+    StorageIntegrityError,
+    scratch_capacity_error_from_oserror,
+)
 from geospatial_harmonization.domain.models.dataset import AssetReference, DataFormat
 from geospatial_harmonization.domain.models.storage import StoredObjectInfo
 from geospatial_harmonization.domain.ports import StoragePort
@@ -98,6 +101,12 @@ def _write_bytes_atomic(dest: Path, data: bytes) -> str:
         with os.fdopen(fd, "wb") as handle:
             handle.write(data)
         os.replace(tmp_name, dest)
+    except OSError as exc:
+        Path(tmp_name).unlink(missing_ok=True)
+        capacity = scratch_capacity_error_from_oserror(exc)
+        if capacity is not None:
+            raise capacity from exc
+        raise
     except BaseException:
         Path(tmp_name).unlink(missing_ok=True)
         raise
@@ -151,6 +160,12 @@ def _copy_file_atomic(
                 f"SHA-256 mismatch for '{src}': expected {expected_sha256}, got {digest}"
             )
         os.replace(tmp_name, dst_resolved)
+    except OSError as exc:
+        Path(tmp_name).unlink(missing_ok=True)
+        capacity = scratch_capacity_error_from_oserror(exc)
+        if capacity is not None:
+            raise capacity from exc
+        raise
     except BaseException:
         Path(tmp_name).unlink(missing_ok=True)
         raise

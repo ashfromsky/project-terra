@@ -2,7 +2,6 @@
 
 import asyncio
 import math
-import tempfile
 from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
@@ -46,6 +45,7 @@ from geospatial_harmonization.handlers.base import (
 )
 from geospatial_harmonization.handlers.catalog import DiscoveryResult
 from geospatial_harmonization.readers import ReaderRegistry, build_default_reader_registry
+from geospatial_harmonization.storage.scratch import run_with_owned_base_dir
 from geospatial_harmonization.transformations.temporal import (
     TemporalAggregationResult,
     integrate_rate_to_depth,
@@ -241,6 +241,17 @@ class GPMIMERGHandler:
 
     async def handle_payload(self, payload: Mapping[str, object]) -> SpatialDataset:
         """Fetch IMERG half-hour granule batch, validate rate units/QA, and accumulate depth."""
+        return await run_with_owned_base_dir(
+            lambda base_dir: self._handle_payload(payload, base_dir),
+            settings=self._settings,
+            prefix="ghs_imerg_",
+            raw_dir=self._raw_dir,
+        )
+
+    async def _handle_payload(
+        self, payload: Mapping[str, object], base_dir: Path
+    ) -> SpatialDataset:
+        """Fetch IMERG granules into ``base_dir``, validate rate units/QA, accumulate depth."""
         if not self._settings.is_provider_enabled(self.provider):
             raise ProviderDisabledError(
                 "GPM IMERG provider is disabled by configuration (GPM_ENABLED=false)",
@@ -293,7 +304,6 @@ class GPMIMERGHandler:
             )
             targets = [(idx, g.data_url, g) for idx, g in enumerate(ordered_granules)]
 
-        base_dir = self._raw_dir or Path(tempfile.mkdtemp(prefix="ghs_imerg_"))
         is_batch = len(targets) > 1
 
         async def _ingest_one(item: tuple[int, str, CmrGranule | None]) -> _ImergGranuleOutcome:

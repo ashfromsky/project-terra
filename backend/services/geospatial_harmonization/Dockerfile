@@ -6,6 +6,10 @@ ENV UV_COMPILE_BYTECODE=1 \
 
 WORKDIR /app
 
+RUN apt-get update \
+    && apt-get install --no-install-recommends -y build-essential libhdf4-alt-dev libjpeg-dev zlib1g-dev \
+    && rm -rf /var/lib/apt/lists/*
+
 COPY pyproject.toml uv.lock ./
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --locked --no-install-project --no-dev
@@ -23,7 +27,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PATH="/app/.venv/bin:${PATH}"
 
 RUN apt-get update \
-    && apt-get install --no-install-recommends -y ca-certificates libexpat1 \
+    && apt-get install --no-install-recommends -y ca-certificates libexpat1 libhdf4-0-alt \
     && rm -rf /var/lib/apt/lists/* \
     && groupadd --system ghs \
     && useradd --system --gid ghs --create-home --home-dir /home/ghs ghs

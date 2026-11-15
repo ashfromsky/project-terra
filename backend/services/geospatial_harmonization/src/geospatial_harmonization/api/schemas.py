@@ -3,7 +3,7 @@
 from dataclasses import asdict
 from datetime import datetime
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 from uuid import UUID, uuid4
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -707,3 +707,40 @@ class AssetDownloadUrlOut(BaseModel):
     download_url: str
     presigned: bool
     expires_in: int | None = None
+
+
+class ZonalStatisticsIn(BaseModel):
+    geometry: dict[str, Any]
+    variable: str | None = None
+    timestamp: str | None = None
+    unit_conversion: str | None = None
+
+
+class HistogramOut(BaseModel):
+    bins: list[float] = Field(default_factory=list)
+    counts: list[int] = Field(default_factory=list)
+
+
+class ZonalStatisticsOut(BaseModel):
+    dataset_id: str = Field(alias="datasetId")
+    variable_name: str = Field(alias="variableName")
+    units: str
+    crs: str
+    timestamp: str
+    mean: float | None = None
+    median: float | None = None
+    min: float | None = None
+    max: float | None = None
+    std: float | None = None
+    q10: float | None = None
+    q25: float | None = None
+    q75: float | None = None
+    q90: float | None = None
+    valid_pixel_count: int = Field(alias="validPixelCount")
+    total_pixel_count: int = Field(alias="totalPixelCount")
+    valid_data_coverage: float = Field(alias="validDataCoverage")
+    approx_area_km2: float = Field(alias="approxAreaKm2")
+    histogram: HistogramOut = Field(default_factory=HistogramOut)
+    warnings: list[str] = Field(default_factory=list)
+
+    model_config = {"populate_by_name": True}
