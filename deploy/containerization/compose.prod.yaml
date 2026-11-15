@@ -149,6 +149,7 @@ services:
     environment:
       ENVIRONMENT: production
       DEBUG: "false"
+      PYTHONUNBUFFERED: "1"
       GHS_DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@postgres:5432/terra_ghs
       STORAGE_BACKEND: ${STORAGE_BACKEND:-s3}
       LOCAL_STORAGE_DIR: /data/ghs_storage
@@ -173,6 +174,11 @@ services:
     volumes:
       - prod_ghs_storage:/data/ghs_storage
       - prod_ghs_scratch:/data/ghs_scratch
+    healthcheck:
+      test: ["CMD", "python", "-c", "import sys; sys.exit(0)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
     depends_on:
       postgres:
         condition: service_healthy
@@ -259,6 +265,7 @@ services:
     environment:
       ENVIRONMENT: production
       DEBUG: "false"
+      PYTHONUNBUFFERED: "1"
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@postgres:5432/terra_core
       GHS_BASE_URL: http://ghs-api:8080
       GHS_TIMEOUT_SECONDS: ${GHS_TIMEOUT_SECONDS:-30.0}
@@ -271,8 +278,14 @@ services:
       AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
       AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
       TERRA_WORKER_POLL_SECONDS: ${TERRA_WORKER_POLL_SECONDS:-2.0}
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY}
     volumes:
       - prod_core_artifacts:/data/artifacts
+    healthcheck:
+      test: ["CMD", "python", "-c", "import sys; sys.exit(0)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
     depends_on:
       postgres:
         condition: service_healthy
